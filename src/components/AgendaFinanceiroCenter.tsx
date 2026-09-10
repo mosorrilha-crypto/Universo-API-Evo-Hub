@@ -23,8 +23,9 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 import { summarizeFinancialTransactions } from '../lib/agendaFinanceiroMetrics';
-import type { FinancialTransaction, LeadInfo, PaymentMethod, PaymentStatus, RecurringExpense, UserProfile } from '../types';
+import type { AgentProduct, FinancialTransaction, LeadInfo, PaymentMethod, PaymentStatus, RecurringExpense, UserProfile } from '../types';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
+import { DialogShell, Field, inputClass, PAYMENT_METHODS, TransactionDialog } from './financial/TransactionDialog';
 
 type CenterView = 'agenda' | 'financial';
 type CalendarEvent = {
@@ -63,11 +64,18 @@ interface AgendaFinanceiroCenterProps {
   onDeleteRecurringExpense?: (id: string) => void;
   /** No celular, fluxo e recorrências abrem como detalhe em vez de alongar a página inicial. */
   mobileDetail?: 'flow' | 'recurring' | null;
-  /** A Agenda abre em compromissos de hoje; calendário e pendências entram sob demanda no celular. */
-  mobileAgendaView?: 'today' | 'calendar' | 'pending';
+  /** A Agenda abre em compromissos de hoje; Semana/Mês entram sob demanda no
+      celular (TASK-0347: nav de 3 abas em vez de 2, Semana e Mês deixaram
+      de ser um segundo nível escondido dentro do card da Agenda). */
+  mobileAgendaView?: 'today' | 'week' | 'month';
+  /** TASK-0351 (pedido direto): catálogo de serviços (mesmo
+      `knowledgeBase.products` já carregado em App.tsx, sem chamada de API
+      nova) — usado só em "Novo agendamento" pra puxar preço/duração em vez
+      de digitar tudo à mão. Só usado no scope="agenda"; opcional pra não
+      quebrar o uso em scope="financial". */
+  catalogProducts?: AgentProduct[];
 }
 
-const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
 const statusStyle: Record<PaymentStatus, string> = {
   pago: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25',
   pendente: 'bg-amber-400/10 text-amber-200 border-amber-400/25',
@@ -105,6 +113,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   onDeleteRecurringExpense,
   mobileDetail = null,
   mobileAgendaView = 'today',
+  catalogProducts = [],
 }) => {
   const { language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -112,6 +121,12 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   const view = scope;
   const [calendarDate, setCalendarDate] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => dateInputValue(new Date()));
+  // Pedido direto do dono do produto (28/08/2026, referência de outro app de
+  // agendamentos): seletor Semana/Mês dentro do card do calendário — Semana
+  // ganha uma grade nova por horário (linhas finas, dias em colunas), Mês
+  // continua a grade existente. "Dia"/"3 dias"/"Atendimentos" ficaram fora
+  // do escopo desta entrega, por decisão explícita do dono do produto.
+  const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week'>('month');
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -154,6 +169,15 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     refreshEvents();
   }, [view, calendarDate.getFullYear(), calendarDate.getMonth()]);
 
+  // TASK-0347 — o seletor Semana/Mês interno (abaixo, escondido no mobile)
+  // e a nova aba Semana/Mês do nav mobile (AgendaWorkspace.tsx) controlam a
+  // MESMA visão; esta é a ponte entre os dois no mobile, sem duplicar o
+  // estado (`calendarViewMode` continua sendo a única fonte de verdade,
+  // usada tanto pela grade quanto pelo desktop).
+  useEffect(() => {
+    if (mobileAgendaView === 'week' || mobileAgendaView === 'month') setCalendarViewMode(mobileAgendaView);
+  }, [mobileAgendaView]);
+
   const financial = useMemo(() => summarizeFinancialTransactions(transactions, period), [transactions, period]);
   const visibleTransactions = useMemo(() => financial.scoped.filter((transaction) => {
     const entryType = transaction.entryType || 'income';
@@ -166,8 +190,36 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     return eventDate.getFullYear() === today.getFullYear() && eventDate.getMonth() === today.getMonth() && eventDate.getDate() === today.getDate() && !event.completed;
   });
   const nextAppointments = events.filter((event) => new Date(event.startIso).getTime() >= Date.now() && !event.completed).sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso)).slice(0, 5);
-  const pendingAppointments = nextAppointments.filter((event) => event.payment?.status !== 'pago');
+  const pendingAppointments = events.filter((event) => (
+    // Compromisso ainda não concluído: pendência normal de confirmação/pagamento.
+    // Compromisso já concluído: só volta pra fila se sobrou cobrança em aberto
+    // (revisão pós-atendimento — mesma prioridade do mapa de processos da Agenda).
+    event.completed
+      ? financialModuleEnabled && event.payment != null && event.payment.status !== 'pago'
+      : !financialModuleEnabled || !event.payment || event.payment.status !== 'pago'
+  )).sort((a, b) => {
+    const aPendingPayment = a.payment?.status === 'atrasado' ? 0 : a.payment?.status === 'pendente' ? 1 : 2;
+    const bPendingPayment = b.payment?.status === 'atrasado' ? 0 : b.payment?.status === 'pendente' ? 1 : 2;
+    return aPendingPayment - bPendingPayment || Date.parse(a.startIso) - Date.parse(b.startIso);
+  }).slice(0, 12);
   const hasOperationalData = view === 'agenda' ? events.length > 0 : transactions.length > 0;
+
+  // TASK-0347 (pedido direto, "reformular está agenda completa não estou
+  // entendendo ela está complexa" → mockup confirmado): no mobile, "Próximos
+  // compromissos" e "Pendências da agenda" eram duas listas separadas que na
+  // prática mostravam muitas vezes o MESMO compromisso duas vezes. Fundidas
+  // numa lista só (mobile-only, ver JSX/CSS), com o item pendente/atrasado
+  // subindo pro topo em vez de precisar de uma segunda seção pra ele.
+  const mobileTodayList = useMemo(() => {
+    const byId = new Map<string, CalendarEvent>();
+    pendingAppointments.forEach((event) => byId.set(event.id, event));
+    nextAppointments.forEach((event) => byId.set(event.id, event));
+    return Array.from(byId.values()).sort((a, b) => {
+      const aPending = a.payment?.status === 'atrasado' ? 0 : a.payment?.status === 'pendente' ? 1 : 2;
+      const bPending = b.payment?.status === 'atrasado' ? 0 : b.payment?.status === 'pendente' ? 1 : 2;
+      return aPending - bPending || Date.parse(a.startIso) - Date.parse(b.startIso);
+    });
+  }, [pendingAppointments, nextAppointments]);
 
   const changeMonth = (offset: number) => {
     setCalendarDate((date) => {
@@ -179,6 +231,22 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
       setSelectedDate(nextSelection);
       return nextMonth;
     });
+  };
+
+  // Navega a semana pelo `selectedDate` (não pelo `calendarDate`, que é
+  // "mês exibido"). Quando a semana muda de mês, atualiza `calendarDate`
+  // também — é o que dispara o refetch de `refreshEvents` (por mês). Uma
+  // semana que fica dividida entre dois meses (ex: 31/ago–06/set) só mostra
+  // os compromissos do mês atualmente carregado — limitação conhecida,
+  // aceitável pro escopo desta entrega (a maioria das semanas cai inteira
+  // dentro de um mês só).
+  const changeWeek = (offset: number) => {
+    const next = new Date(`${selectedDate}T12:00:00`);
+    next.setDate(next.getDate() + offset * 7);
+    setSelectedDate(dateInputValue(next));
+    if (next.getFullYear() !== calendarDate.getFullYear() || next.getMonth() !== calendarDate.getMonth()) {
+      setCalendarDate(new Date(next.getFullYear(), next.getMonth(), 1));
+    }
   };
 
   const callEventAction = async (url: string, method: string, body?: object) => {
@@ -206,24 +274,63 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     if (!service || !date || !time) return;
     const selectedLead = leads.find((lead) => lead.id === clientId);
     const phone = selectedLead?.phone || clientPhone;
-    if (!phone) {
+    const isEdit = appointmentDialog?.mode === 'edit' && !!appointmentDialog.event;
+    // TASK-0270 (achado real ao investigar "não consigo remarcar no
+    // desktop"): "Cliente do CRM"/"Telefone avulso" ficavam `disabled` no
+    // modo edição — inputs/selects `disabled` NÃO entram no FormData do
+    // navegador, então `clientId`/`clientPhone` sempre chegavam vazios aqui
+    // e este guard bloqueava TODA remarcação antes de sequer chamar a API
+    // de reagendar, sem nenhum erro visível pro operador (só o toast
+    // genérico de "informe um cliente", fácil de não notar/entender como a
+    // causa real). Editar um evento já existente nunca precisa de telefone
+    // pra concluir — só é usado (opcionalmente) pra vincular o evento a um
+    // contato, ver bloco abaixo.
+    if (!isEdit && !phone) {
       onToast('Informe um cliente do CRM ou um telefone para criar o agendamento.');
       return;
     }
     const prefix = source === 'ads' ? '[Ads] ' : source === 'referral' ? '[Indicação] ' : source === 'organic' ? '[Orgânico] ' : '[?] ';
     const summary = `${prefix}${service}`;
     const start = new Date(`${date}T${time}:00`);
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    // TASK-0351 (pedido direto): quando o operador escolhe um serviço do
+    // catálogo em vez de digitar, a duração real do serviço
+    // (`durationMinutes`) substitui a hora fixa de 1h que valia pra
+    // qualquer atendimento — ver o <select>/hidden input em
+    // `AppointmentDialog`. Sem seleção do catálogo, continua 1h (mesmo
+    // padrão de sempre).
+    const durationMinutesRaw = Number(form.get('durationMinutes') || 60);
+    const durationMinutes = Number.isFinite(durationMinutesRaw) && durationMinutesRaw > 0 ? durationMinutesRaw : 60;
+    const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
     setSubmitting(true);
     try {
-      if (appointmentDialog?.mode === 'edit' && appointmentDialog.event) {
-        const existing = appointmentDialog.event;
+      if (isEdit && appointmentDialog!.event) {
+        const existing = appointmentDialog!.event;
         await callEventAction(`/api/google-calendar/events/${encodeURIComponent(existing.id)}`, 'PATCH', { summary });
         const oldStart = new Date(existing.startIso);
         if (oldStart.getTime() !== start.getTime()) {
           await callEventAction(`/api/google-calendar/events/${encodeURIComponent(existing.id)}/reschedule`, 'PATCH', { newStartIso: start.toISOString(), newEndIso: end.toISOString() });
         }
-        onToast('Agendamento atualizado e agenda sincronizada.');
+        // TASK-0270 (pedido direto, "esta cliente foi agendada pelo google
+        // como eu posso vincular o agendamento no sistema para aparecer
+        // aqui na ficha de acompanhamento?"): um evento criado direto no
+        // Google Calendar (fora do WhatsApp) nunca tem uma linha em
+        // `appointments` — vincular aqui, só quando o operador de fato
+        // escolheu um cliente/telefone, faz esse evento já existente
+        // aparecer na Ficha do Contato sem duplicar nada na agenda (o
+        // endpoint abaixo nunca cria evento novo, só grava a referência).
+        if (phone) {
+          await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/link-appointment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ eventId: existing.id, summary, startIso: start.toISOString().slice(0, 19), endIso: end.toISOString().slice(0, 19) }),
+          }).then(async (response) => {
+            if (!response.ok) {
+              const data = await response.json().catch(() => null);
+              throw new Error(getApiError(data, 'Não foi possível vincular este agendamento ao contato.'));
+            }
+          });
+        }
+        onToast(phone ? 'Agendamento atualizado, sincronizado e vinculado ao contato.' : 'Agendamento atualizado e agenda sincronizada.');
       } else {
         const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/manual-appointment`, {
           method: 'POST',
@@ -367,14 +474,60 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     });
   }, [calendarDate, events]);
 
-  const selectedDateLabel = useMemo(() => new Intl.DateTimeFormat(displayLocale, {
-    weekday: 'long', day: 'numeric', month: 'long',
-  }).format(new Date(`${selectedDate}T12:00:00`)), [displayLocale, selectedDate]);
+  // TASK-0292 (pedido direto, print real: "os agendamentos de agosto só
+  // aparece no calendário como um número mas eu não consigo ver os dados
+  // dele") — achado real: quando um dia tinha 2+ compromissos, o clique só
+  // chamava `setSelectedDate` (destacava a célula) e nada mais lia
+  // `selectedDate` na visão de Mês pra mostrar os dados — dia vazio abria
+  // criação e dia com 1 compromisso abria a edição dele direto, mas 2+ era
+  // um beco sem saída. Lista compacta abaixo da grade (reaproveita
+  // `EventCard` já usado em "Próximos compromissos"/Pendências), clicável
+  // pra abrir a edição de qualquer um deles.
+  const selectedDayAppointments = useMemo(() => {
+    if (calendarViewMode !== 'month') return [];
+    return eventDays.find(({ day }) => dateInputValue(day) === selectedDate)?.appointments ?? [];
+  }, [eventDays, selectedDate, calendarViewMode]);
 
-  const selectedDateEvents = useMemo(
-    () => eventDays.find(({ day }) => dateInputValue(day) == selectedDate)?.appointments || [],
-    [eventDays, selectedDate],
-  );
+  /** Segunda a domingo da semana que contém `selectedDate`, com os compromissos de cada dia já filtrados e ordenados por horário. */
+  const weekDays = useMemo(() => {
+    const base = new Date(`${selectedDate}T12:00:00`);
+    const monday = new Date(base);
+    monday.setDate(base.getDate() - ((base.getDay() + 6) % 7));
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index);
+      const appointments = events
+        .filter((calendarEvent) => {
+          const eventDate = new Date(calendarEvent.startIso);
+          return eventDate.getFullYear() === day.getFullYear() && eventDate.getMonth() === day.getMonth() && eventDate.getDate() === day.getDate();
+        })
+        .sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso));
+      return { day, appointments };
+    });
+  }, [selectedDate, events]);
+
+  const weekRangeLabel = useMemo(() => {
+    const start = weekDays[0].day;
+    const end = weekDays[6].day;
+    const sameMonth = start.getMonth() === end.getMonth();
+    const startLabel = start.toLocaleDateString(displayLocale, sameMonth ? { day: 'numeric' } : { day: 'numeric', month: 'short' });
+    const endLabel = end.toLocaleDateString(displayLocale, { day: 'numeric', month: 'short' });
+    return `${startLabel} – ${endLabel}`;
+  }, [weekDays, displayLocale]);
+
+  /** Faixa de horário da grade da semana — dinâmica, com folga de 1h antes/depois do primeiro/último compromisso (padrão 8h–19h sem nenhum compromisso na semana), pra não desperdiçar tela mostrando 24h de grade quando o expediente real é bem mais curto. */
+  const weekHourRange = useMemo(() => {
+    let startHour = 8;
+    let endHour = 19;
+    weekDays.forEach(({ appointments }) => {
+      appointments.forEach((calendarEvent) => {
+        const start = new Date(calendarEvent.startIso);
+        const end = calendarEvent.endIso ? new Date(calendarEvent.endIso) : new Date(start.getTime() + 60 * 60000);
+        startHour = Math.min(startHour, start.getHours());
+        endHour = Math.max(endHour, end.getMinutes() > 0 ? end.getHours() + 1 : end.getHours());
+      });
+    });
+    return { startHour: Math.max(0, startHour), endHour: Math.min(24, Math.max(endHour, startHour + 1)) };
+  }, [weekDays]);
 
   const goToToday = () => {
     const today = new Date();
@@ -383,32 +536,137 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   };
 
   const EventCard = ({ calendarEvent, compact = false }: { calendarEvent: CalendarEvent; compact?: boolean }) => (
-    <article className={`group rounded-2xl border border-slate-800 bg-slate-950/55 p-${compact ? '3' : '4'} transition-colors hover:border-emerald-500/35`}>
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-300">
-          <span className="text-[10px] font-bold uppercase">{new Date(calendarEvent.startIso).toLocaleDateString(displayLocale, { weekday: 'short' }).replace('.', '')}</span>
-          <span className="text-sm font-black leading-none">{new Date(calendarEvent.startIso).getDate()}</span>
+    <article className={`agenda-financeiro-workspace__event-card group rounded-2xl border border-slate-800 bg-slate-950/55 ${compact ? 'p-2.5' : 'p-4'} transition-colors hover:border-emerald-500/35`}>
+      <div className={`flex items-start ${compact ? 'gap-2' : 'gap-3'}`}>
+        <div className={`mt-0.5 flex shrink-0 flex-col items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-300 ${compact ? 'h-8 w-8' : 'h-10 w-10'}`}>
+          <span className={`font-bold uppercase ${compact ? 'text-[8px]' : 'text-[10px]'}`}>{new Date(calendarEvent.startIso).toLocaleDateString(displayLocale, { weekday: 'short' }).replace('.', '')}</span>
+          <span className={`font-black leading-none ${compact ? 'text-xs' : 'text-sm'}`}>{new Date(calendarEvent.startIso).getDate()}</span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h3 className="truncate text-sm font-bold text-white">{calendarEvent.summary}</h3>
-              <p className="mt-1 flex items-center gap-1 text-xs text-slate-400"><Clock3 className="h-3.5 w-3.5" />{new Date(calendarEvent.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}{calendarEvent.endIso ? ` — ${new Date(calendarEvent.endIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+            <div className="min-w-0 flex-1">
+              {/* TASK-0292 (pedido direto, "os cards estão muito grandes exigem
+                  rolar muito a página"): compact junta título+horário numa
+                  única linha truncada, em vez de duas linhas empilhadas — a
+                  variante cheia (Próximos compromissos/semana) continua igual. */}
+              {compact ? (
+                <p className="truncate text-xs font-bold text-white">
+                  {calendarEvent.summary}
+                  <span className="ml-1.5 font-normal text-slate-400">· {new Date(calendarEvent.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}{calendarEvent.endIso ? `–${new Date(calendarEvent.endIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                </p>
+              ) : (
+                <>
+                  <h3 className="truncate text-sm font-bold text-white">{calendarEvent.summary}</h3>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-slate-400"><Clock3 className="h-3.5 w-3.5" />{new Date(calendarEvent.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}{calendarEvent.endIso ? ` — ${new Date(calendarEvent.endIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+                </>
+              )}
             </div>
             {calendarEvent.completed && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className={`flex flex-wrap items-center gap-2 ${compact ? 'mt-1.5' : 'mt-3'}`}>
             {financialModuleEnabled && (calendarEvent.payment ? <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${statusStyle[calendarEvent.payment.status]}`}>{calendarEvent.payment.status === 'pago' ? (isSpanish ? 'Cobrado' : 'Recebido') : calendarEvent.payment.status === 'atrasado' ? (isSpanish ? 'Atrasado' : 'Em atraso') : (isSpanish ? 'Por cobrar' : 'A receber')} · {formatMoney(calendarEvent.payment.amount)}</button> : <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className="rounded-full border border-dashed border-amber-500/35 px-2 py-1 text-[10px] font-bold text-amber-200 hover:bg-amber-500/10">{isSpanish ? 'Vincular cobro' : 'Vincular cobrança'}</button>)}
-            {!compact && <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-              <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={isSpanish ? 'Editar agendamiento' : 'Editar agendamento'}><MoreHorizontal className="h-4 w-4" /></button>
-              <button type="button" onClick={() => quickComplete(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-300" title={isSpanish ? 'Finalizar atención' : 'Concluir atendimento'}><CheckCircle2 className="h-4 w-4" /></button>
-              <button type="button" onClick={() => cancelAppointment(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Cancelar agendamiento' : 'Cancelar agendamento'}><Trash2 className="h-4 w-4" /></button>
-            </div>}
+            {/* Achado real (pedido direto, print da Agenda "Hoje" no mobile):
+                o botão de editar/remarcar já existia (abre o mesmo
+                AppointmentDialog em modo 'edit'), mas só aparecia no card
+                COMPLETO (`!compact`), escondido atrás de hover — que nem
+                existe em touch. A lista "Hoje"/Pendências usa sempre
+                `compact`, então não tinha nenhum jeito de reagendar
+                diretamente dali. Card compacto ganha só o botão de editar
+                (sempre visível, sem hover), sem concluir/cancelar — mantém
+                o compacto enxuto, só resolve o gap de reagendamento. */}
+            {compact ? (
+              <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={isSpanish ? 'Editar/reagendar' : 'Editar/reagendar'}><MoreHorizontal className="h-4 w-4" /></button>
+            ) : (
+              <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={isSpanish ? 'Editar agendamiento' : 'Editar agendamento'}><MoreHorizontal className="h-4 w-4" /></button>
+                <button type="button" onClick={() => quickComplete(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-300" title={isSpanish ? 'Finalizar atención' : 'Concluir atendimento'}><CheckCircle2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => cancelAppointment(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Cancelar agendamiento' : 'Cancelar agendamento'}><Trash2 className="h-4 w-4" /></button>
+              </div>
+            )}
           </div>
         </div>
       </div>
     </article>
   );
+
+  /**
+   * Grade da semana por horário (pedido direto do dono do produto,
+   * 28/08/2026, referência de outro app de agendamentos): eixo de horas à
+   * esquerda (fixo — `sticky left-0` — enquanto os dias rolam horizontalmente
+   * num celular estreito), 7 colunas de dia, linhas finas de hora em hora,
+   * compromissos posicionados por horário real (não só listados). Reaproveita
+   * as mesmas classes de cor já usadas/cobertas pelos 4 temas no resto do
+   * arquivo — nenhuma cor nova.
+   */
+  const renderWeekGrid = () => {
+    const { startHour, endHour } = weekHourRange;
+    const totalHours = endHour - startHour;
+    const ROW_HEIGHT_PX = 48;
+    const gridHeight = totalHours * ROW_HEIGHT_PX;
+    const hourMarks = Array.from({ length: totalHours }, (_, index) => startHour + index);
+    const todayKey = dateInputValue(new Date());
+
+    return (
+      <div className="overflow-x-auto">
+        <div className="flex" style={{ minWidth: '36rem' }}>
+          <div className="sticky left-0 z-10 flex-none bg-slate-900" style={{ width: '2.75rem' }}>
+            <div style={{ height: '2.75rem' }} />
+            <div className="relative" style={{ height: `${gridHeight}px` }}>
+              {hourMarks.map((hour) => (
+                <span key={hour} className="absolute right-1.5 -translate-y-1/2 text-[9px] font-medium text-slate-500" style={{ top: `${(hour - startHour) * ROW_HEIGHT_PX}px` }}>{`${hour}h`}</span>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-1">
+            {weekDays.map(({ day, appointments }) => {
+              const dayKey = dateInputValue(day);
+              const isToday = dayKey === todayKey;
+              const isSelected = dayKey === selectedDate;
+              return (
+                <div key={day.toISOString()} className="flex-1 border-l border-slate-800/60 first:border-l-0" style={{ minWidth: '4.75rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(dayKey)}
+                    className="flex w-full flex-col items-center justify-center gap-0.5 border-b border-slate-800/70 pb-1.5"
+                    style={{ height: '2.75rem' }}
+                  >
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{day.toLocaleDateString(displayLocale, { weekday: 'short' }).replace('.', '')}</span>
+                    <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold transition-colors ${isToday ? 'bg-emerald-400 text-slate-950' : isSelected ? 'text-emerald-200 ring-2 ring-emerald-400' : 'text-slate-300'}`}>{day.getDate()}</span>
+                  </button>
+                  <div className="relative" style={{ height: `${gridHeight}px` }}>
+                    {hourMarks.map((hour) => (
+                      <div key={hour} className="absolute inset-x-0 border-t border-slate-800/40" style={{ top: `${(hour - startHour) * ROW_HEIGHT_PX}px` }} />
+                    ))}
+                    {appointments.map((calendarEvent) => {
+                      const start = new Date(calendarEvent.startIso);
+                      const end = calendarEvent.endIso ? new Date(calendarEvent.endIso) : new Date(start.getTime() + 60 * 60000);
+                      const rangeMinutes = totalHours * 60;
+                      const startMinutes = Math.min(rangeMinutes, Math.max(0, (start.getHours() - startHour) * 60 + start.getMinutes()));
+                      const endMinutes = Math.min(rangeMinutes, Math.max(startMinutes, (end.getHours() - startHour) * 60 + end.getMinutes()));
+                      const top = (startMinutes / rangeMinutes) * 100;
+                      const height = Math.max(4, ((endMinutes - startMinutes) / rangeMinutes) * 100);
+                      return (
+                        <button
+                          type="button"
+                          key={calendarEvent.id}
+                          onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })}
+                          className="absolute inset-x-0.5 overflow-hidden rounded-md border border-emerald-500/30 bg-emerald-500/15 px-1 py-0.5 text-left transition-colors hover:bg-emerald-500/25"
+                          style={{ top: `${top}%`, height: `${height}%` }}
+                        >
+                          <span className="block truncate text-[8px] font-bold text-emerald-300 sm:text-[9px]">{calendarEvent.summary.replace(/^\[[^\]]+\]\s*/, '')}</span>
+                          <span className="block truncate text-[7px] text-slate-400 sm:text-[8px]">{start.toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className={`agenda-financeiro-workspace agenda-financeiro-workspace--${view} agenda-financeiro-workspace--financial-detail-${mobileDetail || 'closed'} agenda-financeiro-workspace--agenda-mobile-${mobileAgendaView} space-y-5 animate-page-enter`}>
@@ -421,7 +679,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
           </div>
           <div className="agenda-financeiro-workspace__actions flex flex-wrap gap-2">
             {view === 'financial' && <><button type="button" onClick={() => setTransactionDialog('expense')} className="rounded-xl border border-slate-700 bg-slate-900/70 px-3.5 py-2.5 text-xs font-bold text-slate-200 transition-colors hover:border-rose-400/50 hover:bg-rose-500/10"><ArrowDownRight className="mr-1.5 inline h-4 w-4 text-rose-300" />{isSpanish ? 'Nuevo gasto' : 'Nova despesa'}</button><button type="button" onClick={() => setTransactionDialog('income')} className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3.5 py-2.5 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-500/15"><ArrowUpRight className="mr-1.5 inline h-4 w-4" />{isSpanish ? 'Ingreso adicional' : 'Receita avulsa'}</button></>}
-            {view === 'agenda' && <button type="button" onClick={() => setAppointmentDialog({ mode: 'new' })} className="rounded-xl bg-emerald-400 px-4 py-2.5 text-xs font-black text-slate-950 shadow-lg shadow-emerald-950/30 transition-transform active:scale-[0.98]"><Plus className="mr-1.5 inline h-4 w-4" />{isSpanish ? 'Nuevo agendamiento' : 'Novo agendamento'}</button>}
+            {view === 'agenda' && <button type="button" onClick={() => setAppointmentDialog({ mode: 'new' })} className="agenda-financeiro-workspace__primary-action rounded-xl bg-emerald-400 px-4 py-2.5 text-xs font-black text-slate-950 shadow-lg shadow-emerald-950/30 transition-transform active:scale-[0.98]"><Plus className="mr-1.5 inline h-4 w-4" />{isSpanish ? 'Nuevo agendamiento' : 'Novo agendamento'}</button>}
           </div>
         </div>
       </section>
@@ -430,37 +688,148 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
 
       {!hasOperationalData && !loadingEvents && <section className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/45 p-6 text-center"><CircleDollarSign className="mx-auto h-7 w-7 text-emerald-400" /><h2 className="mt-3 font-bold text-white">{view === 'agenda' ? (isSpanish ? 'La agenda está lista para recibir atenciones' : 'A agenda está pronta para receber atendimentos') : (isSpanish ? 'El financiero está listo para recibir registros' : 'O financeiro está pronto para receber lançamentos')}</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-400">{view === 'agenda' ? (isSpanish ? 'Todavía no hay compromisos en este período. Creá el primer agendamiento o esperá la próxima reserva del agente.' : 'Ainda não há compromissos neste período. Crie o primeiro agendamento ou aguarde a próxima reserva do agente.') : (isSpanish ? 'Todavía no hay ingresos ni gastos registrados en este período.' : 'Ainda não há receitas ou despesas registradas neste período.')}</p></section>}
 
-      {view === 'agenda' && <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg sm:p-5">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-            <div>
+      {/* TASK-0351 (achado real, print anotado: "quando clico em semana e
+          volto para hoje o calendário da semana não some") — o CSS mobile
+          (index.css) escondia estas 2 colunas via `section:has(.grid-cols-7)`
+          + `div:first-child`/`nth-child(2)`; `:has(.grid-cols-7)` só batia
+          na visão de Mês (única com um elemento LITERAL classe
+          `grid-cols-7` — a grade de Semana usa `flex`), então trocar pra
+          Semana e voltar pra "Hoje" nunca escondia a grade de semana. Classes
+          próprias (`__calendar-column`/`__upcoming-column`) substituem os
+          seletores frágeis, independente do conteúdo interno (mês ou
+          semana). */}
+      {view === 'agenda' && <section className="agenda-financeiro-workspace__calendar-section grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="agenda-financeiro-workspace__calendar-column rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg sm:p-5">
+          {/* Achado real (26/08/2026 e 28/08/2026, pedidos do dono do produto
+              com print): o nav de mês e o banner "Dia selecionado" mostravam
+              a mesma informação duas vezes, em dois blocos empilhados —
+              fundidos num único cartão (26/08). No celular real, ainda assim
+              quebrava em 3 linhas por causa do texto do dia selecionado por
+              extenso; removido (28/08) — a mesma informação já aparece no
+              anel de destaque e no selo de contagem do dia na grade logo
+              abaixo, então o cabeçalho agora é só: nav de mês + "Ir para
+              hoje", garantido numa linha só mesmo em tela estreita. */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
               <h2 className="font-bold text-white">{isSpanish ? 'Agenda operativa' : 'Agenda operacional'}</h2>
               <p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Eventos reales del calendario, cobro y atención en el mismo flujo.' : 'Eventos reais do calendário, cobrança e atendimento no mesmo fluxo.'}</p>
             </div>
-            <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1">
-              <button onClick={() => changeMonth(-1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes anterior' : 'Mês anterior'}><ChevronLeft className="h-4 w-4" /></button>
-              <div className="min-w-36 px-1 text-center">
-                <p className="text-xs font-bold capitalize text-slate-200">{monthLabel}</p>
-                <p className="mt-0.5 truncate text-[10px] font-medium text-emerald-300">{selectedDateLabel}</p>
-              </div>
-              <button onClick={() => changeMonth(1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes siguiente' : 'Próximo mês'}><ChevronRight className="h-4 w-4" /></button>
+            {/* Pedido direto do dono do produto (28/08/2026): seletor Semana/Mês,
+                encaixado ao lado do título pra não abrir mais uma linha na tela.
+                TASK-0347: escondido no mobile — virou a aba Semana/Mês do nav
+                de cima (AgendaWorkspace.tsx), redundante com este aqui. */}
+            <div className="hidden shrink-0 rounded-lg border border-slate-800 bg-slate-950 p-0.5 sm:inline-flex">
+              <button type="button" onClick={() => setCalendarViewMode('week')} className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${calendarViewMode === 'week' ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-400 hover:text-white'}`}>{isSpanish ? 'Semana' : 'Semana'}</button>
+              <button type="button" onClick={() => setCalendarViewMode('month')} className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${calendarViewMode === 'month' ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-400 hover:text-white'}`}>{isSpanish ? 'Mes' : 'Mês'}</button>
             </div>
           </div>
 
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300">{isSpanish ? 'Día seleccionado' : 'Dia selecionado'}</p>
-              <p className="truncate text-xs font-semibold text-slate-200">{selectedDateLabel} · {selectedDateEvents.length === 1 ? (isSpanish ? '1 cita' : '1 compromisso') : `${selectedDateEvents.length} ${isSpanish ? 'citas' : 'compromissos'}`}{selectedDate === dateInputValue(new Date()) ? ` · ${isSpanish ? 'hoy' : 'hoje'}` : ''}</p>
+          {/* Achado real (28/08/2026, pedido do dono do produto): estética
+              inspirada no Google Agenda — nav plano sem cartão/borda própria,
+              células do dia sem borda individual (só tonalidade sutil), dia
+              de hoje com círculo preenchido e dia selecionado com anel no
+              número (não a célula inteira). Reaproveita as MESMAS classes de
+              cor já cobertas pelos 4 temas (emerald/slate); não introduz
+              nenhuma cor nova. */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+            <div className="flex min-w-0 items-center gap-1">
+              <button onClick={() => (calendarViewMode === 'week' ? changeWeek(-1) : changeMonth(-1))} className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={calendarViewMode === 'week' ? (isSpanish ? 'Semana anterior' : 'Semana anterior') : (isSpanish ? 'Mes anterior' : 'Mês anterior')}><ChevronLeft className="h-4 w-4" /></button>
+              {/* Achado real (28/08/2026, pedido do dono do produto com print): com
+                  o dia selecionado + contagem de compromissos aqui, o cabeçalho
+                  quebrava em 3 linhas num celular real (mês, dia por extenso,
+                  botão) — a mesma informação já aparece no anel de destaque e no
+                  selo de contagem da célula do dia logo abaixo, então tirar daqui
+                  não perde nada e deixa a linha inteira num só nível. */}
+              <p className="min-w-0 truncate px-1 text-xs font-bold capitalize text-slate-200">{calendarViewMode === 'week' ? weekRangeLabel : monthLabel}</p>
+              <button onClick={() => (calendarViewMode === 'week' ? changeWeek(1) : changeMonth(1))} className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={calendarViewMode === 'week' ? (isSpanish ? 'Próxima semana' : 'Próxima semana') : (isSpanish ? 'Mes siguiente' : 'Próximo mês')}><ChevronRight className="h-4 w-4" /></button>
             </div>
-            <button type="button" onClick={goToToday} className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/15">{isSpanish ? 'Ir a hoy' : 'Ir para hoje'}</button>
+            <button type="button" onClick={goToToday} className="shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/15">{isSpanish ? 'Ir a hoy' : 'Ir para hoje'}</button>
           </div>
 
-          {loadingEvents ? <div className="grid grid-cols-7 gap-1.5 animate-pulse sm:gap-2">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-14 rounded-xl bg-slate-800/70 sm:h-16" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : <div className="grid grid-cols-7 gap-1 sm:gap-1.5"><div className="col-span-7 grid grid-cols-7 gap-1 pb-1 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1.5 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} />)}{eventDays.map(({ day, appointments }) => { const dayKey = dateInputValue(day); const isToday = dayKey === dateInputValue(new Date()); const isSelected = dayKey === selectedDate; return                   <button type="button" key={day.toISOString()} onClick={() => { setSelectedDate(dayKey); setAppointmentDialog({ mode: 'new', initialDate: dayKey }); }} aria-label={`${isToday ? (isSpanish ? 'Hoy, ' : 'Hoje, ') : ''}${day.getDate()} ${monthLabel}`} aria-pressed={isSelected} className={`min-h-14 rounded-lg border p-1 text-left transition-colors sm:min-h-16 sm:rounded-xl sm:p-1.5 ${isSelected ? 'border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-400/45' : appointments.length ? 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'}`}><div className="flex items-center justify-between gap-1"><span className={`flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold ${isToday ? 'bg-emerald-400 px-1 text-slate-950' : isSelected ? 'bg-emerald-500/15 px-1 text-emerald-200' : 'text-slate-300'}`}>{day.getDate()}</span>{appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[8px] font-black text-slate-950">{appointments.length}</span>}</div><div className="mt-1 space-y-0.5">{appointments.slice(0, 1).map((event) => <span key={event.id} className="block truncate rounded bg-slate-900 px-1 py-0.5 text-[8px] font-medium text-slate-300 sm:text-[9px]">{new Date(event.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })} {event.summary.replace(/^\[[^\]]+\]\s*/, '')}</span>)}{appointments.length > 1 && <span className="block text-[8px] font-semibold text-emerald-300">+{appointments.length - 1}</span>}</div></button>; })}</div>}
+          {loadingEvents ? <div className="grid grid-cols-7 gap-0.5 animate-pulse sm:gap-1">{Array.from({ length: 35 }, (_, index) => <div key={index} className="h-11 rounded-lg bg-slate-800/70 sm:h-12 sm:rounded-xl" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : calendarViewMode === 'week' ? renderWeekGrid() : <div className="grid grid-cols-7 gap-0.5 sm:gap-1"><div className="col-span-7 mb-1 grid grid-cols-7 gap-0.5 border-b border-slate-800/70 pb-1.5 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1 sm:pb-2 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{/* Achado real (28/08/2026, pedido do dono do produto com print): a grade
+                de mês tinha ficado sem NENHUMA linha divisória (removidas na estética
+                Google Agenda, TASK-0144) — no celular real isso lia como "espaço
+                desperdiçado" em vez de "limpo". Célula vazia (início do mês) agora
+                completa a grade com uma borda fina, igual às células com dia. */}
+              {Array.from({ length: (new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1).getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} aria-hidden="true" className="min-h-11 rounded-lg border border-slate-800/40 sm:min-h-12 sm:rounded-xl" />)}{eventDays.map(({ day, appointments }) => {
+                const dayKey = dateInputValue(day);
+                const isToday = dayKey === dateInputValue(new Date());
+                const isSelected = dayKey === selectedDate;
+                return (
+                  <button
+                    type="button"
+                    key={day.toISOString()}
+                    onClick={() => {
+                      setSelectedDate(dayKey);
+                      // Achado real (28/08/2026, pedido do dono do produto com print):
+                      // antes, tocar em QUALQUER dia sempre abria "Novo agendamento" —
+                      // até num dia que já tinha compromisso, o preview de horário
+                      // dentro da célula não levava a lugar nenhum de útil. Agora: dia
+                      // vazio abre criação (comportamento de sempre); dia com só 1
+                      // compromisso abre a edição DELE; dia com 2+ só seleciona (evita
+                      // abrir o compromisso errado sem o operador escolher qual).
+                      if (appointments.length === 0) setAppointmentDialog({ mode: 'new', initialDate: dayKey });
+                      else if (appointments.length === 1) setAppointmentDialog({ mode: 'edit', event: appointments[0] });
+                    }}
+                    aria-label={`${isToday ? (isSpanish ? 'Hoy, ' : 'Hoje, ') : ''}${day.getDate()} ${monthLabel}${appointments.length ? ` · ${appointments.length} ${isSpanish ? 'citas' : 'compromissos'}` : ''}`}
+                    aria-pressed={isSelected}
+                    className={`flex min-h-11 flex-col items-center justify-center gap-1 rounded-lg border p-1 transition-colors sm:min-h-12 sm:rounded-xl sm:p-1.5 ${isSelected ? 'border-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15' : appointments.length ? 'border-slate-800/70 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800/40 hover:bg-slate-800/50'}`}
+                  >
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${isToday ? 'bg-emerald-400 text-slate-950' : isSelected ? 'text-emerald-200 ring-2 ring-emerald-400' : 'text-slate-300'}`}>{day.getDate()}</span>
+                    {appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[8px] font-black text-slate-950">{appointments.length}</span>}
+                  </button>
+                );
+              })}</div>}
+
+          {/* TASK-0292 — dia com 2+ compromissos na visão de Mês: antes o
+              clique só destacava a célula, sem mostrar os dados de nenhum
+              compromisso daquele dia (0 abre criação, 1 abre a edição dele
+              direto, ambos já funcionavam). */}
+          {calendarViewMode === 'month' && selectedDayAppointments.length >= 2 && (
+            <div className="mt-3 space-y-2 border-t border-slate-800/70 pt-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                {selectedDayAppointments.length} {isSpanish ? 'citas el' : 'compromissos em'} {new Date(`${selectedDate}T12:00:00`).toLocaleDateString(displayLocale, { day: '2-digit', month: 'short' })}
+              </p>
+              {selectedDayAppointments.map((calendarEvent) => (
+                // Achado real (TASK atual): o card compacto passou a ter seu
+                // próprio botão de editar/reagendar (ver EventCard acima) —
+                // envolver o card inteiro num <button> aqui aninhava um
+                // <button> dentro de outro <button> (HTML inválido, clique
+                // ambíguo). Vira <div role="button"> com o mesmo onClick;
+                // o botão interno chama exatamente a mesma ação, então não
+                // precisa de stopPropagation.
+                <div
+                  key={calendarEvent.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setAppointmentDialog({ mode: 'edit', event: calendarEvent }); }}
+                  className="block w-full cursor-pointer text-left"
+                >
+                  <EventCard calendarEvent={calendarEvent} compact />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold text-white">{isSpanish ? 'Próximos compromisos' : 'Próximos compromissos'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Acciones que requieren atención a continuación.' : 'Ações que exigem atenção na sequência.'}</p></div><button type="button" onClick={refreshEvents} className="text-xs font-bold text-emerald-300 hover:text-emerald-200">{isSpanish ? 'Actualizar' : 'Atualizar'}</button></div><div className="space-y-3">{nextAppointments.length ? nextAppointments.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'No se encontraron compromisos futuros este mes.' : 'Nenhum compromisso futuro encontrado neste mês.'}</p>}</div></div>
+        <div className="agenda-financeiro-workspace__upcoming-column rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold text-white">{isSpanish ? 'Próximos compromisos' : 'Próximos compromissos'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Acciones que requieren atención a continuación.' : 'Ações que exigem atenção na sequência.'}</p></div><button type="button" onClick={refreshEvents} className="text-xs font-bold text-emerald-300 hover:text-emerald-200">{isSpanish ? 'Actualizar' : 'Atualizar'}</button></div><div className="space-y-3">{nextAppointments.length ? nextAppointments.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'No se encontraron compromisos futuros este mes.' : 'Nenhum compromisso futuro encontrado neste mês.'}</p>}</div></div>
       </section>}
 
-      {view === 'financial' && <section className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-bold text-white">{isSpanish ? 'Flujo financiero' : 'Fluxo financeiro'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Ingresos vinculados a la agenda, registros manuales y gastos operativos.' : 'Receitas vinculadas à agenda, lançamentos manuais e despesas operacionais.'}</p></div><div className="flex flex-wrap gap-2"><select value={period} onChange={(event) => setPeriod(event.target.value as 'month' | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="month">{isSpanish ? 'Mes actual' : 'Mês atual'}</option><option value="all">{isSpanish ? 'Todo el historial' : 'Todo histórico'}</option></select><select value={transactionType} onChange={(event) => setTransactionType(event.target.value as 'all' | 'income' | 'expense')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="all">{isSpanish ? 'Todos los tipos' : 'Todos os tipos'}</option><option value="income">{isSpanish ? 'Ingresos' : 'Receitas'}</option><option value="expense">{isSpanish ? 'Gastos' : 'Despesas'}</option></select><select value={transactionStatus} onChange={(event) => setTransactionStatus(event.target.value as PaymentStatus | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="all">{isSpanish ? 'Todos los estados' : 'Todos os status'}</option>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select><button type="button" onClick={() => setTransactionDialog('income')} className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/15"><Plus className="mr-1 inline h-3.5 w-3.5" />{isSpanish ? 'Ingreso adicional' : 'Receita avulsa'}</button></div></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Previsto' : 'Previsto'}</p><p className="mt-1 text-sm font-black text-slate-200">{formatMoney(financial.projectedIncome)}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Ingresos' : 'Receitas'}</p><p className="mt-1 text-sm font-black text-emerald-300">{financial.incomeCount}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Por cobrar' : 'A receber'}</p><p className="mt-1 text-sm font-black text-amber-200">{financial.pendingCount}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Cobrado' : 'Recebido'}</p><p className="mt-1 text-sm font-black text-sky-200">{financial.collectionRate === null ? '—' : new Intl.NumberFormat(displayLocale, { style: 'percent', maximumFractionDigits: 0 }).format(financial.collectionRate)}</p></div></div><div className="responsive-table-scroll hidden overflow-x-auto sm:block"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500"><tr><th className="pb-3 font-bold">{isSpanish ? 'Fecha' : 'Data'}</th><th className="pb-3 font-bold">{isSpanish ? 'Cliente / descripción' : 'Cliente / descrição'}</th><th className="pb-3 font-bold">{isSpanish ? 'Tipo' : 'Tipo'}</th><th className="pb-3 font-bold">{isSpanish ? 'Estado' : 'Status'}</th><th className="pb-3 text-right font-bold">{isSpanish ? 'Valor' : 'Valor'}</th><th className="pb-3" /></tr></thead><tbody className="divide-y divide-slate-800/80">{visibleTransactions.length ? visibleTransactions.map((transaction) => <tr key={transaction.id} className="transition-colors hover:bg-slate-800/30"><td className="py-3.5 text-slate-400">{new Date(transaction.date).toLocaleDateString(displayLocale)}</td><td className="py-3.5"><p className="font-bold text-slate-200">{transaction.productName}</p><p className="mt-0.5 text-[10px] text-slate-500">{transaction.entryType === 'expense' ? (isSpanish ? 'Gasto operativo' : 'Despesa operacional') : transaction.leadName}</p></td><td className="py-3.5"><span className={`inline-flex items-center gap-1 font-bold ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? <ArrowDownRight className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}{transaction.entryType === 'expense' ? (isSpanish ? 'Gasto' : 'Despesa') : (isSpanish ? 'Ingreso' : 'Receita')}</span></td><td className="py-3.5"><select value={transaction.status} onChange={(event) => onUpdateTransactionStatus(transaction.id, event.target.value as PaymentStatus)} aria-label={`${isSpanish ? 'Estado de' : 'Status de'} ${transaction.productName}`} className={`rounded-full border px-2 py-1 text-[10px] font-bold outline-none ${statusStyle[transaction.status]}`}>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select></td><td className={`py-3.5 text-right font-black ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? '-' : '+'}{formatMoney(transaction.amount)}</td><td className="py-3.5 text-right"><button type="button" onClick={() => confirmDeleteTransaction(transaction)} className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Eliminar registro' : 'Excluir lançamento'}><Trash2 className="h-3.5 w-3.5" /></button></td></tr>) : <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-500">{isSpanish ? 'Todavía no hay registros reales para este filtro.' : 'Ainda não há lançamentos reais para este filtro.'}</td></tr>}</tbody></table></div><div className="space-y-2 sm:hidden">{visibleTransactions.length ? visibleTransactions.map((transaction) => <div key={transaction.id}><FinancialTransactionCard transaction={transaction} currency={currency} displayLocale={displayLocale} isSpanish={isSpanish} onUpdateStatus={onUpdateTransactionStatus} onDelete={() => confirmDeleteTransaction(transaction)} /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'Todavía no hay registros reales para este filtro.' : 'Ainda não há lançamentos reais para este filtro.'}</p>}</div></section>}
+      {view === 'agenda' && <section className="agenda-financeiro-workspace__pending rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg sm:p-5">
+        <div className="mb-4 flex items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-300">{isSpanish ? 'Decisión requerida' : 'Decisão necessária'}</p><h2 className="mt-1 font-bold text-white">{isSpanish ? 'Pendientes de la agenda' : 'Pendências da agenda'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Confirmación y cobro antes de seguir con la atención.' : 'Confirmação e cobrança antes de seguir com o atendimento.'}</p></div><span className="rounded-full bg-amber-400/10 px-2 py-1 text-[10px] font-bold text-amber-200">{pendingAppointments.length}</span></div>
+        {pendingAppointments.length ? <div className="space-y-2">{pendingAppointments.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>)}</div> : <div className="rounded-xl border border-dashed border-slate-700 px-3 py-8 text-center text-xs text-slate-400">{isSpanish ? 'No hay pendientes para revisar.' : 'Nenhuma pendência para revisar.'}</div>}
+      </section>}
+
+      {/* TASK-0347 — versão mobile de "Próximos compromissos" + "Pendências da
+          agenda" fundidos numa lista só (`mobileTodayList`), visível só na
+          aba "Hoje" do nav mobile (CSS esconde nas abas Semana/Mês, ver
+          index.css). As duas seções desktop acima continuam intactas — essa
+          é adicional, não substitui nada no desktop. */}
+      {view === 'agenda' && <section className="agenda-financeiro-workspace__mobile-today-list space-y-2 sm:hidden">
+        {mobileTodayList.length ? mobileTodayList.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>) : <div className="rounded-xl border border-dashed border-slate-700 px-3 py-8 text-center text-xs text-slate-400">{isSpanish ? 'No hay compromisos próximos.' : 'Nenhum compromisso próximo.'}</div>}
+      </section>}
+
+      {view === 'financial' &&<section className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-bold text-white">{isSpanish ? 'Flujo financiero' : 'Fluxo financeiro'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Ingresos vinculados a la agenda, registros manuales y gastos operativos.' : 'Receitas vinculadas à agenda, lançamentos manuais e despesas operacionais.'}</p></div><div className="flex flex-wrap gap-2"><select value={period} onChange={(event) => setPeriod(event.target.value as 'month' | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="month">{isSpanish ? 'Mes actual' : 'Mês atual'}</option><option value="all">{isSpanish ? 'Todo el historial' : 'Todo histórico'}</option></select><select value={transactionType} onChange={(event) => setTransactionType(event.target.value as 'all' | 'income' | 'expense')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="all">{isSpanish ? 'Todos los tipos' : 'Todos os tipos'}</option><option value="income">{isSpanish ? 'Ingresos' : 'Receitas'}</option><option value="expense">{isSpanish ? 'Gastos' : 'Despesas'}</option></select><select value={transactionStatus} onChange={(event) => setTransactionStatus(event.target.value as PaymentStatus | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="all">{isSpanish ? 'Todos los estados' : 'Todos os status'}</option>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select><button type="button" onClick={() => setTransactionDialog('income')} className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/15"><Plus className="mr-1 inline h-3.5 w-3.5" />{isSpanish ? 'Ingreso adicional' : 'Receita avulsa'}</button></div></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Previsto' : 'Previsto'}</p><p className="mt-1 text-sm font-black text-slate-200">{formatMoney(financial.projectedIncome)}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Ingresos' : 'Receitas'}</p><p className="mt-1 text-sm font-black text-emerald-300">{financial.incomeCount}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Por cobrar' : 'A receber'}</p><p className="mt-1 text-sm font-black text-amber-200">{financial.pendingCount}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Cobrado' : 'Recebido'}</p><p className="mt-1 text-sm font-black text-sky-200">{financial.collectionRate === null ? '—' : new Intl.NumberFormat(displayLocale, { style: 'percent', maximumFractionDigits: 0 }).format(financial.collectionRate)}</p></div></div><div className="responsive-table-scroll hidden overflow-x-auto sm:block"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500"><tr><th className="pb-3 font-bold">{isSpanish ? 'Fecha' : 'Data'}</th><th className="pb-3 font-bold">{isSpanish ? 'Cliente / descripción' : 'Cliente / descrição'}</th><th className="pb-3 font-bold">{isSpanish ? 'Tipo' : 'Tipo'}</th><th className="pb-3 font-bold">{isSpanish ? 'Estado' : 'Status'}</th><th className="pb-3 text-right font-bold">{isSpanish ? 'Valor' : 'Valor'}</th><th className="pb-3" /></tr></thead><tbody className="divide-y divide-slate-800/80">{visibleTransactions.length ? visibleTransactions.map((transaction) => <tr key={transaction.id} className="transition-colors hover:bg-slate-800/30"><td className="py-3.5 text-slate-400">{new Date(transaction.date).toLocaleDateString(displayLocale)}</td><td className="py-3.5"><p className="font-bold text-slate-200">{transaction.productName}</p><p className="mt-0.5 text-[10px] text-slate-500">{transaction.entryType === 'expense' ? (isSpanish ? 'Gasto operativo' : 'Despesa operacional') : transaction.leadName}</p></td><td className="py-3.5"><span className={`inline-flex items-center gap-1 font-bold ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? <ArrowDownRight className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}{transaction.entryType === 'expense' ? (isSpanish ? 'Gasto' : 'Despesa') : (isSpanish ? 'Ingreso' : 'Receita')}</span></td><td className="py-3.5"><select value={transaction.status} onChange={(event) => onUpdateTransactionStatus(transaction.id, event.target.value as PaymentStatus)} aria-label={`${isSpanish ? 'Estado de' : 'Status de'} ${transaction.productName}`} className={`rounded-full border px-2 py-1 text-[10px] font-bold outline-none ${statusStyle[transaction.status]}`}>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select></td><td className={`py-3.5 text-right font-black ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? '-' : '+'}{formatMoney(transaction.amount)}</td><td className="py-3.5 text-right"><button type="button" onClick={() => confirmDeleteTransaction(transaction)} className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Eliminar registro' : 'Excluir lançamento'}><Trash2 className="h-3.5 w-3.5" /></button></td></tr>) : <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-500">{isSpanish ? 'Todavía no hay registros reales para este filtro.' : 'Ainda não há lançamentos reais para este filtro.'}</td></tr>}</tbody></table></div><div className="space-y-2 sm:hidden">{visibleTransactions.length ? visibleTransactions.map((transaction) => <div key={transaction.id}><FinancialTransactionCard transaction={transaction} currency={currency} displayLocale={displayLocale} isSpanish={isSpanish} onUpdateStatus={onUpdateTransactionStatus} onDelete={() => confirmDeleteTransaction(transaction)} /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'Todavía no hay registros reales para este filtro.' : 'Ainda não há lançamentos reais para este filtro.'}</p>}</div></section>}
 
       {view === 'financial' && onAddRecurringExpense && (
         <section className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg">
@@ -508,7 +877,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
         </section>
       )}
 
-      {appointmentDialog && <AppointmentDialog dialog={appointmentDialog} leads={leads} currency={currency} isSpanish={isSpanish} onClose={() => setAppointmentDialog(null)} onSubmit={saveAppointment} submitting={submitting} />}
+      {appointmentDialog && <AppointmentDialog dialog={appointmentDialog} leads={leads} currency={currency} isSpanish={isSpanish} onClose={() => setAppointmentDialog(null)} onSubmit={saveAppointment} submitting={submitting} catalogProducts={catalogProducts} />}
       {transactionDialog && <TransactionDialog kind={transactionDialog} leads={leads} currency={currency} isSpanish={isSpanish} onClose={() => setTransactionDialog(null)} onSubmit={saveTransaction} submitting={submitting} />}
       {paymentDialog && <PaymentDialog event={paymentDialog} currency={currency} isSpanish={isSpanish} onClose={() => setPaymentDialog(null)} onSubmit={savePayment} submitting={submitting} />}
       {recurringDialogOpen && <RecurringExpenseDialog currency={currency} isSpanish={isSpanish} onClose={() => setRecurringDialogOpen(false)} onSubmit={saveRecurringExpense} submitting={submittingRecurring} />}
@@ -529,31 +898,43 @@ function transactionStatusLabel(status: PaymentStatus, isSpanish: boolean) {
 function FinancialTransactionCard({ transaction, currency, displayLocale, isSpanish, onUpdateStatus, onDelete }: { transaction: FinancialTransaction; currency: string; displayLocale: string; isSpanish: boolean; onUpdateStatus: (id: string, status: PaymentStatus) => void; onDelete: (id: string) => void }) {
   const isExpense = transaction.entryType === 'expense';
   const formatMoney = (amount: number) => new Intl.NumberFormat(displayLocale, { style: 'currency', currency }).format(amount);
-  return <article className="rounded-xl bg-slate-950/55 p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-200">{transaction.productName}</p><p className="mt-0.5 truncate text-[10px] text-slate-500">{isExpense ? (isSpanish ? 'Gasto operativo' : 'Despesa operacional') : transaction.leadName}</p></div><span className={`shrink-0 text-sm font-black ${isExpense ? 'text-rose-300' : 'text-emerald-300'}`}>{isExpense ? '-' : '+'}{formatMoney(transaction.amount)}</span></div><div className="mt-2 flex items-center justify-between gap-2"><span className="text-[10px] text-slate-500">{new Date(transaction.date).toLocaleDateString(displayLocale)} · {isExpense ? (isSpanish ? 'Gasto' : 'Despesa') : (isSpanish ? 'Ingreso' : 'Receita')}</span><select value={transaction.status} onChange={(event) => onUpdateStatus(transaction.id, event.target.value as PaymentStatus)} aria-label={`${isSpanish ? 'Estado de' : 'Status de'} ${transaction.productName}`} className={`rounded-full border bg-transparent px-2 py-1 text-[10px] font-bold outline-none ${statusStyle[transaction.status]}`}>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select></div><button type="button" onClick={() => onDelete(transaction.id)} className="mt-2 rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Eliminar registro' : 'Excluir lançamento'}><Trash2 className="h-3.5 w-3.5" /></button></article>;
+  return <article className="agenda-financeiro-workspace__transaction-card rounded-xl bg-slate-950/55 p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-200">{transaction.productName}</p><p className="mt-0.5 truncate text-[10px] text-slate-500">{isExpense ? (isSpanish ? 'Gasto operativo' : 'Despesa operacional') : transaction.leadName}</p></div><span className={`shrink-0 text-sm font-black ${isExpense ? 'text-rose-300' : 'text-emerald-300'}`}>{isExpense ? '-' : '+'}{formatMoney(transaction.amount)}</span></div><div className="mt-2 flex items-center justify-between gap-2"><span className="text-[10px] text-slate-500">{new Date(transaction.date).toLocaleDateString(displayLocale)} · {isExpense ? (isSpanish ? 'Gasto' : 'Despesa') : (isSpanish ? 'Ingreso' : 'Receita')}</span><select value={transaction.status} onChange={(event) => onUpdateStatus(transaction.id, event.target.value as PaymentStatus)} aria-label={`${isSpanish ? 'Estado de' : 'Status de'} ${transaction.productName}`} className={`rounded-full border bg-transparent px-2 py-1 text-[10px] font-bold outline-none ${statusStyle[transaction.status]}`}>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select></div><button type="button" onClick={() => onDelete(transaction.id)} className="mt-2 rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Eliminar registro' : 'Excluir lançamento'}><Trash2 className="h-3.5 w-3.5" /></button></article>;
 }
 
 function Metric({ icon, label, value, note, tone }: { icon: React.ReactNode; label: string; value: string; note: string; tone: 'emerald' | 'amber' | 'blue' | 'rose' }) {
   const tones = { emerald: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20', amber: 'bg-amber-400/10 text-amber-200 border-amber-400/20', blue: 'bg-sky-500/10 text-sky-200 border-sky-500/20', rose: 'bg-rose-500/10 text-rose-200 border-rose-500/20' };
-  return <article className="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-slate-400">{label}</span><span className={`rounded-lg border p-2 ${tones[tone]}`}>{icon}</span></div><p className="mt-4 text-2xl font-black tracking-tight text-white">{value}</p><p className="mt-1 text-[11px] text-slate-500">{note}</p></article>;
+  return <article className="agenda-financeiro-workspace__metric-card rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-slate-400">{label}</span><span className={`rounded-lg border p-2 ${tones[tone]}`}>{icon}</span></div><p className="mt-4 text-2xl font-black tracking-tight text-white">{value}</p><p className="mt-1 text-[11px] text-slate-500">{note}</p></article>;
 }
 
-function DialogShell({ title, description, children, onClose }: { title: string; description: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"><div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4"><div><h2 className="font-bold text-white">{title}</h2><p className="mt-1 text-xs leading-5 text-slate-400">{description}</p></div><button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button></div>{children}</div></div>;
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-xs font-semibold text-slate-300"><span className="mb-1.5 block">{label}</span>{children}</label>; }
-const inputClass = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition-colors placeholder:text-slate-600 focus:border-emerald-400';
-
-function AppointmentDialog({ dialog, leads, currency, isSpanish, onClose, onSubmit, submitting }: { dialog: AppointmentDialogState; leads: LeadInfo[]; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
+function AppointmentDialog({ dialog, leads, currency, isSpanish, onClose, onSubmit, submitting, catalogProducts = [] }: { dialog: AppointmentDialogState; leads: LeadInfo[]; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean; catalogProducts?: AgentProduct[] }) {
   const eventDate = dialog.event ? new Date(dialog.event.startIso) : dialog.initialDate ? new Date(`${dialog.initialDate}T12:00:00`) : new Date();
   const cleanSummary = dialog.event?.summary.replace(/^\[[^\]]+\]\s*/, '') || '';
-  return <DialogShell title={dialog.mode === 'new' ? (isSpanish ? 'Nuevo agendamiento' : 'Novo agendamento') : (isSpanish ? 'Editar agendamiento' : 'Editar agendamento')} description={isSpanish ? 'El servicio, la agenda y el cobro quedan vinculados en el mismo flujo.' : 'O serviço, a agenda e a cobrança ficam vinculados ao mesmo fluxo.'} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label={isSpanish ? 'Cliente del CRM' : 'Cliente do CRM'}><select name="clientId" defaultValue="" className={inputClass} disabled={dialog.mode === 'edit'}><option value="">{isSpanish ? 'Seleccionar cliente' : 'Selecionar cliente'}</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field><Field label={isSpanish ? 'Teléfono para cliente sin registro' : 'Telefone para cliente avulso'}><input name="clientPhone" disabled={dialog.mode === 'edit'} placeholder="Ej.: 595 981 123456" className={inputClass} /></Field></div><Field label={isSpanish ? 'Nombre de la clienta (opcional)' : 'Nome do cliente (opcional)'}><input name="clientName" placeholder={isSpanish ? 'Usado para identificar el registro sin cuenta' : 'Usado para identificar o cadastro avulso'} className={inputClass} disabled={dialog.mode === 'edit'} /></Field><Field label={isSpanish ? 'Servicio' : 'Serviço'}><input name="service" required defaultValue={cleanSummary} placeholder={isSpanish ? 'Ej.: Diseño de cejas' : 'Ex.: Design de sobrancelhas'} className={inputClass} /></Field><div className="grid grid-cols-2 gap-4"><Field label={isSpanish ? 'Fecha' : 'Data'}><input name="date" type="date" required defaultValue={dateInputValue(eventDate)} className={inputClass} /></Field><Field label={isSpanish ? 'Hora' : 'Hora'}><input name="time" type="time" required defaultValue={timeInputValue(eventDate)} className={inputClass} /></Field></div><div className="grid grid-cols-2 gap-4"><Field label={`${isSpanish ? 'Valor del cobro' : 'Valor da cobrança'} (${currency})`}><input name="amount" type="number" min="0" step="0.01" defaultValue={dialog.event?.payment?.amount ?? ''} disabled={dialog.mode === 'edit'} placeholder="0" className={inputClass} /></Field><Field label={isSpanish ? 'Origen' : 'Origem'}><select name="source" defaultValue="unknown" className={inputClass}><option value="unknown">{isSpanish ? 'Sin origen identificado' : 'Sem origem identificada'}</option><option value="ads">Ads</option><option value="referral">{isSpanish ? 'Recomendación' : 'Indicação'}</option><option value="organic">{isSpanish ? 'Orgánico' : 'Orgânico'}</option></select></Field></div><button type="submit" disabled={submitting} className="w-full rounded-xl bg-emerald-400 py-3 text-xs font-black text-slate-950 transition-opacity disabled:opacity-50">{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : dialog.mode === 'new' ? (isSpanish ? 'Crear agendamiento y cobro' : 'Criar agendamento e cobrança') : (isSpanish ? 'Guardar cambios' : 'Salvar alterações')}</button></form></DialogShell>;
-}
+  // TASK-0351 (pedido direto): "serviços poderia estar conectado ao
+  // catálogo para puxar o valor e tempo de duração" — escolher um item do
+  // catálogo aqui preenche Serviço/Valor/duração de uma vez, em vez de
+  // digitar tudo à mão. `bookable === false` marca item não-agendável por
+  // si só (ex: retoque) e `active === false` marca item pausado — nenhum
+  // dos dois deve aparecer aqui. Continua dando pra digitar um serviço
+  // fora do catálogo (campo de texto abaixo nunca trava).
+  const bookableProducts = useMemo(
+    () => catalogProducts.filter((product) => product.active !== false && product.bookable !== false),
+    [catalogProducts]
+  );
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [serviceText, setServiceText] = useState(cleanSummary);
+  const [amountText, setAmountText] = useState(String(dialog.event?.payment?.amount ?? ''));
+  const [durationMinutes, setDurationMinutes] = useState(60);
 
-function TransactionDialog({ kind, leads, currency, isSpanish, onClose, onSubmit, submitting }: { kind: 'income' | 'expense'; leads: LeadInfo[]; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
-  const isExpense = kind === 'expense';
-  const paymentLabel = (method: PaymentMethod) => isSpanish ? ({ 'Transferência Bancária': 'Transferencia bancaria', 'Cartão de Crédito': 'Tarjeta de crédito', 'Boleto Bancário': 'Boleta bancaria', 'Link WhatsApp': 'Enlace de WhatsApp', PIX: 'PIX' }[method] || method) : method;
-  return <DialogShell title={isExpense ? (isSpanish ? 'Registrar gasto' : 'Registrar despesa') : (isSpanish ? 'Registrar ingreso adicional' : 'Registrar receita avulsa')} description={isExpense ? (isSpanish ? 'Registrá una salida operativa que no provino de un agendamiento.' : 'Controle uma saída operacional que não veio de um agendamento.') : (isSpanish ? 'Registrá un ingreso externo sin duplicar los cobros de la agenda.' : 'Registre uma receita externa sem duplicar cobranças da agenda.')} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5">{!isExpense && <Field label={isSpanish ? 'Cliente del CRM' : 'Cliente do CRM'}><select name="clientId" defaultValue="" className={inputClass}><option value="">{isSpanish ? 'Cliente sin registro' : 'Cliente sem cadastro'}</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field>}<Field label={isSpanish ? 'Descripción' : 'Descrição'}><input name="description" required placeholder={isExpense ? (isSpanish ? 'Ej.: Compra de materiales' : 'Ex.: Compra de materiais') : (isSpanish ? 'Ej.: Venta presencial' : 'Ex.: Venda presencial')} className={inputClass} /></Field><div className="grid grid-cols-2 gap-4"><Field label={`${isSpanish ? 'Valor' : 'Valor'} (${currency})`}><input name="amount" type="number" min="0.01" step="0.01" required className={inputClass} /></Field><Field label={isSpanish ? 'Forma' : 'Forma'}><select name="paymentMethod" className={inputClass}>{PAYMENT_METHODS.map((method) => <option key={method}>{paymentLabel(method)}</option>)}</select></Field></div><Field label={isSpanish ? 'Estado' : 'Status'}><select name="status" defaultValue="pago" className={inputClass}><option value="pago">{isSpanish ? 'Cobrado / confirmado' : 'Pago / confirmado'}</option>{!isExpense && <option value="pendente">{isSpanish ? 'Pendiente' : 'Pendente'}</option>}</select></Field><button type="submit" disabled={submitting} className={`w-full rounded-xl py-3 text-xs font-black transition-opacity disabled:opacity-50 ${isExpense ? 'bg-rose-300 text-rose-950' : 'bg-emerald-400 text-slate-950'}`}>{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : isExpense ? (isSpanish ? 'Registrar gasto' : 'Registrar despesa') : (isSpanish ? 'Registrar ingreso' : 'Registrar receita')}</button></form></DialogShell>;
+  const handleSelectProduct = (productId: string) => {
+    setSelectedProductId(productId);
+    const product = bookableProducts.find((item) => item.id === productId);
+    if (!product) return;
+    setServiceText(product.name);
+    if (typeof product.priceAmount === 'number') setAmountText(String(product.priceAmount));
+    setDurationMinutes(product.durationMinutes && product.durationMinutes > 0 ? product.durationMinutes : 60);
+  };
+
+  return <DialogShell title={dialog.mode === 'new' ? (isSpanish ? 'Nuevo agendamiento' : 'Novo agendamento') : (isSpanish ? 'Editar agendamiento' : 'Editar agendamento')} description={isSpanish ? 'El servicio, la agenda y el cobro quedan vinculados en el mismo flujo.' : 'O serviço, a agenda e a cobrança ficam vinculados ao mesmo fluxo.'} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5">{dialog.mode === 'edit' && <p className="text-[10px] leading-relaxed text-slate-500">{isSpanish ? 'Un evento creado directamente en Google Calendar (fuera de WhatsApp) no aparece en la Ficha del contacto hasta vincularlo aquí a un cliente/teléfono — no crea otro evento ni duplica nada.' : 'Um evento criado direto no Google Calendar (fora do WhatsApp) não aparece na Ficha do contato até ser vinculado aqui a um cliente/telefone — não cria outro evento nem duplica nada.'}</p>}<div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label={dialog.mode === 'edit' ? (isSpanish ? 'Vincular a un cliente del CRM (opcional)' : 'Vincular a um cliente do CRM (opcional)') : (isSpanish ? 'Cliente del CRM' : 'Cliente do CRM')}><select name="clientId" defaultValue="" className={inputClass}><option value="">{isSpanish ? 'Seleccionar cliente' : 'Selecionar cliente'}</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field><Field label={dialog.mode === 'edit' ? (isSpanish ? 'O vincular por teléfono (opcional)' : 'Ou vincular por telefone (opcional)') : (isSpanish ? 'Teléfono para cliente sin registro' : 'Telefone para cliente avulso')}><input name="clientPhone" placeholder="Ej.: 595 981 123456" className={inputClass} /></Field></div><Field label={isSpanish ? 'Nombre de la clienta (opcional)' : 'Nome do cliente (opcional)'}><input name="clientName" placeholder={isSpanish ? 'Usado para identificar el registro sin cuenta' : 'Usado para identificar o cadastro avulso'} className={inputClass} /></Field>{bookableProducts.length > 0 && <Field label={isSpanish ? 'Servicio del catálogo (opcional)' : 'Serviço do catálogo (opcional)'}><select value={selectedProductId} onChange={(event) => handleSelectProduct(event.target.value)} className={inputClass}><option value="">{isSpanish ? 'Personalizado (escribir abajo)' : 'Personalizado (digitar abaixo)'}</option>{bookableProducts.map((product) => <option key={product.id} value={product.id}>{product.name}{typeof product.priceAmount === 'number' ? ` — ${product.priceAmount}` : ''}</option>)}</select></Field>}<Field label={isSpanish ? 'Servicio' : 'Serviço'}><input name="service" required value={serviceText} onChange={(event) => setServiceText(event.target.value)} placeholder={isSpanish ? 'Ej.: Diseño de cejas' : 'Ex.: Design de sobrancelhas'} className={inputClass} /></Field><input type="hidden" name="durationMinutes" value={durationMinutes} /><div className="grid grid-cols-2 gap-4"><Field label={isSpanish ? 'Fecha' : 'Data'}><input name="date" type="date" required defaultValue={dateInputValue(eventDate)} className={inputClass} /></Field><Field label={isSpanish ? 'Hora' : 'Hora'}><input name="time" type="time" required defaultValue={timeInputValue(eventDate)} className={inputClass} /></Field></div><div className="grid grid-cols-2 gap-4"><Field label={`${isSpanish ? 'Valor del cobro' : 'Valor da cobrança'} (${currency})`}><input name="amount" type="number" min="0" step="0.01" value={amountText} onChange={(event) => setAmountText(event.target.value)} disabled={dialog.mode === 'edit'} placeholder="0" className={inputClass} /></Field><Field label={isSpanish ? 'Origen' : 'Origem'}><select name="source" defaultValue="unknown" className={inputClass}><option value="unknown">{isSpanish ? 'Sin origen identificado' : 'Sem origem identificada'}</option><option value="ads">Ads</option><option value="referral">{isSpanish ? 'Recomendación' : 'Indicação'}</option><option value="organic">{isSpanish ? 'Orgánico' : 'Orgânico'}</option></select></Field></div><button type="submit" disabled={submitting} className="w-full rounded-xl bg-emerald-400 py-3 text-xs font-black text-slate-950 transition-opacity disabled:opacity-50">{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : dialog.mode === 'new' ? (isSpanish ? 'Crear agendamiento y cobro' : 'Criar agendamento e cobrança') : (isSpanish ? 'Guardar cambios' : 'Salvar alterações')}</button></form></DialogShell>;
 }
 
 function RecurringExpenseDialog({ currency, isSpanish, onClose, onSubmit, submitting }: { currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {

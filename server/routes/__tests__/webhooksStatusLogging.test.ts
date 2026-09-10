@@ -58,7 +58,13 @@ describe('POST /webhook — status de entrega (sent/delivered/read/failed) da Me
       });
       expect(res.status).toBe(200);
       expect(warnSpy).toHaveBeenCalled();
-      const loggedArgs = warnSpy.mock.calls.map((c) => c.join(' ')).join(' ');
+      // TASK-0201 — o log passou a mandar os dados variáveis como um objeto
+      // estruturado (2º argumento), não mais interpolados no template do
+      // 1º argumento (fix de log injection do CodeQL) — serializa cada
+      // argumento antes de juntar, senão um objeto vira "[object Object]".
+      const loggedArgs = warnSpy.mock.calls
+        .map((call) => call.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '))
+        .join(' ');
       expect(loggedArgs).toContain('wamid.TESTE123');
       expect(loggedArgs).toContain('failed');
     } finally {

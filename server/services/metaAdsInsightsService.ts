@@ -1,4 +1,5 @@
 import { getDb } from './db';
+import { decryptSecret, encryptSecret } from './tokenCrypto';
 
 const META_GRAPH_VERSION = 'v26.0';
 
@@ -293,7 +294,7 @@ async function getTenantMetaAdsCredentials(tenantId: string): Promise<MetaAdsCre
 
   const accessToken = data.meta_ads_access_token || data.capi_access_token;
   if (!accessToken) return null;
-  return { adAccountId: validAdAccountId(data.meta_ads_account_id), accessToken };
+  return { adAccountId: validAdAccountId(data.meta_ads_account_id), accessToken: decryptSecret(accessToken) };
 }
 
 /** Retorna somente o estado da conexão: o token nunca sai do servidor. */
@@ -341,8 +342,8 @@ export async function saveMetaAdsConnection(
   }
 
   const update: Record<string, string> = { tenant_id: tenantId, meta_ads_account_id: adAccountId };
-  if (accessToken) update.meta_ads_access_token = accessToken;
-  if (managementAccessToken) update.meta_ads_management_access_token = managementAccessToken;
+  if (accessToken) update.meta_ads_access_token = encryptSecret(accessToken);
+  if (managementAccessToken) update.meta_ads_management_access_token = encryptSecret(managementAccessToken);
 
   const { error } = await database
     .from('tenant_meta_credentials')
@@ -567,6 +568,107 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
     warnings,
     accountSummary,
   };
+}
+
+export interface AdWelcomeMessageMatch {
+  adId: string;
+  adName: string;
+  campaignName: string | null;
+  effectiveStatus: string | null;
+  /** Onde dentro do creative a busca encontrou o texto (ex: "object_story_spec.link_data.page_welcome_message") — ajuda a conferir manualmente se o palpite bateu certo. */
+  matchedPath: string;
+  /** Trecho bruto onde o texto foi encontrado (pode ser um JSON aninhado da Meta, não só a frase pura) — mostrado pro operador confirmar visualmente. */
+  matchedSnippet: string;
+}
+
+/**
+ * Varre recursivamente um valor (objeto/array/string) coletando todo par
+ * (caminho, texto) de string encontrado — usado pra procurar `query` dentro
+ * do creative de um anúncio sem depender de saber o caminho exato do campo
+ * (`page_welcome_message` costuma vir como uma STRING que por sua vez contém
+ * JSON aninhado com a estrutura do editor visual de saudação — variando
+ * conforme o anúncio foi criado pelo editor visual ou por template
+ * simplificado). Mais robusto que fixar um caminho só, ao custo de eventual
+ * falso positivo se a frase aparecer em outro campo do creative.
+ */
+function collectStringsWithPath(value: unknown, path: string, out: Array<{ path: string; text: string }>): void {
+  if (typeof value === 'string') {
+    out.push({ path, text: value });
+    // `page_welcome_message` costuma ser uma string que É um JSON por dentro
+    // (não um objeto aninhado real) — tenta decodificar mais um nível.
+    try {
+      const nested = JSON.parse(value);
+      if (nested && typeof nested === 'object') collectStringsWithPath(nested, `${path}(json)`, out);
+    } catch {
+      // não era JSON aninhado — já coletamos o texto puro acima, segue.
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectStringsWithPath(item, `${path}[${index}]`, out));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) collectStringsWithPath(item, path ? `${path}.${key}` : key, out);
+  }
+}
+
+interface GraphAdCreativeRow {
+  id?: string;
+  name?: string;
+  campaign?: { name?: string };
+  effective_status?: string;
+  creative?: { object_story_spec?: unknown; asset_feed_spec?: unknown };
+}
+
+/**
+ * TASK-0365 (pedido direto): dado um trecho de texto (a mensagem inicial que
+ * o cliente recebeu ao clicar num anúncio "Clique para WhatsApp"), procura
+ * entre os anúncios da conta conectada qual tem essa mensagem configurada —
+ * pra responder "de qual anúncio veio esse lead" quando a atribuição
+ * automática (ctwa_clid/ad_headline, ver TASK-0364) não foi capturada (leads
+ * anteriores à correção, ou algum caso em que a Evolution API não repassou o
+ * dado). Busca por substring case-insensitive dentro de QUALQUER string do
+ * creative do anúncio (object_story_spec e asset_feed_spec), não só no campo
+ * `page_welcome_message` documentado pela Meta — a API não garante 100% o
+ * mesmo formato pra todo tipo de anúncio (Advantage+, template simplificado
+ * vs. editor visual), e uma busca ampla é mais robusta que fixar um caminho
+ * só. Sempre retorna o trecho bruto onde bateu, pra conferência manual.
+ */
+export async function findAdsByWelcomeMessage(tenantId: string, query: string): Promise<AdWelcomeMessageMatch[]> {
+  const credentials = await getTenantMetaAdsCredentials(tenantId);
+  if (!credentials) {
+    throw new MetaAdsConfigurationError('A Central de Tráfego ainda não está conectada à conta Meta Ads deste negócio.');
+  }
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+
+  const adsResponse = await graphGet<{ data?: GraphAdCreativeRow[] }>(
+    `${credentials.adAccountId}/ads`,
+    { limit: '250', fields: 'id,name,effective_status,campaign{name},creative{object_story_spec,asset_feed_spec}' },
+    credentials.accessToken
+  );
+
+  const matches: AdWelcomeMessageMatch[] = [];
+  for (const ad of adsResponse.data || []) {
+    if (!ad.id || !ad.creative) continue;
+    const strings: Array<{ path: string; text: string }> = [];
+    collectStringsWithPath(ad.creative.object_story_spec, 'object_story_spec', strings);
+    collectStringsWithPath(ad.creative.asset_feed_spec, 'asset_feed_spec', strings);
+
+    const hit = strings.find(({ text }) => text.toLowerCase().includes(needle));
+    if (hit) {
+      matches.push({
+        adId: ad.id,
+        adName: ad.name || ad.id,
+        campaignName: ad.campaign?.name || null,
+        effectiveStatus: ad.effective_status || null,
+        matchedPath: hit.path,
+        matchedSnippet: hit.text.slice(0, 500),
+      });
+    }
+  }
+  return matches;
 }
 
 export function isTrafficDatePreset(value: unknown): value is TrafficDatePreset {

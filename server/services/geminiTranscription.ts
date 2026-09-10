@@ -1,5 +1,7 @@
 import type { GoogleGenAI } from '@google/genai';
 import { withGeminiRetry } from '../gemini';
+import { isAudioEffectivelySilent, stripDataUrlPrefix } from './audioTranscode';
+import { callGroqAudioTranscription, callGroqJsonCompletion, GROQ_SPECIALIST_MODEL, GROQ_SPECIALIST_TIMEOUT_MS } from './groqClient';
 
 export interface TranscriptionResult {
   transcription: string;
@@ -13,8 +15,13 @@ export interface TranscriptionResult {
 }
 
 export interface TranscribeAudioOutcome {
-  source: 'gemini' | 'fallback';
+  source: 'groq' | 'gemini' | 'fallback';
   result: TranscriptionResult;
+}
+
+/** `true` quando `source` veio de uma transcrição real (Groq ou Gemini), nunca do fallback simulado — usado nos 4 chamadores pra decidir se a análise pode disparar resposta automática/checar conteúdo real, em vez de repetir `source === 'gemini' || source === 'groq'` em cada um. */
+export function isRealTranscriptionSource(source: TranscribeAudioOutcome['source']): boolean {
+  return source === 'groq' || source === 'gemini';
 }
 
 /**
@@ -22,7 +29,123 @@ export interface TranscribeAudioOutcome {
  * caso o Gemini não esteja configurado ou a chamada falhe. Compartilhado
  * entre a rota HTTP /api/transcribe e o worker da fila de webhooks (server/services/transcriptionQueue.ts),
  * pra não duplicar o prompt em dois lugares.
+ *
+ * Achado real de auditoria (29/08/2026): um áudio enviado deliberadamente
+ * sem nenhuma fala (silêncio) voltou do Gemini com `source: 'gemini'`
+ * (chamada teve sucesso técnico) e uma transcrição completa e plausível de
+ * uma cliente perguntando preço/disponibilidade — 100% inventada, já que
+ * não havia fala nenhuma no áudio. Isso alimentou `generateAutoReplyForText`
+ * como se fosse a mensagem real da cliente (ver transcriptionQueue.ts), e
+ * só não chegou a enviar porque o revisor pré-envio bloqueou o rascunho
+ * gerado em cima dela. O guard de "sem fallback inventado" logo abaixo só
+ * cobre o caminho de FALHA da chamada (erro de rede/timeout) — nunca
+ * cobria o caso do Gemini "ter sucesso" alucinando conteúdo pra preencher
+ * um JSON obrigatório sem fala real por trás. Corrigido com regra explícita
+ * no prompt (retornar `transcription: ""` sem fala real) + gate em
+ * transcriptionQueue.ts que nunca dispara resposta automática nem some a
+ * mensagem — escala pra humano do mesmo jeito que uma falha técnica.
+ *
+ * Achado real seguinte (mesmo dia, áudio de 2s gravado pelo operador sem
+ * nenhuma fala): a regra de prompt acima sozinha NÃO bastou — o Gemini
+ * continuou inventando uma transcrição plausível mesmo com a instrução
+ * explícita. Instrução de prompt nunca é garantia (mesmo princípio de todo
+ * outro gate anti-alucinação deste projeto) — adicionado `isAudioEffectivelySilent`
+ * (audioTranscode.ts, mede silêncio real via ffmpeg) como barreira
+ * determinística ANTES de mandar qualquer áudio pro Gemini: se for
+ * silêncio de verdade, nem chama o modelo, fechando essa via de alucinação
+ * na raiz em vez de só pedir educadamente pra ele não inventar.
  */
+function noSpeechDetectedResult(): TranscriptionResult {
+  return {
+    transcription: '',
+    language: 'Desconhecido',
+    summary: 'Áudio sem fala inteligível detectada.',
+    intent: 'Desconhecido',
+    sentiment: 'Neutro',
+    keyPoints: [],
+    suggestedReply: '',
+    urgencyScore: 1,
+  };
+}
+
+/**
+ * Segunda chamada Groq (texto puro, não áudio) pra derivar o resto da
+ * análise a partir da transcrição literal já obtida via Whisper — o Whisper
+ * só transcreve, não analisa. Mesma REGRA CRÍTICA anti-alucinação do prompt
+ * do Gemini abaixo: nunca inventar intenção/sentimento/sugestão quando o
+ * texto em si já veio vazio (esse caso nem chega aqui, ver transcribeAudio).
+ */
+async function analyzeTranscribedTextViaGroq(apiKey: string, transcription: string, opts: { leadName?: string; customInstructions?: string }): Promise<TranscriptionResult> {
+  const prompt = `Você é um analista de áudios de atendimento para WhatsApp CRM. Uma transcrição literal de um áudio de cliente já foi feita abaixo (verbatim — não reescreva nem traduza). Analise-a e responda estritamente em formato JSON com a seguinte estrutura:
+{
+  "language": "idioma detectado na transcrição (ex: 'Español (Paraguay)', 'Português (Brasil)')",
+  "summary": "resumo de 1-2 frases do áudio, no mesmo idioma da transcrição",
+  "intent": "Intenção do cliente",
+  "sentiment": "Positivo" | "Neutro" | "Dúvida" | "Urgente" | "Objeção",
+  "keyPoints": ["ponto chave 1", "ponto chave 2"],
+  "suggestedReply": "sugestão de resposta amigável, no mesmo idioma da transcrição",
+  "urgencyScore": número de 1 a 5
+}
+${opts.customInstructions || ''}
+
+Transcrição literal do áudio: "${transcription}"`;
+
+  const { parsed } = await callGroqJsonCompletion(apiKey, prompt, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.5);
+  if (!parsed || typeof parsed.summary !== 'string' || !parsed.summary.trim()) {
+    throw new Error(`Groq retornou análise de transcrição sem "summary" válido: ${JSON.stringify(parsed)?.slice(0, 200)}`);
+  }
+
+  return {
+    transcription,
+    language: typeof parsed.language === 'string' && parsed.language.trim() ? parsed.language : 'Desconhecido',
+    summary: parsed.summary,
+    intent: typeof parsed.intent === 'string' ? parsed.intent : 'Desconhecido',
+    sentiment: typeof parsed.sentiment === 'string' ? parsed.sentiment : 'Neutro',
+    keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints.filter((p: unknown) => typeof p === 'string') : [],
+    suggestedReply: typeof parsed.suggestedReply === 'string' ? parsed.suggestedReply : '',
+    urgencyScore: typeof parsed.urgencyScore === 'number' ? parsed.urgencyScore : 1,
+  };
+}
+
+/**
+ * Transcreve e analisa um áudio via Groq/Whisper (transcrição real) +
+ * análise em texto via Groq (TASK-0352, mesmo incidente ativo — Gemini sem
+ * crédito), com fallback pro caminho 100% Gemini já existente
+ * (transcribeAudioWithGemini) em qualquer falha — rede, timeout, "text"
+ * ausente no Whisper, ou a segunda chamada de análise falhar (nunca deixa
+ * uma transcrição real "órfã" sem o resto dos campos: ou os dois passos do
+ * Groq funcionam, ou cai pro Gemini inteiro). A checagem de silêncio real
+ * (isAudioEffectivelySilent, ver audioTranscode.ts) roda ANTES de escolher
+ * qualquer provedor — Whisper é tão suscetível quanto o Gemini a "alucinar"
+ * uma transcrição plausível a partir de silêncio puro, então a mesma
+ * barreira determinística vale pros dois.
+ */
+export async function transcribeAudio(
+  ai: GoogleGenAI | null,
+  audioBase64: string | undefined,
+  mimeType: string | undefined,
+  opts: { leadName?: string; customInstructions?: string; groqApiKey?: string } = {}
+): Promise<TranscribeAudioOutcome> {
+  if (opts.groqApiKey && audioBase64) {
+    if (await isAudioEffectivelySilent(audioBase64, mimeType)) {
+      return { source: 'groq', result: noSpeechDetectedResult() };
+    }
+    try {
+      const audioBuffer = Buffer.from(stripDataUrlPrefix(audioBase64), 'base64');
+      const { text } = await callGroqAudioTranscription(opts.groqApiKey, audioBuffer, mimeType);
+      if (!text.trim()) {
+        return { source: 'groq', result: noSpeechDetectedResult() };
+      }
+      const result = await analyzeTranscribedTextViaGroq(opts.groqApiKey, text, opts);
+      return { source: 'groq', result };
+    } catch (groqError) {
+      console.warn('⚠️  [Transcrição] Groq falhou, caindo pro Gemini:', (groqError as Error)?.message || groqError);
+    }
+  }
+
+  return transcribeAudioWithGemini(ai, audioBase64, mimeType, opts);
+}
+
 export async function transcribeAudioWithGemini(
   ai: GoogleGenAI | null,
   audioBase64: string | undefined,
@@ -30,6 +153,9 @@ export async function transcribeAudioWithGemini(
   opts: { leadName?: string; customInstructions?: string } = {}
 ): Promise<TranscribeAudioOutcome> {
   if (ai && audioBase64) {
+    if (await isAudioEffectivelySilent(audioBase64, mimeType)) {
+      return { source: 'gemini', result: noSpeechDetectedResult() };
+    }
     try {
       const prompt = `Você é um transcritor e analista de áudios de atendimento para WhatsApp CRM.
 Processe o áudio fornecido e responda estritamente em formato JSON com a seguinte estrutura:
@@ -43,6 +169,8 @@ Processe o áudio fornecido e responda estritamente em formato JSON com a seguin
   "suggestedReply": "sugestão de resposta amigável, no mesmo idioma da transcrição",
   "urgencyScore": número de 1 a 5
 }
+
+REGRA CRÍTICA: se o áudio estiver em silêncio, só tiver ruído de fundo, música, ou qualquer trecho de fala for curto/abafado demais pra captar conteúdo real e específico, responda com "transcription": "" (string vazia) — nunca invente uma fala plausível que a pessoa não disse, mesmo que o áudio tenha duração normal (duração não é garantia de fala real dentro dele). Nesse caso preencha também "summary": "Áudio sem fala inteligível detectada.", "intent": "Desconhecido", "sentiment": "Neutro", "keyPoints": [], "suggestedReply": "", "urgencyScore": 1 — nunca alucine intenção, sentimento ou sugestão de resposta a partir de um áudio sem fala real.
 ${opts.customInstructions || ''}`;
 
       const cleanBase64 = audioBase64.replace(/^data:audio\/\w+;base64,/, '');

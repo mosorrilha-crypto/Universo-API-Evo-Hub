@@ -24,4 +24,31 @@ describe('parseEvolutionWebhookPayload — evolutionImage', () => {
     expect(msg.evolutionImage).toBe(true);
     expect(msg.metaImage).toBeUndefined();
   });
+
+  it('extrai a legenda quando a imagem chega com caption (achado real 28/08/2026)', () => {
+    const [msg] = parseEvolutionWebhookPayload({
+      event: 'messages.upsert',
+      instance: 'cliente-abc',
+      data: {
+        key: { id: 'wamid-img-2', remoteJid: '595991746577@s.whatsapp.net', fromMe: false },
+        pushName: 'Dra Lida Melgarejo',
+        message: { imageMessage: { caption: '1ª Corrida Elas em Movimento — 11/10/2026' } },
+      },
+    });
+    expect(msg.type).toBe('image');
+    expect(msg.caption).toBe('1ª Corrida Elas em Movimento — 11/10/2026');
+  });
+
+  it('não define caption quando a imagem chega sem legenda', () => {
+    const [msg] = parseEvolutionWebhookPayload({
+      event: 'messages.upsert',
+      instance: 'cliente-abc',
+      data: {
+        key: { id: 'wamid-img-3', remoteJid: '595991746577@s.whatsapp.net', fromMe: false },
+        pushName: 'Dra Lida Melgarejo',
+        message: { imageMessage: {} },
+      },
+    });
+    expect(msg.caption).toBeUndefined();
+  });
 });

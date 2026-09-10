@@ -69,7 +69,7 @@ async function alertTenant(row: TenantAlertRow, details: SystemErrorDetails): Pr
       templateArgs: [details.source, shortMessage],
       freeText: `⚠️ Erro real no sistema ${details.source}: ${shortMessage}. Confira os logs do servidor.`,
     });
-    console.log(`🔔 [Alerta de erro de sistema] tenant=${row.id} avisou ${adminPhone} — ${details.source}: ${details.message}`);
+    console.log('🔔 [Alerta de erro de sistema] avisado via WhatsApp', { tenantId: row.id, adminPhone, source: details.source, message: details.message });
   } catch (err) {
     console.warn(`⚠️  [Alerta de erro de sistema] tenant=${row.id} falha ao mandar WhatsApp:`, (err as Error).message);
   }

@@ -1,23 +1,43 @@
 /**
  * Base de conhecimento do agente (objetivo, tom de voz, regras de negócio,
  * catálogo de preços, FAQ) — usada como contexto real nos prompts do Gemini
- * pra resposta automática. Migrado pra tabela Postgres `knowledge_base`
- * (Bloco 2.A), 1 registro (jsonb) por tenant_id.
+ * pra resposta automática. Fonte única: os oito documentos tipados da tabela
+ * `knowledge_base_documents` (draft/publicação/RLS, ver mais abaixo).
  *
- * ISSUE-0096 — `getKnowledgeBase` mantém o acesso explícito ao blob de
- * rollback. O runtime do agente usa `getRuntimeKnowledgeBase`, que só aceita
- * a fonte tipada se os oito documentos publicados estiverem completos; em
- * qualquer lacuna, volta ao legado de modo rastreável para preservar serviço.
+ * TASK-0327 — a tabela legada `knowledge_base` (1 registro jsonb por tenant,
+ * ISSUE-0096) foi eliminada: nenhuma rota grava mais nela (o único caminho de
+ * escrita ainda vivo em produção, o upload de "Documentos Anexados", foi
+ * migrado pro Storage tipado — server/routes/conversations.ts) e a leitura
+ * dos 3 tenants reais já tinha publicação completa dos 8 tipos havia semanas.
+ * `getRuntimeKnowledgeBase` agora só devolve `published_documents` (completo)
+ * ou `unavailable` (lacuna/erro) — sem fallback silencioso pra um blob que
+ * ninguém mais escreve.
  */
 import { getDb, getPlatformDb } from './db';
+import { normalizeText } from './textNormalize';
 
-/** Comparação visual real de um procedimento, mantida inline como as fotos de exemplo da Base de Conhecimento. */
+/**
+ * Comparação visual real de um procedimento. TASK-0218 — a foto passou a
+ * viver no Storage (mesmo padrão já usado por vídeo, ver
+ * knowledgeBaseImageStore.ts): `beforeImageId`/`afterImageId` é a referência
+ * nova, `beforeImageBase64`/`afterImageBase64` continuam aceitos como
+ * fallback de leitura pra registro legado ainda não migrado (nunca
+ * produzidos por um upload novo) — ver resolveKnowledgeBaseImageSource.
+ */
 export interface BeforeAfterPair {
   id: string;
-  beforeImageBase64: string;
+  beforeImageId?: string;
   beforeImageMimeType?: string;
-  afterImageBase64: string;
+  beforeImageFileName?: string;
+  beforeImageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  beforeImageBase64?: string;
+  afterImageId?: string;
   afterImageMimeType?: string;
+  afterImageFileName?: string;
+  afterImageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  afterImageBase64?: string;
   caption?: string;
 }
 
@@ -34,9 +54,19 @@ export interface ProductVariant {
   code: string;
   /** Explicação comercial própria da variação (efeito, acabamento ou diferença), usada no catálogo público e no contexto do agente. */
   description?: string;
-  /** Foto exclusiva desta variação, usada quando a cliente escolhe um efeito/modelo específico. */
-  exampleImageBase64?: string;
+  /**
+   * Foto exclusiva desta variação, usada quando a cliente escolhe um
+   * efeito/modelo específico. TASK-0218 — `exampleImageId` é a referência no
+   * Storage (mesmo padrão de exampleVideoId abaixo); `exampleImageBase64`
+   * continua aceito só como fallback de leitura pra registro legado ainda
+   * não migrado.
+   */
+  exampleImageId?: string;
   exampleImageMimeType?: string;
+  exampleImageFileName?: string;
+  exampleImageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  exampleImageBase64?: string;
   /** Vídeo exclusivo desta variação, armazenado fora do JSON da Base de Conhecimento. */
   exampleVideoId?: string;
   exampleVideoMimeType?: string;
@@ -92,15 +122,27 @@ export interface AgentProduct {
    * de" ou "sob consulta").
    */
   variants?: ProductVariant[];
-  /** Foto de exemplo do serviço (data URI base64), pro operador/agente enviar quando o lead perguntar sobre esse serviço específico. */
-  exampleImageBase64?: string;
-  exampleImageMimeType?: string;
   /**
-   * Vídeo de exemplo do serviço — ao contrário da foto (inline base64
-   * acima), o binário fica no Storage (server/services/knowledgeBaseVideoStore.ts,
-   * bucket "app-data", prefixo kb-video/{tenantId}/{videoId}); aqui só a
-   * referência. Pedido real do dono do produto: vídeos geralmente de até
-   * ~1 minuto, ainda mais persuasivo que foto pra mostrar o procedimento.
+   * Foto de exemplo do serviço, pro operador/agente enviar quando o lead
+   * perguntar sobre esse serviço específico. TASK-0218 — o binário passou a
+   * viver no Storage (server/services/knowledgeBaseImageStore.ts, bucket
+   * "app-data", prefixo kb-image/{tenantId}/{imageId}), mesmo padrão do
+   * vídeo abaixo; `exampleImageId` é a referência nova, `exampleImageBase64`
+   * continua aceito só como fallback de leitura pra registro legado ainda
+   * não migrado (nunca produzido por upload novo).
+   */
+  exampleImageId?: string;
+  exampleImageMimeType?: string;
+  exampleImageFileName?: string;
+  exampleImageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  exampleImageBase64?: string;
+  /**
+   * Vídeo de exemplo do serviço — o binário fica no Storage
+   * (server/services/knowledgeBaseVideoStore.ts, bucket "app-data", prefixo
+   * kb-video/{tenantId}/{videoId}); aqui só a referência. Pedido real do
+   * dono do produto: vídeos geralmente de até ~1 minuto, ainda mais
+   * persuasivo que foto pra mostrar o procedimento.
    */
   exampleVideoId?: string;
   exampleVideoMimeType?: string;
@@ -211,9 +253,10 @@ export interface ProductNameMatch {
 
 /**
  * Acha um produto do catálogo pelo nome exato (comparação normalizada:
- * trim + minúsculas) — procura primeiro no nível do produto, depois dentro
- * de `variants` de cada família. Fonte única usada por toda checagem de
- * duração/bookable/preço/mídia por nome de serviço (ver
+ * acento/caixa/espaçamento via normalizeText, ver textNormalize.ts) —
+ * procura primeiro no nível do produto (nome oficial e `aliases`), depois
+ * dentro de `variants` de cada família. Fonte única usada por toda checagem
+ * de duração/bookable/preço/mídia por nome de serviço (ver
  * isNonBookableProduct/findProductDurationMinutes/resolveProductAmountByName
  * abaixo, e os pontos em conversations.ts/autoReply.ts que mandam foto,
  * vídeo, registram a transação financeira e disparam o Meta CAPI).
@@ -224,12 +267,25 @@ export interface ProductNameMatch {
  * cobrindo "Lash Lift", "Efecto Delineado" etc.) quebraria silenciosamente
  * duração de agendamento, valor do registro financeiro e envio de foto/vídeo
  * assim que um serviço deixasse de ser um produto de topo.
+ *
+ * TASK-0339: até aqui a comparação só tolerava trim+minúsculas — um nome com
+ * acento diferente do cadastro (ex: "pestanas" vs "Pestañas") ou um sinônimo
+ * comercial já cadastrado em `aliases` (usado noutros pontos do agente, ver
+ * agentContextPack.ts/inferServiceInterest) nunca batia aqui, mesmo a IA
+ * citando o produto certo com uma grafia levemente diferente. Adicionada
+ * tolerância a acento/espaçamento e checagem de `aliases` — deliberadamente
+ * SEM matching aproximado por distância de edição: esta função alimenta
+ * preço/duração/agendamento (dinheiro e Google Calendar reais), então um
+ * "quase igual" errado é pior que não achar nada e cair no fallback textual
+ * de "esse nome não bate com nenhum produto do catálogo" já tratado pelos
+ * chamadores.
  */
 export function findProductMatch(kb: AgentKnowledgeBase | null, productName: string): ProductNameMatch | undefined {
-  const normalized = productName.trim().toLowerCase();
+  const normalized = normalizeText(productName);
   for (const product of kb?.products || []) {
-    if (product.name.trim().toLowerCase() === normalized) return { product };
-    const variant = product.variants?.find((v) => v.code.trim().toLowerCase() === normalized);
+    if (normalizeText(product.name) === normalized) return { product };
+    if (product.aliases?.some((alias) => normalizeText(alias) === normalized)) return { product };
+    const variant = product.variants?.find((v) => normalizeText(v.code) === normalized);
     if (variant) return { product, variant };
   }
   return undefined;
@@ -271,31 +327,6 @@ export function resolveProductAmountByName(kb: AgentKnowledgeBase | null, produc
   return resolveProductPriceAmount(match.product, timezone);
 }
 
-/**
- * Todos os `videoId` (Storage, knowledgeBaseVideoStore.ts) referenciados
- * nesta KB — issue #261: usado pra só apagar um vídeo do Storage depois que
- * a troca foi salva de fato (POST /api/knowledge-base em conversations.ts),
- * nunca no momento do upload em si. Antes, trocar o vídeo de um produto/bloco
- * de 1º contato sem clicar em "Salvar Regras no Agente" (fechar a aba,
- * queda de conexão etc.) apagava o vídeo ANTIGO do Storage imediatamente no
- * upload, mesmo que a referência NOVA nunca chegasse a ser persistida —
- * deixando a KB salva com uma referência órfã, apontando pra um arquivo que
- * não existe mais.
- */
-export function collectReferencedVideoIds(kb: AgentKnowledgeBase | null): Set<string> {
-  const ids = new Set<string>();
-  for (const product of kb?.products || []) {
-    if (product.exampleVideoId) ids.add(product.exampleVideoId);
-    for (const variant of product.variants || []) {
-      if (variant.exampleVideoId) ids.add(variant.exampleVideoId);
-    }
-  }
-  for (const block of kb?.firstContactBlocks || []) {
-    if (block.videoId) ids.add(block.videoId);
-  }
-  return ids;
-}
-
 export type FirstContactBlockType = 'text' | 'image' | 'video' | 'file';
 
 /**
@@ -312,9 +343,13 @@ export interface FirstContactBlock {
   type: FirstContactBlockType;
   /** Só pra type === 'text'. */
   text?: string;
-  /** Só pra type === 'image' — inline (data URI base64), mesmo padrão de AgentProduct.exampleImageBase64. */
-  imageBase64?: string;
+  /** Só pra type === 'image' — TASK-0218: Storage (knowledgeBaseImageStore.ts), aqui só a referência, mesmo padrão de AgentProduct.exampleImageId. */
+  imageId?: string;
   imageMimeType?: string;
+  imageFileName?: string;
+  imageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  imageBase64?: string;
   /** Só pra type === 'video' — Storage (knowledgeBaseVideoStore.ts), aqui só a referência, mesmo padrão de AgentProduct.exampleVideoId. */
   videoId?: string;
   videoMimeType?: string;
@@ -373,6 +408,15 @@ export interface AgentKnowledgeBase {
    * que funciona sem precisar de coordenadas exatas.
    */
   locationMapsUrl?: string;
+  /**
+   * TASK-0286 (pedido direto): dados de pagamento (PIX/conta bancária) em
+   * texto livre — mensagem pronta que o OPERADOR manda manualmente pelo
+   * menu de anexos da conversa quando o cliente pede, mesmo padrão do
+   * `locationMapsUrl` acima. Deliberadamente NUNCA lido pelo agente
+   * automático (ver formatKnowledgeBaseForPrompt logo abaixo, que não
+   * inclui este campo) — dado financeiro sensível demais pra automação.
+   */
+  paymentDetailsText?: string;
   /** Sequência fixa de "1º contato" (texto/imagem/vídeo/arquivo, na ordem do array) — ver FirstContactBlock acima. Ausente/vazio = comportamento de sempre. */
   firstContactBlocks?: FirstContactBlock[];
 }
@@ -424,7 +468,7 @@ type KnowledgeBaseDocumentRow = {
 };
 
 const KNOWLEDGE_BASE_DOCUMENT_FIELDS: Record<KnowledgeBaseDocumentType, readonly (keyof AgentKnowledgeBase)[]> = {
-  business_profile: ['companyName', 'agentGoal', 'businessModel', 'locationMapsUrl'],
+  business_profile: ['companyName', 'agentGoal', 'businessModel', 'locationMapsUrl', 'paymentDetailsText'],
   brand_voice: ['toneOfVoice'],
   service_catalog: ['products'],
   pricing_policies: ['pricingAndPolicies', 'businessRules'],
@@ -600,25 +644,23 @@ export async function composePublishedKnowledgeBase(tenantId: string): Promise<A
   return composeKnowledgeBaseDocuments(await getPublishedKnowledgeBaseDocuments(tenantId));
 }
 
-export type RuntimeKnowledgeBaseSource = 'published_documents' | 'legacy_blob' | 'unavailable';
+export type RuntimeKnowledgeBaseSource = 'published_documents' | 'unavailable';
 
 export interface RuntimeKnowledgeBaseResult {
   knowledgeBase: AgentKnowledgeBase | null;
   source: RuntimeKnowledgeBaseSource;
   /** Motivo controlado, próprio para log; nunca contém conteúdo comercial ou do cliente. */
-  fallbackReason?: 'published_documents_incomplete' | 'published_documents_unavailable' | 'legacy_blob_unavailable';
+  fallbackReason?: 'published_documents_incomplete' | 'published_documents_unavailable';
 }
 
 /**
- * Fonte efetiva do agente após a PR4. Não fixa a KB por conversa: cada chamada
- * consulta novamente as versões publicadas. Rascunhos e históricos arquivados
- * ficam fora desta função por construção.
+ * Fonte efetiva do agente após a PR4/TASK-0327. Não fixa a KB por conversa:
+ * cada chamada consulta novamente as versões publicadas. Rascunhos e
+ * históricos arquivados ficam fora desta função por construção. Sem os oito
+ * tipos publicados, não há mais fallback (a tabela legada foi removida) —
+ * devolve `unavailable` de forma explícita/rastreável em vez de servir dado
+ * desatualizado silenciosamente.
  */
-async function getKnowledgeBaseFromDb(tenantId: string, db: ReturnType<typeof getDb>): Promise<AgentKnowledgeBase | null> {
-  const { data } = await db.from('knowledge_base').select('data').eq('tenant_id', tenantId).maybeSingle();
-  return (data?.data as AgentKnowledgeBase | undefined) || null;
-}
-
 async function getRuntimeKnowledgeBaseFromDb(
   tenantId: string,
   db: ReturnType<typeof getDb>,
@@ -630,19 +672,9 @@ async function getRuntimeKnowledgeBaseFromDb(
     if (hasCompletePublication) {
       return { knowledgeBase: composeKnowledgeBaseDocuments(publishedDocuments), source: 'published_documents' };
     }
-
-    const legacyKnowledgeBase = await getKnowledgeBaseFromDb(tenantId, db);
-    return legacyKnowledgeBase
-      ? { knowledgeBase: legacyKnowledgeBase, source: 'legacy_blob', fallbackReason: 'published_documents_incomplete' }
-      : { knowledgeBase: null, source: 'unavailable', fallbackReason: 'legacy_blob_unavailable' };
+    return { knowledgeBase: null, source: 'unavailable', fallbackReason: 'published_documents_incomplete' };
   } catch {
-    // A indisponibilidade de uma leitura nova não pode derrubar atendimento
-    // enquanto a base legada ainda existe. autoReply registra esta fonte em
-    // log estruturado para que a recuperação não fique silenciosa.
-    const legacyKnowledgeBase = await getKnowledgeBaseFromDb(tenantId, db).catch(() => null);
-    return legacyKnowledgeBase
-      ? { knowledgeBase: legacyKnowledgeBase, source: 'legacy_blob', fallbackReason: 'published_documents_unavailable' }
-      : { knowledgeBase: null, source: 'unavailable', fallbackReason: 'legacy_blob_unavailable' };
+    return { knowledgeBase: null, source: 'unavailable', fallbackReason: 'published_documents_unavailable' };
   }
 }
 
@@ -790,18 +822,6 @@ export async function listKnowledgeBaseDocumentEvents(tenantId: string, document
     .order('created_at', { ascending: false });
   if (error) throw error;
   return ((data || []) as KnowledgeBaseDocumentEventRow[]).map(normalizeKnowledgeBaseDocumentEvent);
-}
-
-export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {
-  return getKnowledgeBaseFromDb(tenantId, getDb());
-}
-
-export async function setKnowledgeBase(tenantId: string, kb: AgentKnowledgeBase): Promise<void> {
-  const db = getDb();
-  const { error } = await db
-    .from('knowledge_base')
-    .upsert({ tenant_id: tenantId, data: kb, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
-  if (error) throw error;
 }
 
 /**

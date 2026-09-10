@@ -1,4 +1,4 @@
-export type ActiveTab = 'home' | 'whatsapp' | 'crm' | 'agenda' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'catalog' | 'escalations' | 'quality' | 'system_logs';
+export type ActiveTab = 'whatsapp' | 'crm' | 'agenda' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'catalog' | 'escalations' | 'quality' | 'system_logs' | 'broadcast';
 
 export type UserRole = 'operator' | 'manager' | 'admin' | 'saas_admin';
 
@@ -45,6 +45,7 @@ export interface UserProfile {
   avatar: string;
   department: string;
   shift?: string;
+  isActive?: boolean;
 }
 
 export type CRMStage = 'novo' | 'contato' | 'proposta' | 'negociacao' | 'ganho' | 'perdido';
@@ -171,9 +172,19 @@ export interface LeadAttribution {
 /** Par comparativo real, sempre com foto anterior e posterior do mesmo procedimento. */
 export interface BeforeAfterPair {
   id: string;
-  beforeImageBase64: string;
+  /** Foto "antes" no Storage (server/services/knowledgeBaseImageStore.ts) — preferida sobre beforeImageBase64 quando presente. */
+  beforeImageId?: string;
+  beforeImageFileName?: string;
+  beforeImageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver beforeImageId. */
+  beforeImageBase64?: string;
   beforeImageMimeType?: string;
-  afterImageBase64: string;
+  /** Foto "depois" no Storage — preferida sobre afterImageBase64 quando presente. */
+  afterImageId?: string;
+  afterImageFileName?: string;
+  afterImageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver afterImageId. */
+  afterImageBase64?: string;
   afterImageMimeType?: string;
   /** Contexto opcional e não identificável do resultado, como técnica ou efeito. */
   caption?: string;
@@ -185,7 +196,11 @@ export interface ProductVariant {
   code: string;
   /** Explica o benefício, efeito ou diferença desta variação específica, sem repetir a descrição geral da família. */
   description?: string;
-  /** Foto exclusiva da variação, usada no catálogo e no envio manual quando o cliente pede exatamente este efeito/modelo. */
+  /** Foto exclusiva da variação, usada no catálogo e no envio manual quando o cliente pede exatamente este efeito/modelo. Storage (knowledgeBaseImageStore.ts) — preferida sobre exampleImageBase64 quando presente. */
+  exampleImageId?: string;
+  exampleImageFileName?: string;
+  exampleImageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver exampleImageId. */
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
   /** Vídeo exclusivo da variação; o binário permanece no Storage e a KB guarda somente a referência. */
@@ -222,15 +237,17 @@ export interface AgentProduct {
   category?: string;
   /** Tamanhos/modelos dessa família, cada um com preço próprio (ver server/services/knowledgeBaseStore.ts). */
   variants?: ProductVariant[];
+  /** Foto de exemplo no Storage (server/services/knowledgeBaseImageStore.ts) — preferida sobre exampleImageBase64 quando presente. */
+  exampleImageId?: string;
+  exampleImageFileName?: string;
+  exampleImageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver exampleImageId. Causou o incidente real de produção documentado em App.tsx (base64 de imagem estourando a cota de localStorage). */
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
   /**
-   * Vídeo de exemplo do serviço — diferente da foto (exampleImageBase64,
-   * guardada inline como base64), o vídeo fica no Storage do backend
+   * Vídeo de exemplo do serviço — o vídeo fica no Storage do backend
    * (server/services/knowledgeBaseVideoStore.ts) e aqui só guarda a
-   * referência (id opaco), pra nunca repetir o incidente real de produção
-   * documentado em App.tsx (base64 de imagem já estourou a cota de
-   * localStorage — vídeo inline seria dramaticamente pior).
+   * referência (id opaco).
    */
   exampleVideoId?: string;
   exampleVideoMimeType?: string;
@@ -267,6 +284,11 @@ export interface FirstContactBlock {
   id: string;
   type: FirstContactBlockType;
   text?: string;
+  /** Imagem do bloco no Storage (server/services/knowledgeBaseImageStore.ts) — preferida sobre imageBase64 quando presente. */
+  imageId?: string;
+  imageFileName?: string;
+  imageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver imageId. */
   imageBase64?: string;
   imageMimeType?: string;
   videoId?: string;
@@ -322,6 +344,13 @@ export interface AgentKnowledgeBase {
   documents: AgentFileDoc[];
   /** Link de localização (Google Maps) que o agente manda quando o cliente pede o endereço — ver server/services/knowledgeBaseStore.ts. */
   locationMapsUrl?: string;
+  /** TASK-0286 (pedido direto): dados de pagamento (PIX/conta bancária) em
+      texto livre, mandado MANUALMENTE pelo operador quando o cliente pede —
+      mesmo padrão do `locationMapsUrl` (mensagem pronta, nunca inventada;
+      só aparece no menu de anexos da conversa quando o tenant configura).
+      Nunca usado pela IA/agente automático — dado financeiro sensível
+      demais pra automação, decisão deliberada. */
+  paymentDetailsText?: string;
   firstContactBlocks?: FirstContactBlock[];
   lastSaved?: string;
 }
@@ -346,6 +375,8 @@ export interface ChatMessage {
   mimeType?: string;
   fileName?: string;
   timestamp: string;
+  /** TASK-0281 — timestamp ISO cru (com data completa), só pra mensagens reais de WhatsApp — `timestamp` acima já vem formatado só como "HH:MM" pra exibição, e usar ele pra decidir separador de dia faz qualquer mensagem antiga (de dias atrás) parecer "de hoje" (ver src/lib/chatDate.ts). `undefined` pras mensagens de demonstração/mock, que continuam usando o fallback "sempre hoje" de propósito. */
+  rawTimestamp?: string;
   /** true quando o envio real via Meta Cloud API falhou — a mensagem ficou só local, o cliente nunca recebeu. */
   sendFailed?: boolean;
   /** id de outra mensagem desta conversa que esta responde (quote) — quando a mensagem citada tem id real de provedor, também chega no WhatsApp real do cliente (ver server/services/conversationStore.ts). */
@@ -353,8 +384,10 @@ export interface ChatMessage {
   /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
   forwardedFromMessageId?: string;
   reactions?: MessageReaction[];
-  /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel. */
-  sentBy?: 'ai' | 'operator';
+  /** Só presente quando sender='agent' — distingue resposta automática da IA, mensagem digitada manualmente por um operador no painel, ou envio automático de campanha de disparo em massa. */
+  sentBy?: 'ai' | 'operator' | 'campaign';
+  /** TASK-0370 — nome do operador que digitou (snapshot no momento do envio). Só presente quando `sentBy === 'operator'`; `undefined` em mensagens antigas ou quando o painel ainda não sabe identificar quem escreveu. */
+  operatorName?: string;
 }
 
 export interface ExtractedCRMData {
@@ -429,7 +462,41 @@ export interface ContactAgentContext {
     needsHumanConfirmation: boolean;
     outcome: string | null;
   } | null;
+  serviceWindow?: {
+    withinWindow: boolean;
+    hoursRemaining: number;
+    lastLeadMessageAt: string | null;
+    windowExpiresAt: string | null;
+  } | null;
 }
+
+/**
+ * Item da jornada do contato (GET /api/conversations/:phone/journey) — log
+ * append-only mesclando agendamentos e mudanças de estágio do CRM, mais
+ * recente primeiro. Sem backfill: só eventos gravados a partir do deploy da
+ * TASK que criou essa rota em diante (ver server/services/contactJourneyStore.ts).
+ */
+export type ContactJourneyEvent =
+  | {
+      kind: 'appointment';
+      id: string;
+      eventType: 'created' | 'rescheduled' | 'cancelled' | 'completed' | 'no_show' | 'payment_verified';
+      serviceSummary?: string;
+      scheduledStart?: string;
+      scheduledEnd?: string;
+      paymentStatus?: string;
+      eventId?: string;
+      actor: 'ai' | 'operator' | 'system';
+      createdAt: string;
+    }
+  | {
+      kind: 'stage_change';
+      id: string;
+      fromStage?: string;
+      toStage: string;
+      changedBy?: string;
+      createdAt: string;
+    };
 
 export interface LeadInfo {
   id: string;
@@ -478,6 +545,10 @@ export interface LeadInfo {
   /** true = existe conversa real de WhatsApp pra esse telefone (ver GET /api/crm/leads) — false quando o lead foi cadastrado manualmente no CRM e ainda não trocou mensagem nenhuma. */
   hasConversation?: boolean;
   email?: string;
+  /** TASK-0243 — timestamp da última mensagem do LEAD (não da conversa em geral) — usado pra filtrar "dentro/fora da janela de 24h da Meta" na lista, sem abrir cada conversa. `undefined` = lead nunca escreveu. */
+  lastLeadMessageAt?: string;
+  /** Número do tenant que esta conversa usa — presente só em conversas do canal Meta Cloud API (nunca em Evolution/Instagram, ver server/services/conversationStore.ts). A restrição de janela de 24h/template só existe pra esse canal. */
+  phoneNumberId?: string | null;
 }
 
 export interface TranscriptionResult {

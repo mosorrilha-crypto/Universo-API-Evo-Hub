@@ -10,8 +10,20 @@ import { randomUUID } from 'crypto';
 type Row = Record<string, any>;
 type Tables = Record<string, Row[]>;
 
+/**
+ * `ilike` real do Postgres: `%` é curinga (qualquer sequência, inclusive
+ * vazia), case-insensitive, sem `%` vira match exato — mesmo comportamento
+ * usado pelos 2 casos reais já existentes (login por e-mail, match exato) e
+ * o novo caso de busca parcial (createContactListFromSegment,
+ * TASK-0366 — filtro de interesse por termo livre, ex.: `%micro%`).
+ */
+function matchesIlikePattern(value: string, pattern: string): boolean {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
+  return new RegExp(`^${escaped}$`, 'i').test(value);
+}
+
 class FakeQueryBuilder {
-  private filters: Array<['eq' | 'ilike' | 'gte' | 'lt' | 'in', string, any]> = [];
+  private filters: Array<['eq' | 'ilike' | 'gte' | 'lt' | 'lte' | 'in', string, any]> = [];
   private wantSelect = false;
   private maximumRows: number | null = null;
 
@@ -45,6 +57,12 @@ class FakeQueryBuilder {
     return this;
   }
 
+  /** Comparação simples (string/número) — suficiente pra filtro "na hora marcada ou antes" por scheduled_at ISO. */
+  lte(column: string, value: any) {
+    this.filters.push(['lte', column, value]);
+    return this;
+  }
+
   in(column: string, values: any[]) {
     this.filters.push(['in', column, values]);
     return this;
@@ -66,9 +84,10 @@ class FakeQueryBuilder {
 
   private matches(row: Row): boolean {
     return this.filters.every(([kind, column, value]) => {
-      if (kind === 'ilike') return String(row[column] ?? '').toLowerCase() === String(value ?? '').toLowerCase();
+      if (kind === 'ilike') return matchesIlikePattern(String(row[column] ?? ''), String(value ?? ''));
       if (kind === 'gte') return row[column] >= value;
       if (kind === 'lt') return row[column] < value;
+      if (kind === 'lte') return row[column] <= value;
       if (kind === 'in') return (value as any[]).includes(row[column]);
       return row[column] === value;
     });
@@ -133,6 +152,7 @@ function buildConversationListSummaries(tables: Tables): Row[] {
       .filter((message) => message.tenant_id === conversation.tenant_id && message.conversation_id === conversation.id)
       .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(b.id).localeCompare(String(a.id)));
     const last = conversationMessages[0];
+    const lastLeadMessage = conversationMessages.find((message) => message.sender === 'lead');
     const unreadCount = conversationMessages.filter((message) =>
       message.sender === 'lead' && String(message.created_at) > String(conversation.last_read_at || '')
     ).length;
@@ -148,6 +168,7 @@ function buildConversationListSummaries(tables: Tables): Row[] {
       last_message_reactions: last?.reactions || null,
       last_message_sent_by: last?.sent_by || null,
       unread_count: unreadCount,
+      last_lead_message_at: lastLeadMessage?.created_at || null,
     };
   });
 }

@@ -27,7 +27,7 @@ const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: st
     ? { base64: 'b2dnLW9wdXMtY29udmVydGlkbw==', mimeType: 'audio/ogg; codecs=opus' }
     : { base64: 'bXAzLWNvbnZlcnRpZG8=', mimeType: 'audio/mpeg' }
 ));
-const transcribeAudioWithGemini = vi.fn();
+const transcribeAudio = vi.fn();
 
 vi.mock('../../services/metaSend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/metaSend')>();
@@ -35,7 +35,7 @@ vi.mock('../../services/metaSend', async (importOriginal) => {
 });
 vi.mock('../../services/mediaImageStore', () => ({ getMediaImage: vi.fn(), saveMediaImage }));
 vi.mock('../../services/audioTranscode', () => ({ transcodeToWhatsAppVoiceNote }));
-vi.mock('../../services/geminiTranscription', () => ({ transcribeAudioWithGemini }));
+vi.mock('../../services/geminiTranscription', () => ({ transcribeAudio, isRealTranscriptionSource: (s: string) => s === 'groq' || s === 'gemini' }));
 
 const { createConversationsRouter } = await import('../conversations');
 
@@ -80,7 +80,7 @@ beforeEach(() => {
   sendWhatsAppAudioMessage.mockClear();
   saveMediaImage.mockClear();
   transcodeToWhatsAppVoiceNote.mockClear();
-  transcribeAudioWithGemini.mockReset();
+  transcribeAudio.mockReset();
   supabase = createFakeSupabase({
     conversations: [{ id: 'conv-1', tenant_id: TENANT_A, phone: '595981111111', name: 'Cliente A', updated_at: new Date().toISOString(), geo_restriction: null }],
   });
@@ -97,12 +97,12 @@ async function sendAudio() {
 
 describe('POST /api/conversations/:phone/send-media — transcreve áudio enviado pelo operador', () => {
   it('grava a transcrição real no lugar do placeholder quando o Gemini responde com sucesso', async () => {
-    transcribeAudioWithGemini.mockResolvedValue({ source: 'gemini', result: { transcription: 'Oi, seu horário ficou confirmado pra amanhã às 15h.' } });
+    transcribeAudio.mockResolvedValue({ source: 'gemini', result: { transcription: 'Oi, seu horário ficou confirmado pra amanhã às 15h.' } });
 
     const res = await sendAudio();
     expect(res.status).toBe(200);
 
-    expect(transcribeAudioWithGemini).toHaveBeenCalledWith(
+    expect(transcribeAudio).toHaveBeenCalledWith(
       null,
       'b2dnLW9wdXMtY29udmVydGlkbw==',
       'audio/ogg; codecs=opus',
@@ -115,8 +115,19 @@ describe('POST /api/conversations/:phone/send-media — transcreve áudio enviad
     expect(savedMessage.text).not.toBe('🎤 Áudio enviado');
   });
 
+  it('achado real (29/08/2026): grava um texto legível, nunca a string vazia, quando não há fala real detectada (source "gemini" com transcription "")', async () => {
+    transcribeAudio.mockResolvedValue({ source: 'gemini', result: { transcription: '' } });
+
+    const res = await sendAudio();
+    expect(res.status).toBe(200);
+
+    const savedMessage = supabase.__tables.messages.find((m: any) => m.type === 'audio');
+    expect(savedMessage.text).toBe('[Áudio sem fala detectável]');
+    expect(savedMessage.text).not.toBe('');
+  });
+
   it('grava o mesmo texto de fallback do lado de entrada quando o Gemini falha/está indisponível', async () => {
-    transcribeAudioWithGemini.mockResolvedValue({ source: 'fallback', result: { transcription: '[Não foi possível transcrever o áudio no momento]' } });
+    transcribeAudio.mockResolvedValue({ source: 'fallback', result: { transcription: '[Não foi possível transcrever o áudio no momento]' } });
 
     const res = await sendAudio();
     expect(res.status).toBe(200);
@@ -126,7 +137,7 @@ describe('POST /api/conversations/:phone/send-media — transcreve áudio enviad
   });
 
   it('o envio continua respondendo 200 mesmo se a chamada de transcrição lançar uma exceção', async () => {
-    transcribeAudioWithGemini.mockRejectedValue(new Error('Gemini timeout'));
+    transcribeAudio.mockRejectedValue(new Error('Gemini timeout'));
 
     const res = await sendAudio();
     expect(res.status).toBe(200);
@@ -146,6 +157,6 @@ describe('POST /api/conversations/:phone/send-media — transcreve áudio enviad
       body: JSON.stringify({ base64: 'aW1hZ2VtLWZha2U=', mimeType: 'image/jpeg', filename: 'foto.jpg' }),
     });
     expect(res.status).toBe(200);
-    expect(transcribeAudioWithGemini).not.toHaveBeenCalled();
+    expect(transcribeAudio).not.toHaveBeenCalled();
   });
 });

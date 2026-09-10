@@ -13,6 +13,7 @@
 import type { AgentKnowledgeBase, FirstContactBlock } from './knowledgeBaseStore';
 import type { MediaSendConfig } from './autoReply';
 import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
+import { resolveKnowledgeBaseImageBinary } from './knowledgeBaseImageStore';
 import { getKnowledgeBaseDocument } from './knowledgeBaseDocumentStore';
 import { sendWhatsAppTextMessage, sendWhatsAppMediaMessage, uploadWhatsAppMedia } from './metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage } from './evolutionSend';
@@ -34,7 +35,7 @@ function blockHasContent(block: FirstContactBlock): boolean {
     case 'text':
       return !!block.text?.trim();
     case 'image':
-      return !!block.imageBase64;
+      return !!block.imageId || !!block.imageBase64;
     case 'video':
       return !!block.videoId;
     case 'file':
@@ -65,17 +66,33 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
   }
 
   if (block.type === 'image') {
-    if (!block.imageBase64) return;
-    const mimeType = block.imageMimeType || 'image/jpeg';
-    const cleanBase64 = block.imageBase64.replace(/^data:[^;]+;base64,/, '');
+    if (!block.imageId && !block.imageBase64) return;
+    // TASK-0218: resolve o binário via Storage (imageId) com fallback pro
+    // Base64 legado inline — mesmo contrato usado em runMidiaTool.
+    const resolvedImage = await resolveKnowledgeBaseImageBinary(
+      mediaConfig.supabaseUrl,
+      mediaConfig.supabaseKey,
+      tenantId,
+      block.imageId,
+      block.imageMimeType,
+      block.imageBase64,
+      'firstContactMessage:image'
+    );
+    if (!resolvedImage) {
+      console.warn(`⚠️  [Primeiro Contato] tenant=${tenantId} imagem configurada (${block.imageId}) não encontrada no Storage.`);
+      return;
+    }
+    const mimeType = resolvedImage.mimeType;
+    const imageBase64 = resolvedImage.buffer.toString('base64');
     if (isEvolution) {
-      await sendEvolutionMediaMessage(mediaConfig.evolutionInstanceName, mediaConfig.evolutionApiUrl, mediaConfig.evolutionApiKey, phone, cleanBase64, mimeType, 'primeiro-contato.jpg');
+      await sendEvolutionMediaMessage(mediaConfig.evolutionInstanceName, mediaConfig.evolutionApiUrl, mediaConfig.evolutionApiKey, phone, imageBase64, mimeType, 'primeiro-contato.jpg');
     } else {
-      const buffer = Buffer.from(cleanBase64, 'base64');
-      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, buffer, mimeType, 'primeiro-contato.jpg');
+      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, resolvedImage.buffer, mimeType, 'primeiro-contato.jpg');
       await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType);
     }
-    await recordOutgoingMessage(tenantId, phone, { type: 'image', text: '📷 Mensagem de primeiro contato', timestamp: nowTimestamp() }, 'ai');
+    const messageId = newMessageId();
+    await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, messageId, imageBase64, mimeType);
+    await recordOutgoingMessage(tenantId, phone, { type: 'image', text: '📷 Mensagem de primeiro contato', timestamp: nowTimestamp() }, 'ai', undefined, undefined, messageId);
     console.log(`🤖 [Primeiro Contato] tenant=${tenantId} bloco imagem enviado pra ${phone}.`);
     return;
   }

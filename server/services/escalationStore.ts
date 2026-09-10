@@ -163,6 +163,28 @@ export function reviewerEscalationSourceKey(phone: string): string {
   return `revisor-pre-envio:${phone}`;
 }
 
+/**
+ * Fonte estável pra escalonamentos de "cliente tentando fechar agendamento
+ * precisa de confirmação humana" (webhooks.ts, transcriptionQueue.ts) — sem
+ * isso, o sourceKey default cai em defaultSourceKey acima, que inclui um
+ * hash da ÚLTIMA MENSAGEM no cálculo. Achado real de produção (05/09/2026,
+ * TASK-0314, print real do dono do produto: "por que estamos tendo tantos
+ * escalonamentos como este de agenda?"): uma mesma cliente respondendo em
+ * sequência dentro do MESMO fluxo de fechamento incompleto (ex: "quiero
+ * agendar entonces" seguido, 1min30s depois, de "el próximo martes...")
+ * gerava um card NOVO a cada mensagem — cada uma tinha um texto diferente,
+ * logo um hash/sourceKey diferente — em vez de reabrir/atualizar o mesmo
+ * atendimento pendente. Usar telefone como única chave (mesmo padrão de
+ * reviewerEscalationSourceKey acima) faz `logEscalation` reaproveitar o
+ * mesmo card enquanto a cliente ainda fornece dados, incrementando
+ * occurrence_count e atualizando reason/last_message — sem perder o alerta
+ * de reabertura quando o caso já tinha sido resolvido antes (`wasResolved`
+ * em logEscalation continua dispatchando nesse caso).
+ */
+export function bookingConfirmationEscalationSourceKey(phone: string): string {
+  return `agendamento-confirmacao:${phone}`;
+}
+
 function defaultPriority(kind: EscalationKind, reason: string): EscalationPriority {
   const text = normalizeForKey(reason);
   if (kind === 'payment_proof' || /reclamacao|reclamação|fraude|bloquead/.test(text)) return 'high';
@@ -447,6 +469,21 @@ export async function deleteEscalation(tenantId: string, id: string, actor?: Esc
   await appendAuditEvent(tenantId, id, 'archived', {}, actor);
   recordEscalationOperation(tenantId, escalation, 'escalation_archived');
   return true;
+}
+
+/**
+ * Apaga o escalonamento e seu histórico de auditoria de vez — diferente de
+ * `deleteEscalation` (que arquiva). Só pra saas_admin (checado na rota),
+ * pensado pra tirar da fila real casos de teste do próprio time que não
+ * têm valor de auditoria (ex: um número pessoal usado pra testar o agente).
+ */
+export async function permanentlyDeleteEscalation(tenantId: string, id: string): Promise<boolean> {
+  const db = getDb();
+  const { error: auditError } = await db.from('escalation_audit_events').delete().eq('tenant_id', tenantId).eq('escalation_id', id);
+  if (auditError) throw auditError;
+  const { data, error } = await db.from('escalations').delete().eq('tenant_id', tenantId).eq('id', id).select('id');
+  if (error) throw error;
+  return Boolean(data?.length);
 }
 
 /** Traz de volta um caso arquivado — reabre como pendente pra reaparecer na fila normal. */

@@ -35,7 +35,7 @@ function startServer(role: string) {
   app.use(
     createAdminRouter({
       authenticateToken: makeAuth(role) as any,
-      supabase: supabase as any,
+      supabase: supabase as any, jwtSecret: 'test-secret', isProduction: false,
       publicBaseUrl: 'https://universo.example.com',
     })
   );
@@ -74,27 +74,47 @@ function completePublishedDocuments(tenantId: string) {
   }));
 }
 
+// TASK-0327 — o blob legado `knowledge_base` foi eliminado; a fonte real
+// (e a única que este endpoint lê, via getRuntimeKnowledgeBaseForPlatform)
+// são os 8 documentos tipados publicados.
+function originTenantPublishedDocuments() {
+  const documentTypes = [
+    'business_profile', 'brand_voice', 'service_catalog', 'pricing_policies',
+    'opening_hours', 'faq', 'human_handoff_rules', 'media_assets',
+  ];
+  return documentTypes.map((documentType) => ({
+    id: `${SOURCE_TENANT_ID}-${documentType}`,
+    tenant_id: SOURCE_TENANT_ID,
+    document_type: documentType,
+    version: 1,
+    status: 'published',
+    data: documentType === 'business_profile'
+      ? { companyName: 'Empresa Origem' }
+      : documentType === 'service_catalog'
+        ? { products: [{ id: 'p1', name: 'Serviço X', price: 'Gs 100.000', description: 'desc', exampleImageBase64: 'data:image/jpeg;base64,QQ==', exampleVideoId: 'video-storage-origem' }] }
+        : documentType === 'pricing_policies'
+          ? { businessRules: ['Regra 1'] }
+          : documentType === 'media_assets'
+            ? {
+                firstContactBlocks: [
+                  { id: 'b1', type: 'text', text: 'Olá!' },
+                  { id: 'b2', type: 'image', imageBase64: 'data:image/jpeg;base64,QQ==' },
+                  { id: 'b3', type: 'video', videoId: 'video-storage-origem' },
+                  { id: 'b4', type: 'file', fileId: 'file-storage-origem' },
+                ],
+              }
+            : {},
+    created_at: '2026-08-27T00:00:00.000Z',
+    updated_at: '2026-08-27T00:00:00.000Z',
+    published_at: '2026-08-27T00:00:00.000Z',
+  }));
+}
+
 beforeEach(() => {
   supabase = createFakeSupabase({
     tenants: [
       { id: SOURCE_TENANT_ID, slug: 'origem', name: 'Empresa Origem' },
       { id: OTHER_TENANT_ID, slug: 'sem-kb', name: 'Empresa Sem KB' },
-    ],
-    knowledge_base: [
-      {
-        tenant_id: SOURCE_TENANT_ID,
-        data: {
-          companyName: 'Empresa Origem',
-          products: [{ id: 'p1', name: 'Serviço X', price: 'Gs 100.000', description: 'desc', exampleImageBase64: 'data:image/jpeg;base64,QQ==', exampleVideoId: 'video-storage-origem' }],
-          businessRules: ['Regra 1'],
-          firstContactBlocks: [
-            { id: 'b1', type: 'text', text: 'Olá!' },
-            { id: 'b2', type: 'image', imageBase64: 'data:image/jpeg;base64,QQ==' },
-            { id: 'b3', type: 'video', videoId: 'video-storage-origem' },
-            { id: 'b4', type: 'file', fileId: 'file-storage-origem' },
-          ],
-        },
-      },
     ],
   });
   initDb(supabase as any);
@@ -106,6 +126,7 @@ afterEach(async () => {
 
 describe('GET /api/admin/tenants/:id/knowledge-base', () => {
   it('devolve a base do tenant de origem sem as referências de Storage (vídeo/arquivo de 1º contato, exampleVideoId de produto)', async () => {
+    supabase.__tables.knowledge_base_documents = originTenantPublishedDocuments();
     ({ server, baseUrl } = await startServer('saas_admin'));
 
     const res = await fetch(`${baseUrl}/api/admin/tenants/${SOURCE_TENANT_ID}/knowledge-base`);

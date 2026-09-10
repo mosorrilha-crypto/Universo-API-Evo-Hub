@@ -72,10 +72,17 @@ describe('recordCatalogWhatsappClick + matchCatalogClickCode', () => {
     expect(await matchCatalogClickCode(TENANT_B, click.message)).toBeUndefined();
   });
 
-  it('grava a origem do clique (legacy/novo) quando informada — usado pra comparar as duas páginas de catálogo', async () => {
+  it('grava a origem do clique (legacy/novo/direct) quando informada — usado pra comparar as páginas/CTAs de catálogo', async () => {
     await recordCatalogWhatsappClick(TENANT_A, 'Hola', undefined, 'novo');
     const { getDb } = await import('../db');
     const { data } = await getDb().from('public_catalog_whatsapp_clicks').select('*').eq('tenant_id', TENANT_A);
     expect(data?.[0]?.source).toBe('novo');
+  });
+
+  it('grava origem "direct" — botão de WhatsApp direto na primeira dobra do Beauty Concierge (TASK-0125)', async () => {
+    await recordCatalogWhatsappClick(TENANT_A, 'Hola Monique, vi tu catálogo', undefined, 'direct');
+    const { getDb } = await import('../db');
+    const { data } = await getDb().from('public_catalog_whatsapp_clicks').select('*').eq('tenant_id', TENANT_A);
+    expect(data?.[0]?.source).toBe('direct');
   });
 });

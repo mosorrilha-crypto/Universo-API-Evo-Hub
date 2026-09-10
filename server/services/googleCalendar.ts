@@ -14,6 +14,7 @@ import jwt from 'jsonwebtoken';
 import { getDb, getPlatformDb } from './db';
 import { getTenantBusinessHours, type BusinessHours } from './tenantProfileStore';
 import { withStructuredLog } from './structuredLog';
+import { decryptSecret, encryptSecret } from './tokenCrypto';
 
 // Evita importar o tipo OAuth2Client de 'google-auth-library' diretamente —
 // o pacote 'googleapis' reexporta uma cópia própria (via googleapis-common)
@@ -22,7 +23,20 @@ import { withStructuredLog } from './structuredLog';
 // google.calendar({auth}) espera, não importa qual cópia é resolvida.
 type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
 
-const SCOPES = ['https://www.googleapis.com/auth/calendar'];
+// TASK-0185 — o escopo de Sheets foi somado ao de Calendar (mesmo app OAuth,
+// mesmo token por tenant em tenant_calendar_tokens) pra alimentar o backup em
+// Google Sheets (googleSheetsSync.ts) sem pedir uma segunda conexão Google
+// separada. Um tenant que já conectou o Calendar ANTES desta mudança só ganha
+// o escopo novo ao reconectar (o botão "Conectar Google Calendar" já força
+// `prompt: 'consent'`, então basta clicar de novo) — o token antigo continua
+// funcionando pra Calendar normalmente até lá, só não habilita Sheets.
+// TASK-0267 — escopo de e-mail somado pra gravar qual conta Google foi
+// conectada (google_account_email em tenant_calendar_tokens), só pra
+// diagnóstico interno (nunca exibido no painel/Agenda) — resolve dúvida real
+// de suporte ("é a mesma conta que uso no celular?") sem precisar reconectar
+// pra descobrir. Tenant que já conectou ANTES desta mudança só ganha o
+// escopo novo ao reconectar (mesmo padrão do escopo de Sheets acima).
+const SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/userinfo.email'];
 
 /**
  * Token por tenant, na tabela Postgres `tenant_calendar_tokens` (Bloco 2.A) —
@@ -32,15 +46,38 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 async function loadRefreshToken(tenantId: string): Promise<string | null> {
   const db = getDb();
   const { data } = await db.from('tenant_calendar_tokens').select('refresh_token').eq('tenant_id', tenantId).maybeSingle();
-  return data?.refresh_token || null;
+  if (!data?.refresh_token) return null;
+  // decryptSecret reconhece texto puro legado (sem o prefixo "v1:") e
+  // devolve como está — cobre tenants conectados antes desta mudança sem
+  // precisar de backfill pra continuar funcionando (ver tokenCrypto.ts).
+  return decryptSecret(data.refresh_token);
 }
 
-async function saveRefreshToken(tenantId: string, refreshToken: string): Promise<void> {
+async function saveRefreshToken(tenantId: string, refreshToken: string, accountEmail?: string | null): Promise<void> {
   const db = getDb();
-  const { error } = await db
-    .from('tenant_calendar_tokens')
-    .upsert({ tenant_id: tenantId, refresh_token: refreshToken, connected_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+  const row: Record<string, unknown> = { tenant_id: tenantId, refresh_token: encryptSecret(refreshToken), connected_at: new Date().toISOString() };
+  // Só sobrescreve o e-mail quando temos um valor novo (ex: rotação de token
+  // dentro de getAuthorizedGoogleClient, que não busca o userinfo de novo) —
+  // nunca apaga um e-mail já gravado por falta de info nesta chamada específica.
+  if (accountEmail) row.google_account_email = accountEmail;
+  const { error } = await db.from('tenant_calendar_tokens').upsert(row, { onConflict: 'tenant_id' });
   if (error) throw error;
+}
+
+/**
+ * Melhor esforço, nunca bloqueia a conexão: se a chamada ao userinfo falhar
+ * (rede, escopo ainda não concedido numa reconexão antiga), o Calendar
+ * continua funcionando normalmente, só sem o e-mail pra diagnóstico.
+ */
+async function fetchAccountEmail(client: OAuth2Client): Promise<string | null> {
+  try {
+    const oauth2 = google.oauth2({ version: 'v2', auth: client });
+    const { data } = await oauth2.userinfo.get();
+    return data.email || null;
+  } catch (err) {
+    console.warn('⚠️  [GoogleCalendar] Falha ao buscar e-mail da conta conectada (não bloqueia a conexão):', (err as Error).message);
+    return null;
+  }
 }
 
 function createOAuthClient(clientId?: string, clientSecret?: string, redirectUri?: string): OAuth2Client {
@@ -95,7 +132,9 @@ export async function handleGoogleOAuthCallback(
   if (!tokens.refresh_token) {
     throw new Error('Google não devolveu um refresh_token — desconecte o app em myaccount.google.com/permissions e tente conectar de novo (o consentimento precisa ser "fresco").');
   }
-  await saveRefreshToken(tenantId, tokens.refresh_token);
+  client.setCredentials(tokens);
+  const accountEmail = await fetchAccountEmail(client);
+  await saveRefreshToken(tenantId, tokens.refresh_token, accountEmail);
 }
 
 export async function isGoogleCalendarConnected(tenantId: string): Promise<boolean> {
@@ -128,7 +167,7 @@ export async function disconnectGoogleCalendar(tenantId: string): Promise<void> 
  * funcionava uma vez logo após reconectar no painel, e voltava a falhar com
  * `invalid_grant` minutos depois, repetidamente.
  */
-async function getAuthorizedClient(tenantId: string, clientId?: string, clientSecret?: string, redirectUri?: string): Promise<OAuth2Client> {
+export async function getAuthorizedGoogleClient(tenantId: string, clientId?: string, clientSecret?: string, redirectUri?: string): Promise<OAuth2Client> {
   const refreshToken = await loadRefreshToken(tenantId);
   if (!refreshToken) {
     throw new Error('Google Calendar não está conectado. Conecte no painel antes de agendar.');
@@ -229,7 +268,7 @@ export async function checkFreeBusy(tenantId: string, cfg: CalendarConfig, start
   if (!isWithinBusinessHours(hours, startIso, endIso)) return false;
 
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'checkFreeBusy' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const timeMin = localNaiveToUtcIso(startIso, timezone);
     const timeMax = localNaiveToUtcIso(endIso, timezone);
@@ -311,7 +350,7 @@ async function computeAvailabilityForDates(
   const lastDate = sortedDates[sortedDates.length - 1];
 
   const busy = await withStructuredLog({ tenantId, area: 'googleCalendar', op: 'computeAvailabilityForDates' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const timeMin = localNaiveToUtcIso(`${firstDate}T00:00:00`, timezone);
     const timeMax = localNaiveToUtcIso(`${lastDate}T23:59:59`, timezone);
@@ -386,7 +425,7 @@ export async function createCalendarEvent(
 ): Promise<string> {
   await assertWithinBusinessHours(tenantId, startIso, endIso);
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'createCalendarEvent' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const res = await calendar.events.insert({
       calendarId: 'primary',
@@ -412,7 +451,7 @@ export async function rescheduleCalendarEvent(
 ): Promise<void> {
   await assertWithinBusinessHours(tenantId, newStartIso, newEndIso);
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'rescheduleCalendarEvent' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     await calendar.events.patch({
       calendarId: 'primary',
@@ -434,7 +473,7 @@ export async function rescheduleCalendarEvent(
  */
 export async function updateCalendarEventSummary(tenantId: string, cfg: CalendarConfig, eventId: string, summary: string): Promise<void> {
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'updateCalendarEventSummary' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     await calendar.events.patch({
       calendarId: 'primary',
@@ -446,7 +485,7 @@ export async function updateCalendarEventSummary(tenantId: string, cfg: Calendar
 
 export async function cancelCalendarEvent(tenantId: string, cfg: CalendarConfig, eventId: string): Promise<void> {
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'cancelCalendarEvent' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     await calendar.events.delete({ calendarId: 'primary', eventId });
   });
@@ -464,7 +503,7 @@ export interface UpcomingEvent {
 /** Lista eventos entre duas datas — usado pelo job de lembretes automáticos. */
 export async function listUpcomingEvents(tenantId: string, cfg: CalendarConfig, timeMinIso: string, timeMaxIso: string): Promise<UpcomingEvent[]> {
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'listUpcomingEvents' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const res = await calendar.events.list({
       calendarId: 'primary',

@@ -1,9 +1,10 @@
 import { Router, type RequestHandler, type Response } from 'express';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import {
   listConversations,
   getConversation,
+  getConversationMessagesPage,
+  getConversationPhoneNumberId,
   updateMessageText,
   recordOutgoingMessage,
   clearConversationHistory,
@@ -17,14 +18,13 @@ import {
   markConversationRead,
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
-import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
+import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage, listApprovedMetaMessageTemplates, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
-import { resolveCredentialsForTenant } from '../services/tenantResolver';
+import { sendBubbles, type OutboundChannel } from '../services/sendBubbles';
+import { resolveCredentialsForTenant, resolveCredentialsForConversation, resolveMetaTemplateCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import {
-  getKnowledgeBase,
-  setKnowledgeBase,
-  collectReferencedVideoIds,
+  getRuntimeKnowledgeBase,
   formatKnowledgeBaseForPrompt,
   findProductMatch,
   resolveProductAmountByName,
@@ -43,33 +43,38 @@ import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleA
 import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLogsModuleAccess';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
-import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
+import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
+import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, resolveKnowledgeBaseImageBinary, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
-import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
+import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, permanentlyDeleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
 import { listOperationEvents } from '../services/operationEventStore';
 import { archiveSystemIncident, listSystemIncidents, resolveSystemIncident, restoreSystemIncident, reviewSystemIncident } from '../services/systemIncidentStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
-import { getDb } from '../services/db';
+import { getDb, getPlatformDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { generateCorrectedReplySuggestion } from '../services/replySafetyGate';
 import { getContactAgentMemory, OperatorContactMemoryValidationError, updateContactAgentMemoryByOperator } from '../services/contactAgentMemoryStore';
+import { listContactJourney } from '../services/contactJourneyStore';
 import { listAgentTurnTraces } from '../services/agentTurnTraceStore';
 import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
 import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
-import { transcribeAudioWithGemini } from '../services/geminiTranscription';
+import { transcribeAudio, isRealTranscriptionSource } from '../services/geminiTranscription';
+import { extractPaymentProofDataWithGemini } from '../services/paymentReceiptAnalysis';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
-import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
-import { getNowLocalNaive } from '../services/autoReply';
+import { queueLeadSheetSync } from '../services/googleSheetsSync';
+import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, listUpcomingEvents, type CalendarConfig } from '../services/googleCalendar';
+import { getNowLocalNaive, getPromptAuditView, type AgentType } from '../services/autoReply';
 import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
 import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { resolveTenantId, requireRole } from '../middleware/rbac';
+import { conversationsStreamRateLimiter } from '../middleware/rateLimit';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
@@ -193,7 +198,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       await clearAppointmentForPhone(tenantId, phone);
       return true;
     } catch (err: any) {
-      console.warn(`⚠️  [Pagamento rejeitado] falha ao liberar o horário no Calendar (tenant=${tenantId} phone=${phone}):`, err.message);
+      console.warn('⚠️  [Pagamento rejeitado] falha ao liberar o horário no Calendar:', { tenantId, phone, message: err.message });
       return false;
     }
   }
@@ -206,20 +211,20 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
    * o mesmo segredo/algoritmo de authenticateToken (não dá pra reaproveitar
    * o middleware direto, que só lê do header).
    */
-  router.get('/api/conversations/stream', asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const token = typeof req.query.token === 'string' ? req.query.token : undefined;
-    if (!token) return res.status(401).end();
-    let user: any;
-    try {
-      user = jwt.verify(token, jwtSecret);
-    } catch {
-      return res.status(403).end();
-    }
-    if (!user?.tenantId) return res.status(403).end();
+  // TASK-0311 (TASK-0249 item 1): até aqui esta rota tinha sua PRÓPRIA
+  // verificação de JWT (não passava pelo `authenticateToken` compartilhado)
+  // porque `EventSource` nativo não manda header `Authorization` — o token
+  // vinha por querystring como contorno. Isso deixou de ser necessário: a
+  // sessão agora é um cookie `httpOnly` (`universo_session`), que o
+  // `EventSource` manda sozinho em toda conexão same-origem (mesma regra do
+  // `fetch`, não precisa de `withCredentials` pra same-origin) — a rota
+  // passa a usar o middleware padrão como qualquer outra rota autenticada.
+  router.get('/api/conversations/stream', conversationsStreamRateLimiter, authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const user = req.user!;
     // Mesma exceção de resolveTenantId (middleware/rbac.ts): só saas_admin
     // pode apontar pra outro tenant, aqui via querystring (EventSource
-    // nativo não manda header customizado) — o painel manda isso a partir
-    // do tenant selecionado no seletor.
+    // nativo não manda header customizado como X-Tenant-Id) — o painel
+    // manda isso a partir do tenant selecionado no seletor.
     const requestedTenantId = typeof req.query.tenantId === 'string' ? req.query.tenantId.trim() : undefined;
     const tenantId = user.role === 'saas_admin' && requestedTenantId ? requestedTenantId : user.tenantId;
 
@@ -290,14 +295,50 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(404).json({ error: 'Áudio original não está mais disponível pra reprocessar (não foi salvo ou expirou).' });
     }
 
-    const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, media.buffer.toString('base64'), media.contentType, {
+    const outcome = await transcribeAudio(getAi ? getAi() : null, media.buffer.toString('base64'), media.contentType, {
       leadName: conv?.name,
-      customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+      customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
+      groqApiKey,
     });
 
-    await updateMessageText(tenantId, phone, messageId, outcome.result.transcription);
+    // Mesmo critério de /send-media acima e de transcriptionQueue.ts: sem
+    // fala real detectada, grava um texto legível em vez da string vazia.
+    const hasNoDetectedSpeech = isRealTranscriptionSource(outcome.source) && !outcome.result.transcription?.trim();
+    await updateMessageText(tenantId, phone, messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
 
-    res.json({ success: outcome.source === 'gemini', source: outcome.source, transcription: outcome.result.transcription });
+    res.json({ success: isRealTranscriptionSource(outcome.source), source: outcome.source, transcription: outcome.result.transcription });
+  }));
+
+  // Análise sob demanda de uma imagem do chat marcada pelo operador como
+  // comprovante de pagamento (menu "⋮" do balão) — TASK-0284. Só analisa e
+  // devolve os campos extraídos; nunca cria/confirma nada sozinha. Mesmo
+  // formato de retry-transcription acima. Gate só authenticateToken (é
+  // leitura/análise, não move dinheiro) — quem efetivamente restringe é o
+  // POST /api/financial/transactions (requireFinancialModule+manager) ou o
+  // POST .../verify-payment (requireAgendaModule) chamados depois, quando o
+  // operador de fato confirmar no modal.
+  router.post('/api/conversations/:phone/messages/:messageId/analyze-payment-proof', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { messageId } = req.params;
+
+    // Mesmo padrão de GET /api/media/:messageId acima: valida tenant direto
+    // na tabela messages antes de tocar o Storage, id é opaco.
+    const { data: message } = await getDb()
+      .from('messages')
+      .select('type')
+      .eq('tenant_id', tenantId)
+      .eq('id', messageId)
+      .maybeSingle();
+    if (!message) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+    if (message.type !== 'image') return res.status(400).json({ error: 'Esta mensagem não é uma imagem.' });
+
+    const media = await getMediaImage(supabaseUrl, supabaseKey, messageId);
+    if (!media) {
+      return res.status(404).json({ error: 'Imagem original não está mais disponível.' });
+    }
+
+    const extraction = await extractPaymentProofDataWithGemini(getAi ? getAi() : null, media.buffer.toString('base64'), media.contentType);
+    res.json({ success: !!extraction, extraction: extraction ?? null });
   }));
 
   router.get('/api/conversations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
@@ -314,15 +355,22 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/conversations/:phone/context', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const [memoryResult, traceResult] = await Promise.allSettled([
+    const [memoryResult, traceResult, windowResult] = await Promise.allSettled([
       getContactAgentMemory(tenantId, phone),
       listAgentTurnTraces(tenantId, phone, 1),
+      getCustomerServiceWindowStatus(tenantId, phone),
     ]);
     const memory = memoryResult.status === 'fulfilled' ? memoryResult.value : null;
     const latestTrace = traceResult.status === 'fulfilled' ? traceResult.value[0] || null : null;
+    const windowStatus = windowResult.status === 'fulfilled' ? windowResult.value : null;
+    const hoursRemaining = windowStatus?.windowExpiresAt
+      ? Math.max(0, Math.round((new Date(windowStatus.windowExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60)))
+      : 0;
+
     const unavailable = {
       memory: memoryResult.status === 'rejected',
       trace: traceResult.status === 'rejected',
+      window: windowResult.status === 'rejected',
     };
     if (unavailable.memory || unavailable.trace) {
       console.warn(`⚠️  [Conversation Context] tenant=${tenantId} leitura parcial de contexto (memory=${unavailable.memory}, trace=${unavailable.trace}); painel continua em modo seguro.`);
@@ -331,6 +379,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({
       available: !unavailable.memory && !unavailable.trace,
       unavailable,
+      serviceWindow: windowStatus ? {
+        withinWindow: windowStatus.withinWindow,
+        hoursRemaining,
+        lastLeadMessageAt: windowStatus.lastLeadMessageAt,
+        windowExpiresAt: windowStatus.windowExpiresAt,
+      } : null,
       memory: memory ? {
         preferredLanguage: memory.preferred_language,
         preferredName: memory.preferred_name,
@@ -354,6 +408,102 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         outcome: latestTrace.outcome,
       } : null,
     });
+  }));
+
+  /**
+   * Lista modelos de mensagens aprovados (Meta WhatsApp Templates) para reabertura de conversas
+   * fora da janela de 24 horas.
+   *
+   * Achado real (auditoria desta feature): a versão original desta rota
+   * devolvia 4 templates FICTÍCIOS hardcoded (nomes/preço inventados) pra
+   * qualquer tenant — a Meta rejeitaria o envio de verdade, porque esses
+   * templates nunca existiram na conta real de ninguém, e nada isolava por
+   * tenant (todo mundo via a mesma lista fixa). Agora busca de verdade na
+   * conta WhatsApp Business (WABA) real do tenant via Graph API
+   * (listApprovedMetaMessageTemplates). Sem WABA cadastrado (ou provider
+   * Evolution, que não tem esse conceito) devolve lista vazia com o motivo —
+   * nunca inventa dado de negócio.
+   */
+  router.get('/api/conversations/:phone/templates', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const credentials = await resolveMetaTemplateCredentialsForTenant(tenantId);
+    if (!credentials) {
+      return res.json({ templates: [], reason: 'waba_not_configured' });
+    }
+    try {
+      const templates = await listApprovedMetaMessageTemplates(credentials.wabaId, credentials.accessToken);
+      res.json({ templates });
+    } catch (err: any) {
+      console.error(`❌ [Conversas] Falha ao listar templates aprovados (tenant=${tenantId}):`, err.message);
+      res.status(502).json({ templates: [], error: err.message });
+    }
+  }));
+
+  /**
+   * Envia um modelo aprovado de reabertura de conversa pelo WhatsApp.
+   */
+  router.post('/api/conversations/:phone/send-template', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { templateName, languageCode = 'pt_BR', parameters = [] } = req.body || {};
+    if (!templateName || typeof templateName !== 'string') {
+      return res.status(400).json({ error: 'Campo "templateName" é obrigatório.' });
+    }
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+
+    try {
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, phone);
+      const channel = await resolveCredentialsForConversation(
+        tenantId,
+        conversationPhoneNumberId,
+        { metaAccessToken, metaPhoneNumberId },
+        { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+      );
+
+      const paramsArray: string[] = Array.isArray(parameters) ? parameters.map(String) : [];
+      let realMessageId: string | undefined;
+
+      if (channel.provider === 'meta') {
+        const metaRes = await sendWhatsAppTemplateMessage(
+          channel.metaPhoneNumberId,
+          channel.metaAccessToken,
+          phone,
+          templateName,
+          languageCode,
+          paramsArray
+        );
+        realMessageId = metaRes.messageId;
+      } else {
+        const fallbackText = `[Modelo: ${templateName}] ${paramsArray.length ? paramsArray.join(' • ') : ''}`;
+        realMessageId = await sendEvolutionTextMessage(
+          channel.evolutionInstanceName,
+          channel.evolutionApiUrl,
+          channel.evolutionApiKey,
+          phone,
+          fallbackText
+        );
+      }
+
+      const formattedText = `[Modelo: ${templateName}] ${paramsArray.length ? paramsArray.join(' • ') : ''}`;
+      const conv = await recordOutgoingMessage(
+        tenantId,
+        phone,
+        {
+          type: 'text',
+          text: formattedText,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        },
+        'operator',
+        undefined,
+        undefined,
+        realMessageId
+      );
+
+      await resolveOpenEscalationsAfterManualReply(tenantId, phone, { id: req.user?.id });
+      res.json({ success: true, conversation: conv, messageId: realMessageId });
+    } catch (err: any) {
+      console.error('❌ [Conversas] Falha ao enviar template oficial:', err.message);
+      res.status(502).json({ error: err.message });
+    }
   }));
 
   /**
@@ -406,10 +556,48 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
   }));
 
+  /**
+   * Jornada do contato: histórico cronológico append-only de agendamentos
+   * (criado/remarcado/cancelado/concluído/pagamento verificado) + mudanças de
+   * estágio do CRM, pra alimentar a timeline da Ficha do Contato. Sem
+   * backfill — só eventos gravados a partir do deploy desta rota em diante.
+   */
+  router.get('/api/conversations/:phone/journey', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const beforeTimestamp = typeof req.query.before === 'string' ? req.query.before : undefined;
+    const events = await listContactJourney(tenantId, phone, { limit, beforeTimestamp });
+    res.json({ events });
+  }));
+
   router.get('/api/conversations/:phone', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const conv = await getConversation(tenantOf(req), req.params.phone);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
     res.json({ conversation: conv });
+  }));
+
+  /**
+   * TASK-0280 (pedido direto, 04/09/2026, "não precisa carregar tudo só as
+   * últimas msg... antigas vai sendo carregada conforme o usuário vai
+   * rolando"): página de mensagens em vez do histórico inteiro — usada pelo
+   * painel ao abrir uma conversa (sem `before`/`after`, as mais recentes) e
+   * ao rolar pra cima (`before`, mensagens anteriores a esse timestamp) ou
+   * quando chega mensagem nova via SSE numa conversa já aberta (`after`, só
+   * o que é mais novo que o já carregado — evita rebuscar tudo de novo a
+   * cada mensagem). `limit` no máximo 100, padrão 30.
+   */
+  router.get('/api/conversations/:phone/messages', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const limitParam = Number.parseInt(String(req.query.limit ?? ''), 10);
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 30;
+    const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+    const after = typeof req.query.after === 'string' ? req.query.after : undefined;
+    const page = await getConversationMessagesPage(tenantOf(req), req.params.phone, {
+      limit,
+      beforeTimestamp: before,
+      afterTimestamp: after,
+    });
+    res.json(page);
   }));
 
   // Marca a conversa como lida — chamado quando o operador abre a conversa
@@ -420,16 +608,66 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ success: true });
   }));
 
+  /**
+   * Achado real de auditoria (continuação da TASK-0151, 29/08/2026): quando
+   * um operador responde manualmente pelo painel — ignorando o rascunho
+   * bloqueado e conduzindo a conversa por conta própria, como aconteceu de
+   * verdade com uma cliente real (tenant Monique) — nenhum escalonamento
+   * aberto pra esse telefone fechava sozinho, ficava "aberto" no painel
+   * indefinidamente mesmo já resolvido na prática pelo humano. `payment_proof`
+   * fica de fora: aquele exige a decisão explícita de aprovar/rejeitar o
+   * comprovante nos botões próprios, nunca só "o operador mandou uma
+   * mensagem". `skipEscalationId` existe pro fluxo "Aprovar e enviar"
+   * (TASK-0093): o painel manda o texto por este mesmo endpoint e, em
+   * seguida, chama /approve-and-resolve pra fechar aquele escalonamento
+   * específico com o código e o exemplo aprovado corretos — sem pular aqui,
+   * essa segunda chamada encontraria o caso já resolvido e devolveria 409.
+   */
+  async function resolveOpenEscalationsAfterManualReply(
+    tenantId: string,
+    phone: string,
+    actor: { id?: string },
+    skipEscalationId?: string
+  ): Promise<void> {
+    try {
+      const openOnes = (await listEscalations(tenantId)).filter(
+        (e) => e.phone === phone && e.kind !== 'payment_proof' && !e.resolved && e.status !== 'archived' && e.id !== skipEscalationId
+      );
+      await Promise.all(openOnes.map((e) => resolveEscalation(tenantId, e.id, {
+        actor,
+        resolutionCode: 'operator_manual_reply',
+        resolutionNote: 'Resolvido automaticamente: operador respondeu manualmente pelo painel.',
+      })));
+    } catch (err: any) {
+      console.warn('⚠️ [Conversas] Falha ao auto-resolver escalonamentos após resposta manual:', { tenantId, phone, message: err?.message || err });
+    }
+  }
+
   router.post('/api/conversations/:phone/send', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { text, replyToMessageId } = req.body || {};
+    const { text, replyToMessageId, escalationId } = req.body || {};
     if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ error: 'Campo "text" é obrigatório.' });
     }
     const tenantId = tenantOf(req);
 
     try {
-      const channel = await resolveCredentialsForTenant(
+      // TASK-0370 — nome do operador que está digitando, pra identificar
+      // QUEM especificamente mandou (antes o painel só mostrava um rótulo
+      // genérico "Você (equipe)" pra qualquer operador do tenant). Busca
+      // avulsa (não um join na query de mensagens) porque só interessa no
+      // momento do envio — fica gravado como snapshot na própria mensagem.
+      const operatorName = req.user?.id
+        ? (await getDb().from('operators').select('name').eq('id', req.user.id).maybeSingle()).data?.name || undefined
+        : undefined;
+
+      // TASK-0171 (disparo em massa): a conversa pode estar num número de
+      // disparo, não no operacional do tenant — resolve pelo phone_number_id
+      // da CONVERSA, não do tenant como um todo, senão a resposta sairia
+      // por um número diferente do que o cliente conhece.
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
+      const channel = await resolveCredentialsForConversation(
         tenantId,
+        conversationPhoneNumberId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
@@ -450,39 +688,89 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       }
       const hasRealProviderId = !!replyTarget && !replyTarget.id.startsWith('wa-');
 
-      let realMessageId: string | undefined;
-      if (channel.provider === 'evolution') {
-        realMessageId = await sendEvolutionTextMessage(
-          channel.evolutionInstanceName,
-          channel.evolutionApiUrl,
-          channel.evolutionApiKey,
-          req.params.phone,
-          text.trim(),
-          hasRealProviderId
-            ? { id: replyTarget!.id, remoteJid: `${req.params.phone}@s.whatsapp.net`, fromMe: replyTarget!.sender === 'agent', text: replyTarget!.text }
-            : undefined
-        );
+      // Achado real (30/08/2026): "Aprovar e enviar" um rascunho bloqueado
+      // mandava o texto inteiro como UMA mensagem só, com o separador " / "
+      // literal visível pro cliente — o rascunho é montado em webhooks.ts
+      // como `bubbles.join(' / ')` só pra exibição no card do escalonamento
+      // (ver logEscalation em webhooks.ts/transcriptionQueue.ts), mas nunca
+      // era desfeito de volta em bolhas separadas na hora de enviar de
+      // verdade, diferente de toda resposta automática normal (sendBubbles.ts
+      // manda cada bolha como mensagem própria, com pausa de digitação entre
+      // elas, exatamente como o cliente veria se fosse a IA respondendo). Só
+      // desfaz o join quando o envio vem de um escalonamento (`escalationId`
+      // presente) — uma mensagem digitada manualmente pelo operador com "/"
+      // no meio (endereço, data) nunca deve ser partida.
+      const bubbles: string[] = typeof escalationId === 'string' && escalationId
+        ? text.trim().split(' / ').map((b: string) => b.trim()).filter(Boolean)
+        : [text.trim()];
+
+      let conv: Awaited<ReturnType<typeof recordOutgoingMessage>> | undefined;
+      if (bubbles.length > 1) {
+        const outboundChannel: OutboundChannel = channel.provider === 'evolution'
+          ? { provider: 'evolution', evolutionInstanceName: channel.evolutionInstanceName, evolutionApiUrl: channel.evolutionApiUrl, evolutionApiKey: channel.evolutionApiKey }
+          : { provider: 'meta', phoneNumberId: channel.metaPhoneNumberId, accessToken: channel.metaAccessToken };
+        // A citação nativa do WhatsApp ("em resposta a X") só é suportada
+        // pelo envio de bolha única abaixo — sendBubbles não aceita um alvo
+        // de citação. replyToMessageId continua salvo internamente (painel
+        // mostra "em resposta a" mesmo assim), só a citação real na API não
+        // sai nesse caminho — combinação rara (aprovar um rascunho bloqueado
+        // E citar uma mensagem específica ao mesmo tempo).
+        let isFirstBubble = true;
+        await sendBubbles(outboundChannel, req.params.phone, bubbles, async (bubbleText) => {
+          conv = await recordOutgoingMessage(
+            tenantId,
+            req.params.phone,
+            { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) },
+            'operator',
+            isFirstBubble && typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
+            undefined,
+            undefined,
+            operatorName
+          );
+          isFirstBubble = false;
+        });
       } else {
-        realMessageId = await sendWhatsAppTextMessage(
-          channel.metaPhoneNumberId,
-          channel.metaAccessToken,
+        let realMessageId: string | undefined;
+        if (channel.provider === 'evolution') {
+          realMessageId = await sendEvolutionTextMessage(
+            channel.evolutionInstanceName,
+            channel.evolutionApiUrl,
+            channel.evolutionApiKey,
+            req.params.phone,
+            text.trim(),
+            hasRealProviderId
+              ? { id: replyTarget!.id, remoteJid: `${req.params.phone}@s.whatsapp.net`, fromMe: replyTarget!.sender === 'agent', text: replyTarget!.text }
+              : undefined
+          );
+        } else {
+          realMessageId = await sendWhatsAppTextMessage(
+            channel.metaPhoneNumberId,
+            channel.metaAccessToken,
+            req.params.phone,
+            text.trim(),
+            hasRealProviderId ? replyTarget!.id : undefined
+          );
+        }
+        conv = await recordOutgoingMessage(
+          tenantId,
           req.params.phone,
-          text.trim(),
-          hasRealProviderId ? replyTarget!.id : undefined
+          {
+            type: 'text',
+            text: text.trim(),
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          },
+          'operator',
+          typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
+          undefined,
+          realMessageId,
+          operatorName
         );
       }
-      const conv = await recordOutgoingMessage(
+      await resolveOpenEscalationsAfterManualReply(
         tenantId,
         req.params.phone,
-        {
-          type: 'text',
-          text: text.trim(),
-          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        },
-        'operator',
-        typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
-        undefined,
-        realMessageId
+        { id: req.user?.id },
+        typeof escalationId === 'string' ? escalationId : undefined
       );
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
@@ -510,8 +798,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       let uploadBase64 = base64;
       let uploadMimeType = mimeType as string;
       let uploadFilename = filename || 'arquivo';
-      const channel = await resolveCredentialsForTenant(
+      // TASK-0171 — mesmo raciocínio do /send: resolve pelo número da
+      // CONVERSA (pode ser um número de disparo), não do tenant como um todo.
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
+      const channel = await resolveCredentialsForConversation(
         tenantId,
+        conversationPhoneNumberId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
@@ -536,7 +828,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           try {
             await sendEvolutionVoiceMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType);
           } catch (error) {
-            console.warn(`🎙️ [audioFallback] evolution_ogg_opus_failed to=***${req.params.phone.replace(/\D/g, '').slice(-4)} reason=${error instanceof Error ? error.message : String(error)}`);
+            console.warn('🎙️ [audioFallback] evolution_ogg_opus_failed', { to: req.params.phone.replace(/\D/g, '').slice(-4), reason: error instanceof Error ? error.message : String(error) });
             await applyTranscode('mp3');
             await sendEvolutionVoiceMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType);
           }
@@ -552,7 +844,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
               diagnosticTag
             );
             if (diagnosticTag) {
-              console.log(`🔬 [${diagnosticTag}] to=***${req.params.phone.replace(/\D/g, '').slice(-4)} media_id=${mediaId} mime="${uploadMimeType}" bytes=${audioBuffer.length}`);
+              console.log('🔬 [audioDiagnostic]', { diagnosticTag, to: req.params.phone.replace(/\D/g, '').slice(-4), mediaId, mimeType: uploadMimeType, bytes: audioBuffer.length });
             }
           };
 
@@ -561,7 +853,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           } catch (error) {
             // A falha cobre tanto rejeição da Meta quanto uma eventual falha de
             // codificação OGG local. Só então entregamos MP3 como contingência.
-            console.warn(`🎙️ [audioFallback] ogg_opus_failed to=***${req.params.phone.replace(/\D/g, '').slice(-4)} reason=${error instanceof Error ? error.message : String(error)}`);
+            console.warn('🎙️ [audioFallback] ogg_opus_failed', { to: req.params.phone.replace(/\D/g, '').slice(-4), reason: error instanceof Error ? error.message : String(error) });
             await applyTranscode('mp3');
             await sendCurrentAudio('audioMp3Fallback');
           }
@@ -617,11 +909,19 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       // ponto.
       if (msgType === 'audio') {
         try {
-          const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, uploadBase64, uploadMimeType, {
+          const outcome = await transcribeAudio(getAi ? getAi() : null, uploadBase64, uploadMimeType, {
             leadName: conv?.name,
-            customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+            customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
+            groqApiKey,
           });
-          await updateMessageText(tenantId, req.params.phone, messageId, outcome.result.transcription);
+          // Achado real (29/08/2026): sem fala real detectada, transcription
+          // vem vazia ("") — gravar isso direto como texto da mensagem
+          // sobrescrevia o placeholder "🎤 Áudio enviado" por uma legenda em
+          // branco, tão confuso quanto a transcrição alucinada que esse
+          // mecanismo existe pra evitar. Mesmo texto/critério já usado em
+          // transcriptionQueue.ts (áudio recebido do cliente).
+          const hasNoDetectedSpeech = isRealTranscriptionSource(outcome.source) && !outcome.result.transcription?.trim();
+          await updateMessageText(tenantId, req.params.phone, messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
         } catch (transcriptionError) {
           console.warn(`⚠️  [Conversas] Falha ao transcrever áudio enviado (messageId=${messageId}):`, (transcriptionError as Error).message);
         }
@@ -768,7 +1068,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         payload: { label: label.trim(), labels },
       });
     } catch (err: any) {
-      console.warn(`⚠️ [Auditoria] Falha ao registrar etiqueta adicionada (tenant=${tenantId}, phone=${req.params.phone}):`, err?.message || err);
+      console.warn('⚠️ [Auditoria] Falha ao registrar etiqueta adicionada:', { tenantId, phone: req.params.phone, message: err?.message || err });
     }
     res.json({ success: true, labels });
   }));
@@ -789,7 +1089,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         payload: { label: req.params.label, labels },
       });
     } catch (err: any) {
-      console.warn(`⚠️ [Auditoria] Falha ao registrar etiqueta removida (tenant=${tenantId}, phone=${req.params.phone}):`, err?.message || err);
+      console.warn('⚠️ [Auditoria] Falha ao registrar etiqueta removida:', { tenantId, phone: req.params.phone, message: err?.message || err });
     }
     res.json({ success: true, labels });
   }));
@@ -834,21 +1134,25 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // automática). Uma rota só pra tudo, em vez de vários endpoints quase
   // idênticos — cada campo do body é opcional, só atualiza o que veio.
   router.patch('/api/conversations/:phone/state', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { archived, pinned, muted, unread, name, aiBlocked, adLead } = req.body || {};
-    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true } = {};
+    const { archived, pinned, muted, unread, name, aiBlocked, adLead, releaseAiNow } = req.body || {};
+    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true; releaseAiNow?: true } = {};
     if (typeof archived === 'boolean') patch.archived = archived;
     if (typeof pinned === 'boolean') patch.pinned = pinned;
     if (typeof muted === 'boolean') patch.muted = muted;
     if (typeof unread === 'boolean') patch.unread = unread;
     if (typeof aiBlocked === 'boolean') patch.aiBlocked = aiBlocked;
     if (adLead === true) patch.adLead = true;
+    // TASK-0181 (parte 2): botão "Devolver a IA agora" no menu ⋮ da conversa
+    // — libera o gate "operador ativo" de webhooks.ts sem precisar esperar
+    // os 5min de silêncio (ver conversationStore.ConversationStatePatch.releaseAiNow).
+    if (releaseAiNow === true) patch.releaseAiNow = true;
     if (typeof name === 'string') {
       const trimmed = name.trim();
       if (!trimmed) return res.status(400).json({ error: 'Campo "name" não pode ser vazio.' });
       patch.name = trimmed;
     }
     if (Object.keys(patch).length === 0) {
-      return res.status(400).json({ error: 'Informe ao menos um campo: archived, pinned, muted, unread, name, aiBlocked ou adLead.' });
+      return res.status(400).json({ error: 'Informe ao menos um campo: archived, pinned, muted, unread, name, aiBlocked, adLead ou releaseAiNow.' });
     }
     const conv = await updateConversationState(tenantOf(req), req.params.phone, patch);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
@@ -863,26 +1167,42 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!productName) return res.status(400).json({ error: 'Campo "productName" é obrigatório.' });
     const tenantId = tenantOf(req);
 
-    const kb = await getKnowledgeBase(tenantId);
+    const { knowledgeBase: kb } = await getRuntimeKnowledgeBase(tenantId);
     const match = findProductMatch(kb, productName);
-    const media = match?.variant?.exampleImageBase64 ? match.variant : match?.product;
-    if (!media?.exampleImageBase64) {
+    const media = match?.variant?.exampleImageId || match?.variant?.exampleImageBase64 ? match.variant : match?.product;
+    if (!media?.exampleImageId && !media?.exampleImageBase64) {
       return res.status(404).json({ error: 'Esse serviço não tem foto de exemplo cadastrada na Base de Conhecimento.' });
+    }
+    // TASK-0218: resolve o binário via Storage (exampleImageId) com fallback
+    // pro Base64 legado inline — mesmo contrato usado em runMidiaTool e
+    // firstContactMessage.ts.
+    const resolvedPhoto = await resolveKnowledgeBaseImageBinary(
+      supabaseUrl,
+      supabaseKey,
+      tenantId,
+      media.exampleImageId,
+      media.exampleImageMimeType,
+      media.exampleImageBase64,
+      'conversations:send-example-photo'
+    );
+    if (!resolvedPhoto) {
+      return res.status(404).json({ error: 'A foto cadastrada não foi encontrada no Storage — tente subir de novo na Base de Conhecimento.' });
     }
 
     try {
-      const mimeType = media.exampleImageMimeType || 'image/jpeg';
-      const channel = await resolveCredentialsForTenant(
+      const mimeType = resolvedPhoto.mimeType;
+      const photoBase64 = resolvedPhoto.buffer.toString('base64');
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
+      const channel = await resolveCredentialsForConversation(
         tenantId,
+        conversationPhoneNumberId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
-      const cleanImageBase64 = media.exampleImageBase64.replace(/^data:[^;]+;base64,/, '');
       if (channel.provider === 'evolution') {
-        await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, cleanImageBase64, mimeType, `${productName}.jpg`, productName);
+        await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, photoBase64, mimeType, `${productName}.jpg`, productName);
       } else {
-        const exampleImageBuffer = Buffer.from(cleanImageBase64, 'base64');
-        const mediaId = await uploadWhatsAppMedia(channel.metaPhoneNumberId, channel.metaAccessToken, exampleImageBuffer, mimeType, `${productName}.jpg`);
+        const mediaId = await uploadWhatsAppMedia(channel.metaPhoneNumberId, channel.metaAccessToken, resolvedPhoto.buffer, mimeType, `${productName}.jpg`);
         await sendWhatsAppMediaMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, mediaId, mimeType, productName);
       }
 
@@ -905,7 +1225,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         undefined,
         messageId
       );
-      await saveMediaImage(supabaseUrl, supabaseKey, messageId, media.exampleImageBase64, mimeType);
+      await saveMediaImage(supabaseUrl, supabaseKey, messageId, photoBase64, mimeType);
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
@@ -926,7 +1246,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!productName) return res.status(400).json({ error: 'Campo "productName" é obrigatório.' });
     const tenantId = tenantOf(req);
 
-    const kb = await getKnowledgeBase(tenantId);
+    const { knowledgeBase: kb } = await getRuntimeKnowledgeBase(tenantId);
     const match = findProductMatch(kb, productName);
     const media = match?.variant?.exampleVideoId ? match.variant : match?.product;
     if (!media?.exampleVideoId) {
@@ -940,8 +1260,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     try {
       const mimeType = media.exampleVideoMimeType || video.contentType;
       const filename = media.exampleVideoFileName || `${productName}.mp4`;
-      const channel = await resolveCredentialsForTenant(
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
+      const channel = await resolveCredentialsForConversation(
         tenantId,
+        conversationPhoneNumberId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
@@ -1052,6 +1374,18 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // de um agendamento antigo, existente ou não), mesmo raciocínio do PR #203.
     await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: true });
 
+    // TASK-0185 — backup em Google Sheets: agendamento fechado fora do fluxo
+    // de WhatsApp (manual, no painel) também precisa refletir "Agendou?"
+    // sem esperar a cliente mandar uma mensagem nova.
+    const conversationForSheet = await getConversation(tenantId, phone).catch(() => undefined);
+    queueLeadSheetSync(tenantId, calendarConfig, {
+      phone,
+      name: conversationForSheet?.name,
+      firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
+      interest: conversationForSheet?.interest || conversationForSheet?.adHeadline,
+      scheduled: true,
+    });
+
     // A central cria uma cobrança pendente já no agendamento confirmado. A
     // referência apt:<eventId> é a mesma usada na aprovação do comprovante,
     // portanto nunca há lançamento duplicado quando o pagamento for baixado.
@@ -1085,6 +1419,109 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     const appointment = await getAppointmentForPhone(tenantId, phone);
     res.status(201).json({ appointment });
+  }));
+
+  // TASK-0270 (pedido direto, print da Ficha do Contato de "Noelia Esquivel":
+  // "Esta cliente foi agendada pelo google como eu posso vincular o
+  // agendamento no sistema para aparecer aqui na ficha de acompanhamento?")
+  // — um agendamento criado direto no Google Calendar (fora do WhatsApp, sem
+  // passar por criar_agendamento nem pelo manual-appointment acima) nunca
+  // gera uma linha em `appointments`, então a Ficha do Contato desse
+  // telefone nunca sabe que ele existe ("Agendou? não", sem card em
+  // AGENDAMENTOS), mesmo o evento real já estando na agenda e visível na
+  // aba Agenda. Diferente do endpoint acima, este NUNCA cria um evento novo
+  // (create=duplicaria o evento real que o operador está vinculando) nem
+  // chama checkFreeBusy (o evento já ocupa o horário) — só grava o vínculo
+  // telefone↔evento já existente, usando o eventId que o painel já tem em
+  // mãos (veio da própria listagem de eventos do Google Calendar deste
+  // tenant, GET /api/google-calendar/upcoming-events).
+  router.post('/api/conversations/:phone/link-appointment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const { eventId, summary, startIso, endIso } = req.body || {};
+    if (!eventId?.trim() || !summary?.trim() || !startIso || !endIso) {
+      return res.status(400).json({ error: 'Campos "eventId", "summary", "startIso" e "endIso" são obrigatórios.' });
+    }
+
+    // Mesmo guard do manual-appointment: nunca sobrescreve silenciosamente
+    // um agendamento ativo diferente já rastreado pra este telefone (evita
+    // vincular o evento errado por engano e perder a referência do real).
+    const existing = await getAppointmentForPhone(tenantId, phone);
+    const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
+    const existingIsUpcoming = existing && existing.eventId !== eventId && Date.parse(`${existing.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
+    if (existingIsUpcoming) {
+      return res.status(409).json({ error: `Este contato já tem um agendamento ativo diferente ("${existing!.summary}" em ${existing!.startIso}).` });
+    }
+
+    await setAppointmentForPhone(tenantId, phone, { eventId: eventId.trim(), summary: summary.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: !existing });
+
+    // TASK-0185 — mesmo backup em Google Sheets do manual-appointment: um
+    // agendamento vinculado aqui também precisa refletir "Agendou?" sem
+    // esperar a cliente mandar mensagem nova.
+    const conversationForSheet = await getConversation(tenantId, phone).catch(() => undefined);
+    queueLeadSheetSync(tenantId, calendarConfig, {
+      phone,
+      name: conversationForSheet?.name,
+      firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
+      interest: conversationForSheet?.interest || conversationForSheet?.adHeadline,
+      scheduled: true,
+    });
+
+    const appointment = await getAppointmentForPhone(tenantId, phone);
+    res.status(200).json({ appointment });
+  }));
+
+  // TASK-0292 (pedido direto, print da Ficha do Contato — "este campo não
+  // está conectado a agenda, e eu não consigo editar pois a cliente
+  // remarcou"): `appointments` guarda só um snapshot (startIso/endIso) do
+  // evento vinculado ao telefone, atualizado apenas pelos fluxos acima
+  // (criar/remarcar pela IA, manual-appointment, link-appointment). Se o
+  // reagendamento aconteceu por qualquer OUTRO canal (ex.: editar o evento
+  // direto no Google Calendar, fora deste app), essa linha fica congelada no
+  // horário antigo e a Ficha (100% leitura) não tinha nenhum jeito de
+  // corrigir. Busca o estado ATUAL do mesmo eventId já rastreado numa janela
+  // ampla (não limitada ao mês em exibição na Agenda) e realinha — nunca cria
+  // evento novo nem toca em pagamento (é o mesmo agendamento, só corrigindo
+  // o rastreamento).
+  router.post('/api/conversations/:phone/appointment/resync', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const existing = await getAppointmentForPhone(tenantId, phone);
+    if (!existing?.eventId) {
+      return res.status(400).json({ error: 'Nenhum agendamento vinculado a este contato para ressincronizar.' });
+    }
+    if (!calendarConfig) {
+      return res.status(503).json({ error: 'Google Calendar não configurado neste servidor.' });
+    }
+
+    const timeMinIso = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const timeMaxIso = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString();
+    let liveEvents;
+    try {
+      liveEvents = await listUpcomingEvents(tenantId, calendarConfig, timeMinIso, timeMaxIso);
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao consultar a agenda: ${err.message}` });
+    }
+
+    const found = liveEvents.find((ev) => ev.id === existing.eventId);
+    if (!found) {
+      return res.status(404).json({ error: 'Evento não encontrado na agenda — pode ter sido excluído ou movido para fora da janela de busca.' });
+    }
+
+    const foundEndIso = found.endIso || existing.endIso;
+    const changed = found.summary !== existing.summary || found.startIso !== existing.startIso || foundEndIso !== existing.endIso;
+    if (changed) {
+      await setAppointmentForPhone(tenantId, phone, {
+        eventId: existing.eventId,
+        summary: found.summary,
+        startIso: found.startIso,
+        endIso: foundEndIso,
+        source: existing.source,
+      }, { resetPaymentState: false });
+    }
+
+    const appointment = await getAppointmentForPhone(tenantId, phone);
+    res.status(200).json({ appointment, changed });
   }));
 
   /**
@@ -1140,8 +1577,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!appointment.eventId) return; // sem evento real, sem referência estável pra deduplicar
     try {
       if (!(await financialModuleEnabled())) return;
-      const [kb, conversation] = await Promise.all([
-        getKnowledgeBase(tenantId),
+      const [{ knowledgeBase: kb }, conversation] = await Promise.all([
+        getRuntimeKnowledgeBase(tenantId),
         getConversation(tenantId, phone),
       ]);
       const amount = overrideAmount ?? (resolveProductAmountByName(kb, appointment.summary) ?? 0);
@@ -1169,7 +1606,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       }
     } catch (err) {
       if (!isDuplicateSourceRefError(err)) {
-        console.warn(`⚠️  [Financeiro] Falha ao registrar transação automática pro agendamento verificado (tenant=${tenantId}, phone=${phone}):`, (err as Error)?.message || err);
+        console.warn('⚠️  [Financeiro] Falha ao registrar transação automática pro agendamento verificado:', { tenantId, phone, message: (err as Error)?.message || err });
       }
       // duplicado (retry/reentrega): nada a fazer no financeiro, mas ainda assim avança o CRM abaixo
     }
@@ -1177,7 +1614,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     try {
       await upsertCrmLeadState(tenantId, phone, { stage: 'ganho' });
     } catch (err) {
-      console.warn(`⚠️  [CRM] Falha ao avançar lead pro estágio 'ganho' após pagamento verificado (tenant=${tenantId}, phone=${phone}):`, (err as Error)?.message || err);
+      console.warn('⚠️  [CRM] Falha ao avançar lead pro estágio \'ganho\' após pagamento verificado:', { tenantId, phone, message: (err as Error)?.message || err });
     }
   }
 
@@ -1200,7 +1637,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       });
     } catch (err: any) {
       // Auditoria não pode desfazer uma decisão financeira já confirmada.
-      console.warn(`⚠️ [Auditoria] Falha ao registrar decisão do comprovante (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+      console.warn('⚠️ [Auditoria] Falha ao registrar decisão do comprovante:', { tenantId, phone, message: err?.message || err });
     }
   }
 
@@ -1224,10 +1661,18 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // como caminho de API (coberto por testes, ver
   // conversationsVerifyPayment*.test.ts) por precaução, não removido.
   router.post('/api/conversations/:phone/verify-payment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { status } = req.body || {};
+    const { status, overrideAmount } = req.body || {};
     if (status !== 'verified' && status !== 'rejected') {
       return res.status(400).json({ error: 'Campo "status" precisa ser "verified" ou "rejected".' });
     }
+    // TASK-0284: permite passar o valor REAL lido pela IA no comprovante
+    // (ex: sinalizado direto de uma imagem do chat), em vez de sempre usar
+    // o preço do catálogo — mesmo campo que resolve-payment/manual-appointment
+    // já suportam via recordFinancialTransactionForVerifiedPayment.
+    const resolvedOverrideAmount =
+      typeof overrideAmount === 'number' && Number.isFinite(overrideAmount) && overrideAmount > 0
+        ? overrideAmount
+        : undefined;
     const operatorId = req.user?.id;
     if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });
 
@@ -1267,7 +1712,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const updated = await setPaymentVerification(tenantId, phone, status, operatorId);
     if (!updated) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
     const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, phone, updated) : false;
-    if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, updated);
+    if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, updated, resolvedOverrideAmount);
     await recordPaymentDecisionAudit(tenantId, phone, status, operatorId, updated);
     res.json({ success: true, appointment: updated, calendarReleased });
   }));
@@ -1300,7 +1745,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   // Base de conhecimento real do agente (objetivo, regras, preços, FAQ) —
-  // usada como contexto nos prompts de resposta automática.
+  // usada como contexto nos prompts de resposta automática. TASK-0327: fonte
+  // única é getRuntimeKnowledgeBase (composição dos 8 documentos tipados
+  // publicados) — a tabela legada `knowledge_base` (blob jsonb por tenant)
+  // foi eliminada; escrever/editar a Base de Conhecimento agora passa sempre
+  // pelo editor tipado (draft + publicação, ver as rotas
+  // /api/knowledge-base/documents/:type/* abaixo).
+  //
   // Cache condicional por ETag (pedido direto de chat, 25/08/2026 —
   // incidente real de cota do Supabase: a Base de Conhecimento da Monique
   // sozinha pesa ~12MB, quase tudo foto de exemplo de produto inline em
@@ -1309,23 +1760,14 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // painel repetidas vezes durante desenvolvimento/teste já bastou pra
   // estourar a cota gratuita de saída (egress) do projeto.
   //
-  // Em vez de mudar o formato salvo (arriscado — POST /api/knowledge-base
-  // faz upsert do objeto inteiro; qualquer troca de forma aqui exigiria
-  // reconciliar merge/remoção de foto com risco real de apagar imagem por
-  // engano), o fix é só de transporte: manda o `updated_at` como ETag; se o
-  // cliente já tem a versão mais recente (If-None-Match bate), responde 304
-  // sem corpo nenhum — sem mudar NADA do formato/contrato dos dados. Não
-  // altera em nada quem lê `getKnowledgeBase()` direto (autoReply.ts,
-  // publicCatalogStore.ts, firstContactMessage.ts) — só esta rota HTTP.
+  // O ETag não pode mais vir de `updated_at` (não existe mais uma única
+  // linha/timestamp — a fonte é a composição de 8 documentos tipados) —
+  // é um hash do CONTEÚDO devolvido, o que mantém a mesma finalidade
+  // (evitar reenviar o corpo de ~12MB quando nada mudou).
   router.get('/api/knowledge-base', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { data: row, error } = await getDb()
-      .from('knowledge_base')
-      .select('data, updated_at')
-      .eq('tenant_id', tenantOf(req))
-      .maybeSingle();
-    if (error) return res.status(500).json({ error: error.message });
+    const { knowledgeBase } = await getRuntimeKnowledgeBase(tenantOf(req));
 
-    const etag = `"kb-${tenantOf(req)}-${row?.updated_at || 'none'}"`;
+    const etag = `"kb-${crypto.createHash('sha256').update(JSON.stringify(knowledgeBase)).digest('hex').slice(0, 32)}"`;
     res.setHeader('ETag', etag);
     res.setHeader('Cache-Control', 'private, no-cache');
     // Sem isso, o cache HTTP do navegador (que não varia por header custom
@@ -1338,30 +1780,11 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (req.headers['if-none-match'] === etag) {
       return res.status(304).end();
     }
-    res.json({ knowledgeBase: (row?.data as any) || null });
+    res.json({ knowledgeBase: knowledgeBase || null });
   }));
 
-  router.post('/api/knowledge-base', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { knowledgeBase } = req.body || {};
-    if (!knowledgeBase || typeof knowledgeBase !== 'object') {
-      return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
-    }
-    const tenantId = tenantOf(req);
-    // Issue #261 — só agora (save real, bem-sucedido) é seguro apagar vídeo
-    // do Storage: qualquer videoId que estava referenciado na KB anterior e
-    // deixou de aparecer na nova é, de fato, lixo (produto/bloco removido ou
-    // vídeo trocado por outro) — nunca uma troca que ainda não foi salva.
-    const previousVideoIds = collectReferencedVideoIds(await getKnowledgeBase(tenantId));
-    await setKnowledgeBase(tenantId, knowledgeBase);
-    const currentVideoIds = collectReferencedVideoIds(knowledgeBase);
-    const orphanedVideoIds = [...previousVideoIds].filter((id) => !currentVideoIds.has(id));
-    await Promise.all(orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)));
-    res.json({ success: true });
-  }));
-
-  // ISSUE-0096 / PR2 — API administrativa de documentos tipados. Não substitui
-  // GET/POST /api/knowledge-base: o agente e o painel legado seguem no blob
-  // até o corte de runtime aprovado em PR4. Por conter rascunhos internos,
+  // ISSUE-0096 / PR2 — API administrativa de documentos tipados. Por conter
+  // rascunhos internos,
   // toda a superfície é exclusiva de admin/saas_admin.
   router.get('/api/knowledge-base/documents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     try {
@@ -1444,6 +1867,24 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.delete('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await clearTenantPromptLayer(tenantOf(req));
     res.json(await getTenantPromptLayerRow(tenantOf(req)));
+  }));
+
+  // TASK-0330 — auditoria SOMENTE LEITURA do prompt real mandado ao Gemini
+  // (Camada 1 fixa + Camada 3 Base de Conhecimento, já combinadas
+  // idênticas ao que o especialista de verdade usa; Camada 4 real da
+  // conversa quando `phone` é informado). Pedido direto: depois de eliminar
+  // a rota de salvar a KB inteira (TASK-0327), o dono do produto precisava
+  // de outro jeito de conferir "quais informações estão chegando e como
+  // estão chegando no agente" — nunca escreve nada, só lê e reaproveita a
+  // mesma montagem de prompt do turno real (getPromptAuditView).
+  const VALID_AUDIT_AGENTS: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
+  router.get('/api/tenant-prompt-audit', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const agent = req.query.agent as string;
+    if (!VALID_AUDIT_AGENTS.includes(agent as AgentType)) {
+      return res.status(400).json({ error: `Campo "agent" precisa ser um destes: ${VALID_AUDIT_AGENTS.join(', ')}.` });
+    }
+    const phone = typeof req.query.phone === 'string' && req.query.phone.trim() ? req.query.phone.trim() : undefined;
+    res.json(await getPromptAuditView(tenantOf(req), agent as AgentType, phone));
   }));
 
   // Horário de funcionamento real do tenant (tabela `tenants`, não a base de
@@ -1572,7 +2013,15 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // slug → religar como um jeito de burlar a trava acima.
     if (enabled) patch.public_catalog_slug_locked = true;
 
-    const { error } = await getDb()
+    // TASK-0187 (parte 2) — achado durante a investigação do bug de horários
+    // de atendimento (relatado ao vivo, 01/09/2026): a tabela `tenants` só
+    // tem policy RLS de SELECT pro papel `authenticated` (confirmado via
+    // pg_policies), nenhuma de UPDATE — getDb() (cliente tenant-scoped)
+    // nunca dava erro aqui, mas RLS filtrava pra zero linhas afetadas
+    // silenciosamente, então salvar o Catálogo Público (endereço, contato,
+    // mensagens do WhatsApp) nunca persistia de verdade. getPlatformDb() é
+    // seguro aqui porque `tenantOf(req)` já vem do JWT autenticado.
+    const { error } = await getPlatformDb()
       .from('tenants')
       .update(patch)
       .eq('id', tenantOf(req));
@@ -1656,54 +2105,6 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     });
   }));
 
-  // Upload real de documento anexado à base de conhecimento — até aqui a
-  // aba "Documentos Anexados" era só um registro visual fictício (achado
-  // real: 2 "documentos" hardcoded no preset da Monique que nunca
-  // existiram de verdade, ninguém conseguia abrir). Extrai texto quando dá
-  // (PDF/TXT/CSV/JSON/MD, ver knowledgeBaseDocumentStore.ts) pra o agente
-  // usar como contexto real (formatKnowledgeBaseForPrompt), com teto de
-  // tamanho pra nunca inflar o prompt sem limite.
-  router.post('/api/knowledge-base/documents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const tenantId = tenantOf(req);
-    const { fileName, mimeType, base64 } = req.body || {};
-    if (!fileName?.trim() || !base64) {
-      return res.status(400).json({ error: 'Campos "fileName" e "base64" são obrigatórios.' });
-    }
-    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buffer.length > MAX_DOCUMENT_BYTES) {
-      return res.status(400).json({ error: `Arquivo maior que ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB.` });
-    }
-
-    const kb = (await getKnowledgeBase(tenantId)) || {};
-    const existingDocs = kb.documents || [];
-    if (existingDocs.length >= MAX_DOCUMENTS_PER_TENANT) {
-      return res.status(400).json({ error: `Limite de ${MAX_DOCUMENTS_PER_TENANT} documentos atingido. Apague algum documento antigo antes de enviar um novo.` });
-    }
-    const existingTotalBytes = existingDocs.reduce((sum, d) => sum + (d.sizeBytes || 0), 0);
-    if (existingTotalBytes + buffer.length > MAX_TOTAL_BYTES_PER_TENANT) {
-      const remainingMb = Math.max(0, (MAX_TOTAL_BYTES_PER_TENANT - existingTotalBytes) / (1024 * 1024)).toFixed(1);
-      return res.status(400).json({ error: `Limite de ${MAX_TOTAL_BYTES_PER_TENANT / (1024 * 1024)}MB no total atingido (restam ${remainingMb}MB). Apague algum documento antigo antes de enviar um novo.` });
-    }
-
-    const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const resolvedMimeType = mimeType || 'application/octet-stream';
-    await uploadKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId, buffer, resolvedMimeType);
-    const extractedText = await extractTextFromDocument(buffer, resolvedMimeType, fileName);
-
-    const newDoc = {
-      id: docId,
-      fileName: String(fileName).trim(),
-      fileSize: `${(buffer.length / (1024 * 1024)).toFixed(1)} MB`,
-      sizeBytes: buffer.length,
-      mimeType: resolvedMimeType,
-      uploadDate: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      status: 'Processado' as const,
-      extractedText,
-    };
-    await setKnowledgeBase(tenantId, { ...kb, documents: [...existingDocs, newDoc] });
-    res.json({ document: newDoc });
-  }));
-
   // Baixa/visualiza o arquivo real — nunca público (pode conter dado
   // sensível do negócio), mesmo padrão autenticado de GET /api/media/:messageId.
   router.get('/api/knowledge-base/documents/:docId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
@@ -1719,12 +2120,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.send(doc.buffer);
   }));
 
+  // TASK-0327 — apaga só o binário do Storage. A remoção da referência em
+  // `media_assets.documents` é responsabilidade do editor tipado (o cliente
+  // já tira o item de formData.documents e persiste via rascunho/publicação,
+  // mesmo padrão já usado por vídeo/imagem — nenhum dos dois tem rota de
+  // DELETE dedicada, só esta, mantida por já apagar o Storage de fato).
   router.delete('/api/knowledge-base/documents/:docId', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const tenantId = tenantOf(req);
-    const docId = req.params.docId;
-    await deleteKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId);
-    const kb = (await getKnowledgeBase(tenantId)) || {};
-    await setKnowledgeBase(tenantId, { ...kb, documents: (kb.documents || []).filter((d) => d.id !== docId) });
+    await deleteKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantOf(req), req.params.docId);
     res.json({ success: true });
   }));
 
@@ -1735,7 +2137,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // pra um produto ainda não salvo no servidor (ver knowledgeBaseVideoStore.ts).
   // Quem associa a referência a um produto é o cliente (AgentKnowledgeBase.tsx),
   // no mesmo formData local que já guarda exampleImageBase64 — só persiste
-  // de verdade quando a base inteira é salva (POST /api/knowledge-base acima).
+  // de verdade quando o rascunho do documento tipado é salvo/publicado.
   router.post('/api/knowledge-base/videos', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { fileName, mimeType, base64 } = req.body || {};
@@ -1803,6 +2205,63 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('Vary', 'Authorization');
     res.send(video.buffer);
+  }));
+
+  // TASK-0218 — upload real de imagem (foto de exemplo de produto/variante,
+  // antes/depois, bloco de imagem do 1º contato) pro Storage, mesmo padrão
+  // de POST /api/knowledge-base/videos acima: quem associa a referência
+  // (imageId) a um produto/bloco é o cliente (AgentKnowledgeBase.tsx), no
+  // mesmo formData local que já guarda os campos de imagem — só persiste de
+  // verdade quando a base inteira é salva (POST /api/knowledge-base ou o
+  // draft/publish de documentos tipados abaixo). Sem transcodificação
+  // (diferente de vídeo): JPEG/PNG/WebP já são aceitos direto pela Meta.
+  router.post('/api/knowledge-base/images', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { fileName, mimeType, base64 } = req.body || {};
+    if (!fileName?.trim() || !base64 || !mimeType) {
+      return res.status(400).json({ error: 'Campos "fileName", "mimeType" e "base64" são obrigatórios.' });
+    }
+    const resolvedMimeType = String(mimeType).split(';')[0].trim();
+    if (!ALLOWED_IMAGE_MIME_TYPES.has(resolvedMimeType)) {
+      return res.status(400).json({ error: `Formato de imagem não aceito (${resolvedMimeType}) — use JPEG, PNG ou WebP.` });
+    }
+    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buffer.length > MAX_IMAGE_BYTES) {
+      return res.status(400).json({ error: `Imagem maior que ${MAX_IMAGE_BYTES / (1024 * 1024)}MB (limite da Meta pra mensagem de imagem) — comprima antes de enviar.` });
+    }
+    if (buffer.length === 0) {
+      return res.status(400).json({ error: 'Arquivo de imagem vazio.' });
+    }
+
+    const imageId = `image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await uploadKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantId, imageId, buffer, resolvedMimeType);
+
+    // Issue #261 (mesmo padrão já usado por vídeo) — NÃO apaga a imagem
+    // anterior aqui. A referência nova só é persistida de fato quando a KB
+    // inteira é salva; a limpeza da imagem antiga acontece só depois do
+    // save real, comparando o que deixou de ser referenciado (ver
+    // POST /api/knowledge-base acima).
+    res.json({
+      imageId,
+      mimeType: resolvedMimeType,
+      fileName: String(fileName).trim(),
+      sizeBytes: buffer.length,
+    });
+  }));
+
+  // Baixa/visualiza a imagem real — nunca pública (autenticado + escopada
+  // por tenant já pela própria chave de Storage), mesmo padrão de
+  // GET /api/knowledge-base/videos/:videoId acima.
+  router.get('/api/knowledge-base/images/:imageId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const image = await getKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantOf(req), req.params.imageId);
+    if (!image) return res.status(404).json({ error: 'Imagem não encontrada.' });
+    res.setHeader('Content-Type', image.contentType);
+    // Mesmo padrão de cache privado por id estável já usado pra vídeo — o
+    // id é imutável (trocar a foto gera um id novo), então 1h de cache por
+    // id é seguro e reduz egress repetido do Storage.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Vary', 'Authorization');
+    res.send(image.buffer);
   }));
 
   // Upload de arquivo (ex: catálogo em PDF) pra um bloco tipo "file" da
@@ -1995,7 +2454,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
 
     const conversation = await getConversation(tenantId, escalation.phone);
-    const knowledgeBase = await getKnowledgeBase(tenantId);
+    const { knowledgeBase } = await getRuntimeKnowledgeBase(tenantId);
     const safeKnowledgeContext = knowledgeBase
       ? formatKnowledgeBaseForPrompt({
           companyName: knowledgeBase.companyName,
@@ -2148,6 +2607,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
   router.delete('/api/escalations/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const deleted = await deleteEscalation(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    res.json({ success: true });
+  }));
+
+  // Exclusão definitiva (não arquiva, apaga a linha e o histórico de auditoria) —
+  // restrita a saas_admin. Pedido do gestor (28/08/2026): escalonamentos de
+  // teste do próprio time contaminam a fila real (inclusive a aba Arquivados,
+  // já que o DELETE normal acima só arquiva) e precisam de um jeito de sumir
+  // de vez, sem valor de auditoria a preservar.
+  router.delete('/api/escalations/:id/permanent', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const deleted = await permanentlyDeleteEscalation(tenantOf(req), req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ success: true });
   }));

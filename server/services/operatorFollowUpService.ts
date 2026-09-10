@@ -22,6 +22,8 @@ import { getConversation, recordOutgoingMessage } from './conversationStore';
 import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage } from './metaSend';
 import { logEscalation, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, type Escalation } from './escalationStore';
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
+import { buildChronologicalConversationContext } from './conversationReplyGuard';
+import { HISTORY_WINDOW_SIZE } from './autoReply';
 
 const CUSTOMER_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -51,10 +53,29 @@ export async function getCustomerServiceWindowStatus(tenantId: string, phone: st
   };
 }
 
-async function draftFollowUpMessage(tenantId: string, ai: GoogleGenAI, operatorReply: string, contactName: string | undefined): Promise<string> {
+/**
+ * TASK-0316 (pedido direto, seguindo o mesmo achado da TASK-0315): esta
+ * função nunca recebeu o histórico da conversa — só a orientação livre do
+ * operador. Diferente do botão "Sugerir mensagem de retomada" da Ficha IA
+ * (rascunho revisável, corrigido na TASK-0315), esta retomada é AUTOMÁTICA
+ * — dentro da janela de 24h, o texto gerado aqui vai direto pro cliente
+ * sem nenhum operador revisar antes (só o revisor de segurança confere
+ * depois, e ele sim já recebia o histórico via `reviewAutoReplyBeforeSend`
+ * mais abaixo). Um modelo escrevendo "retomada de contato" sem nunca ter
+ * visto do que se tratava a conversa tem uma chance real de soar
+ * desconectado do que já foi dito — exatamente o tipo de "fora de
+ * contexto" relatado. Mesma janela do agente principal (HISTORY_WINDOW_SIZE)
+ * e mesmo formato cronológico numerado (buildChronologicalConversationContext)
+ * já usados no resto do projeto.
+ */
+async function draftFollowUpMessage(tenantId: string, ai: GoogleGenAI, operatorReply: string, contactName: string | undefined, conversationHistory: unknown): Promise<string> {
+  const chronologicalHistory = buildChronologicalConversationContext(conversationHistory, HISTORY_WINDOW_SIZE);
   const prompt = `Você é a atendente de WhatsApp de um negócio. Um atendente humano deixou esta orientação sobre como retomar contato com ${contactName || 'um cliente'} que ficou sem resposta: "${operatorReply}"
 
-Escreva UMA mensagem curta, natural e calorosa pro cliente, em espanhol paraguaio (a menos que a orientação esteja claramente noutro idioma — nesse caso, responda no mesmo idioma da orientação), baseada só no que a orientação diz. Não invente nenhum dado (preço, horário, disponibilidade) que não esteja na orientação. Responda só com o texto da mensagem, sem aspas nem comentário.`;
+Escreva UMA mensagem curta, natural e calorosa pro cliente, em espanhol paraguaio (a menos que a orientação esteja claramente noutro idioma — nesse caso, responda no mesmo idioma da orientação), baseada só no que a orientação diz. Não invente nenhum dado (preço, horário, disponibilidade) que não esteja na orientação. Responda só com o texto da mensagem, sem aspas nem comentário.
+
+Histórico cronológico de mensagens desta conversa (as mais antigas podem ter sido omitidas; a numeração recomeça em 1, não é a posição real na conversa completa) — use só pra manter continuidade e nunca repetir/contradizer o que já foi dito, retomar não é a mesma coisa que recomeçar:
+${chronologicalHistory}`;
 
   const response = await withGeminiRetry(
     () =>
@@ -113,9 +134,13 @@ export async function sendOperatorGuidedFollowUp(
   }
 
   if (!deps.ai) return { sent: false, reason: 'IA indisponível no momento.' };
+  // TASK-0316: buscada ANTES de gerar a mensagem (antes só era buscada
+  // depois, pro revisor de segurança) — o prompt que REDIGE a retomada
+  // agora também recebe o histórico real, não só quem valida depois.
+  const conversation = await getConversation(tenantId, escalation.phone);
   let message: string;
   try {
-    message = await draftFollowUpMessage(tenantId, deps.ai, escalation.operatorReply, escalation.contactName);
+    message = await draftFollowUpMessage(tenantId, deps.ai, escalation.operatorReply, escalation.contactName, conversation?.messages);
   } catch (error: any) {
     // Achado real (27/08/2026): sem isto, um timeout/erro do Gemini aqui
     // derrubava a requisição inteira com 500 (erro não tratado) — o
@@ -125,12 +150,12 @@ export async function sendOperatorGuidedFollowUp(
     return { sent: false, reason: 'A IA demorou demais ou falhou ao gerar a retomada. Tente novamente ou responda manualmente.' };
   }
   if (!message) return { sent: false, reason: 'IA não conseguiu gerar a mensagem de retomada.' };
-  const conversation = await getConversation(tenantId, escalation.phone);
   const safety = await reviewAutoReplyBeforeSend({
     customerMessage: escalation.lastMessage || escalation.operatorReply,
     draftBubbles: [message],
     history: conversation?.messages,
     knowledgeContext: escalation.operatorReply,
+    contactName: escalation.contactName,
   }, { ai: deps.ai });
   if (!safety.approved) {
     console.warn(`🛡️ [Revisor pré-envio] retomada guiada bloqueada para ${escalation.phone}: ${safety.reason}`);

@@ -1,6 +1,7 @@
 import type { TrackedAppointment } from './appointmentStore';
 import type { Escalation } from './escalationStore';
 import type { ContactAgentMemory, ContactAgentMemoryPatch, ContactMemoryOpenLoop } from './contactAgentMemoryStore';
+import type { AgentKnowledgeBase } from './knowledgeBaseStore';
 import { getAppointmentForPhone } from './appointmentStore';
 import { getContactAgentMemory } from './contactAgentMemoryStore';
 import { getOpenEscalationForPhone } from './escalationStore';
@@ -15,7 +16,7 @@ export interface AgentContextPack {
   liveState: {
     appointment: Pick<TrackedAppointment, 'paymentStatus' | 'heldUntil' | 'eventId'> | null;
     appointmentAvailable: boolean;
-    escalation: Pick<Escalation, 'id' | 'kind' | 'resolved'> | null;
+    escalation: (Pick<Escalation, 'id' | 'kind' | 'resolved'> & Partial<Pick<Escalation, 'reason' | 'createdAt'>>) | null;
     escalationAvailable: boolean;
   };
   selectedFacts: Record<string, unknown>;
@@ -36,6 +37,26 @@ export interface DeriveContactMemoryInput {
   awaitingCustomerChoice?: string;
   needsHumanConfirmation: boolean;
   liveState: AgentContextPack['liveState'];
+  /** TASK-0246: catálogo real do tenant, pra `inferServiceInterest` casar o
+      texto do lead contra produtos/categorias de verdade em vez de uma
+      lista fixa de 3 categorias hardcoded pra estética (achado real numa
+      auditoria: `serviceInterest` nunca detectava nada fora de "pestañas/
+      cejas/labios", quebrado pra qualquer tenant de outro segmento, ex:
+      Clic Piscinas). Opcional — sem catálogo (tenant ainda sem produtos
+      cadastrados), cai no fallback antigo (ver `inferServiceInterest`). */
+  knowledgeBase?: AgentKnowledgeBase | null;
+  /** TASK-0355 — o próprio especialista já extrai isso (campo "servicoInteresse"
+      do JSON de resposta), lendo a conversa inteira com muito mais precisão
+      que o regex de `inferServiceInterest` (que só olha a mensagem atual).
+      Sem chamada extra: já vem de graça na mesma resposta usada pra gerar o
+      texto pro cliente — só nunca tinha sido aproveitado aqui. Quando ausente
+      (ex: nenhum serviço específico mencionado ainda), cai no fallback de sempre. */
+  interestedService?: string;
+  /** TASK-0355 — idem: a fase da conversa ("abertura"|"informacao"|"objecao"|
+      "fechamento") também já vem de graça na mesma resposta do especialista.
+      Usada só pra registrar que uma objeção real ocorreu nesta mensagem —
+      nunca decide nada sozinha, é só um fato observado. */
+  phase?: 'abertura' | 'informacao' | 'objecao' | 'fechamento';
 }
 
 function compactText(value: string | null | undefined, maxLength = 180): string | null {
@@ -83,7 +104,15 @@ function renderLiveState(liveState: AgentContextPack['liveState']): string[] {
   if (!liveState.escalationAvailable) {
     lines.push('- Escalonamentos: estado vivo indisponível neste turno; preserve o tratamento conservador de casos sensíveis.');
   } else if (liveState.escalation) {
-    lines.push(`- Escalonamento humano aberto (${liveState.escalation.kind}): mantenha a decisão sob revisão humana; não prometa resolução, reembolso ou exceção.`);
+    const minutesOpen = liveState.escalation.createdAt
+      ? Math.max(0, Math.round((Date.now() - new Date(liveState.escalation.createdAt).getTime()) / 60000))
+      : undefined;
+    const reasonSnippet = compactText(liveState.escalation.reason, 160);
+    lines.push(
+      `- Escalonamento humano aberto (${liveState.escalation.kind}${minutesOpen !== undefined ? `, há ${minutesOpen} min` : ''})` +
+      `${reasonSnippet ? `, motivo: "${reasonSnippet}"` : ''}: mantenha a decisão sob revisão humana; não prometa resolução, reembolso ou exceção.` +
+      ' NÃO reabra nem repita sozinho o mesmo assunto que gerou esta escalação (o mesmo preço/horário/pedido já está em análise humana) — se a cliente insistir nele, reconheça que já está sendo verificado, sem novo prazo ou promessa.'
+    );
   }
   return lines;
 }
@@ -92,7 +121,7 @@ export function buildAgentContextPack(input: {
   memory: ContactAgentMemory | null;
   appointment?: Pick<TrackedAppointment, 'paymentStatus' | 'heldUntil' | 'eventId'> | null;
   appointmentAvailable?: boolean;
-  escalation?: Pick<Escalation, 'id' | 'kind' | 'resolved'> | null;
+  escalation?: (Pick<Escalation, 'id' | 'kind' | 'resolved'> & Partial<Pick<Escalation, 'reason' | 'createdAt'>>) | null;
   escalationAvailable?: boolean;
 }): AgentContextPack {
   const liveState = {
@@ -164,8 +193,48 @@ function detectExplicitLanguage(text: string): string | undefined {
   return undefined;
 }
 
-function inferServiceInterest(text: string): string | undefined {
+/**
+ * TASK-0246 (achado real de auditoria, 03/09/2026): antes disso,
+ * `inferServiceInterest` só reconhecia 3 categorias hardcoded de estética
+ * (pestañas/cejas/labios) — funcionava só por coincidência pro tenant da
+ * Monique e nunca detectava nada pra qualquer outro segmento (ex: Clic
+ * Piscinas, tenant real de limpeza de piscina, sem nenhuma menção a
+ * "pestaña" nunca vai bater). Agora casa o texto do lead contra o catálogo
+ * REAL do tenant — primeiro por categoria (termo mais genérico, mais
+ * chance de bater com uma menção casual do cliente), depois por nome
+ * comercial/apelido do produto (mais específico).
+ */
+function inferServiceInterestFromCatalog(normalizedText: string, kb: AgentKnowledgeBase | null | undefined): string | undefined {
+  const products = (kb?.products || []).filter((p) => p.active !== false);
+  if (!products.length) return undefined;
+  const norm = (value: string) => value.trim().toLocaleLowerCase('pt-BR');
+
+  const categories = Array.from(new Set(
+    products.map((p) => p.category).filter((c): c is string => !!c && c.trim().length >= 3)
+  ));
+  for (const category of categories) {
+    if (normalizedText.includes(norm(category))) return category;
+  }
+
+  for (const product of products) {
+    const candidates = [product.name, ...(product.aliases || [])];
+    for (const candidate of candidates) {
+      const normalizedCandidate = norm(candidate);
+      // Exige pelo menos 4 caracteres — evita falso positivo com sigla
+      // curta demais casando com qualquer trecho aleatório do texto.
+      if (normalizedCandidate.length >= 4 && normalizedText.includes(normalizedCandidate)) return product.name;
+    }
+  }
+  return undefined;
+}
+
+function inferServiceInterest(text: string, kb?: AgentKnowledgeBase | null): string | undefined {
   const normalized = text.toLocaleLowerCase('pt-BR');
+  const fromCatalog = inferServiceInterestFromCatalog(normalized, kb);
+  if (fromCatalog) return fromCatalog;
+  // Fallback legado — só entra em ação quando o tenant ainda não tem
+  // catálogo cadastrado ou o texto não bateu com nenhum produto/categoria
+  // real; mantido como rede de segurança, não mais como caminho principal.
   if (/(pestañ|lash|extens[õo]es)/.test(normalized)) return 'pestañas/extensiones';
   if (/(ceja|sobrancelha|brow|microblading|micropigment)/.test(normalized)) return 'cejas/sobrancelhas';
   if (/(labio|lábio|lip)/.test(normalized)) return 'lábios';
@@ -211,18 +280,29 @@ function deriveNextBestAction(input: DeriveContactMemoryInput): string | undefin
  * agenda/pagamento/escalonamento para facts_confirmed.
  */
 export function deriveContactMemoryPatch(input: DeriveContactMemoryInput): ContactAgentMemoryPatch {
-  const serviceInterest = input.existingMemory?.service_interest || inferServiceInterest(input.text);
+  // TASK-0355: prefere o servicoInteresse que o próprio especialista já
+  // extraiu (lê a conversa inteira, nome exato do catálogo) ao regex de
+  // inferServiceInterest (só olha a mensagem atual) — mesma prioridade de
+  // antes em relação à memória já existente (sticky, uma vez registrado).
+  const serviceInterest = input.existingMemory?.service_interest || input.interestedService || inferServiceInterest(input.text, input.knowledgeBase);
   const nextBestAction = deriveNextBestAction(input);
   const conversationSummary = [
     serviceInterest ? `Interesse: ${serviceInterest}.` : null,
     nextBestAction ? `Próximo passo: ${nextBestAction}` : null,
   ].filter(Boolean).join(' ') || undefined;
+  // TASK-0355: a fase "objecao" já vem de graça na mesma resposta do
+  // especialista — registra a mensagem que gerou a objeção como um fato
+  // observável. Acrescenta à lista existente (nunca substitui — ver
+  // replaceObjections em contactAgentMemoryStore.ts, reservado pra correção
+  // humana), então uma objeção nova nunca apaga uma anterior.
+  const newObjection = input.phase === 'objecao' ? compactText(input.text, 200) : null;
 
   return {
     preferredLanguage: input.existingMemory?.preferred_language || detectExplicitLanguage(input.text),
     preferredName: input.capturedClientName || input.existingMemory?.preferred_name || undefined,
     currentIntent: input.agent,
     serviceInterest,
+    objections: newObjection ? [newObjection] : undefined,
     openLoops: buildOpenLoops(input),
     nextBestAction,
     conversationSummary,

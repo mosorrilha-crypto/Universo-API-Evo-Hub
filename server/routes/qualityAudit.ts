@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+import type { GoogleGenAI } from '@google/genai';
 import { Router, type RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -13,6 +15,13 @@ import {
   type QualityReviewKind,
   type QualityReviewStatus,
 } from '../services/qualityAuditStore';
+import { runAgentEvaluation } from '../services/agentEvalService';
+import { generateAutoReplyForText } from '../services/autoReply';
+import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { getTenantSegment } from '../services/tenantProfileStore';
+import type { CalendarConfig } from '../services/googleCalendar';
+import { createAgentEvalRun, finishAgentEvalRun, listAgentEvalRuns, updateAgentEvalRunProgress } from '../services/agentEvalRunStore';
+import { recordAgentEvalRunCase, listAgentEvalRunCases } from '../services/agentEvalRunCaseStore';
 import { calculateControlledExperimentResult } from '../services/controlledExperimentResults';
 import {
   createControlledExperiment,
@@ -33,7 +42,20 @@ interface QualityAuditRouterDeps {
   authenticateToken: RequestHandler;
   /** Injeção de teste; em produção consulta o entitlement do tenant corrente. */
   isQualityModuleEnabled?: () => Promise<boolean>;
+  /** TASK-0208 — avaliação automática (botão "Rodar avaliação automática"). Getter deferido, mesmo padrão já usado em webhooks.ts. */
+  getAi?: () => GoogleGenAI | null;
+  groqApiKey?: string;
+  /** TASK-0375 — "Testar roteiro manual" precisa do calendário real pra
+   * ferramentas de consulta de disponibilidade funcionarem de verdade
+   * (mesmas credenciais de app compartilhadas usadas em webhooks.ts/
+   * conversations.ts — nunca um segredo por tenant aqui). */
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRedirectUri?: string;
 }
+
+const EVAL_RUN_MAX_COUNT = 100;
+const EVAL_RUN_MIN_COUNT = 1;
 
 function tenantOf(req: AuthenticatedRequest): string {
   return resolveTenantId(req);
@@ -52,9 +74,15 @@ function safeContext(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function createQualityAuditRouter({ authenticateToken, isQualityModuleEnabled }: QualityAuditRouterDeps): Router {
+export function createQualityAuditRouter({ authenticateToken, isQualityModuleEnabled, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri }: QualityAuditRouterDeps): Router {
   const router = Router();
   const qualityModuleEnabled = isQualityModuleEnabled || isQualityModuleEnabledForCurrentTenant;
+  // Mesmo formato de webhooks.ts/conversations.ts — CalendarConfig só carrega
+  // credenciais de app (OAuth), nunca segredo por tenant; a autorização real
+  // por tenant já mora no lado de dentro de checkFreeBusy/etc.
+  const calendarConfig: CalendarConfig | undefined = googleRedirectUri
+    ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }
+    : undefined;
 
   function requireQualityModule() {
     return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
@@ -185,6 +213,99 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
     res.json({ experiment });
   }));
 
+  /**
+   * TASK-0208 — botão "Rodar avaliação automática" (pedido direto do dono
+   * do produto, ver TASK-0203). Uma rodada de N casos leva minutos (cada
+   * caso faz várias chamadas Gemini sequenciais) — não cabe numa
+   * requisição HTTP síncrona, então cria o registro de progresso e
+   * responde IMEDIATAMENTE com o runId; a avaliação continua rodando no
+   * processo do servidor em background (fire-and-forget controlado —
+   * qualquer erro é capturado e gravado em agent_eval_runs.error, nunca
+   * derruba o processo). O painel faz polling em GET .../eval-runs pra
+   * acompanhar. Os ACHADOS de falha continuam caindo em quality_reviews,
+   * igual ao script de terminal (mesma função runAgentEvaluation).
+   */
+  router.post('/api/quality-audit/eval-runs', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const ai = getAi?.();
+    if (!ai) return res.status(503).json({ error: 'Gemini não configurado (GEMINI_API_KEY ausente) — avaliação automática indisponível.' });
+    const tenantId = tenantOf(req);
+    const rawCount = req.body?.count;
+    const parsedCount = Number(rawCount);
+    // count=0 é um valor explícito (deve virar EVAL_RUN_MIN_COUNT, não o
+    // padrão) — diferente de ausente/inválido, que cai no padrão de 10.
+    // `Number(x) || 10` erraria isso: 0 é falsy em JS, cairia no padrão.
+    const requestedCount = rawCount === undefined || !Number.isFinite(parsedCount)
+      ? 10
+      : Math.max(EVAL_RUN_MIN_COUNT, Math.min(parsedCount, EVAL_RUN_MAX_COUNT));
+
+    const run = await createAgentEvalRun({ tenantId, requestedCount, requestedBy: req.user?.id || null });
+    res.status(202).json({ run });
+
+    // A partir daqui a resposta HTTP já foi enviada — este bloco roda em
+    // background. Nunca deixa uma exceção não tratada escapar (viraria
+    // unhandledRejection e derrubaria o processo inteiro, ver CLAUDE.md).
+    runAgentEvaluation({
+      tenantId,
+      ai,
+      count: requestedCount,
+      groqApiKey,
+      onProgress: async ({ completed, passed, failed }) => {
+        try {
+          await updateAgentEvalRunProgress(run.id, { completedCount: completed, passCount: passed, failCount: failed });
+        } catch (err) {
+          console.warn(`⚠️  [Avaliação automática] falha ao atualizar progresso do run ${run.id}:`, (err as Error)?.message || err);
+        }
+      },
+      // TASK-0249 — pedido direto do dono do produto: poder ver a lista
+      // completa de pergunta+resposta de uma rodada, inclusive os casos
+      // APROVADOS (não só os que viram achado em quality_reviews), pra
+      // conferir se o julgador acertou de verdade. onCaseResult já
+      // calculava tudo isso, só não estava conectado a nenhuma persistência
+      // nesta rota (só o CLI usava, pra dump em arquivo).
+      onCaseResult: (result) => {
+        recordAgentEvalRunCase({
+          runId: run.id,
+          tenantId,
+          category: result.category,
+          question: result.text,
+          history: result.history,
+          agent: result.agent,
+          bubbles: result.bubbles,
+          passed: Boolean(result.passed),
+          safetyApproved: result.safety?.approved,
+          safetyReason: result.safety?.reason,
+          qualityIssues: result.quality?.issues,
+          suggestedFix: result.quality?.suggestedFix,
+          error: result.error,
+        }).catch((err) => {
+          console.warn(`⚠️  [Avaliação automática] falha ao salvar caso do run ${run.id}:`, (err as Error)?.message || err);
+        });
+      },
+    })
+      .then(async (summary) => {
+        await finishAgentEvalRun(run.id, { status: 'completed', repeatedPhraseCount: summary.repeatedPhrases.length });
+      })
+      .catch(async (err) => {
+        console.warn(`⚠️  [Avaliação automática] run ${run.id} falhou:`, (err as Error)?.message || err);
+        try {
+          await finishAgentEvalRun(run.id, { status: 'failed', error: (err as Error)?.message || String(err) });
+        } catch (persistError) {
+          console.warn(`⚠️  [Avaliação automática] falha ao registrar erro do run ${run.id}:`, (persistError as Error)?.message || persistError);
+        }
+      });
+  }));
+
+  router.get('/api/quality-audit/eval-runs', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const runs = await listAgentEvalRuns(tenantOf(req));
+    res.json({ runs });
+  }));
+
+  /** TASK-0249 — lista pergunta+resposta+veredito de cada caso de uma rodada, aprovado ou não. */
+  router.get('/api/quality-audit/eval-runs/:runId/cases', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const cases = await listAgentEvalRunCases(tenantOf(req), req.params.runId);
+    res.json({ cases });
+  }));
+
   /** Materializa na fila apenas candidatos recorrentes; não muda prompt, KB ou agente. */
   router.post('/api/quality-audit/memory-pattern-reviews/sync', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
@@ -307,8 +428,9 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
     const { status, reviewNote, correctedValue } = req.body || {};
     const parsedStatus = status === undefined ? undefined : parseStatus(status);
     if (status !== undefined && !parsedStatus) return res.status(400).json({ error: 'Status de revisão inválido.' });
+    const tenantId = tenantOf(req);
     const review = await updateQualityReview({
-      tenantId: tenantOf(req),
+      tenantId,
       reviewId: req.params.id,
       status: parsedStatus,
       reviewNote: reviewNote === undefined ? undefined : String(reviewNote || ''),
@@ -316,16 +438,44 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
       reviewedBy: req.user?.id || null,
     });
     if (!review) return res.status(404).json({ error: 'Revisão não encontrada.' });
+
+    // TASK-0304 — pedido direto do dono do produto: "Aprovar" não fazia
+    // nada além de gravar o status (achado durante uma auditoria da própria
+    // tela de Qualidade). Quando o achado aprovado já tem uma resposta
+    // sugerida ("Como deveria ter respondido"), aprovar agora abre um
+    // rascunho de conhecimento pra decisão humana incorporar (ou não) esse
+    // padrão na Base de Conhecimento do tenant — nunca publica sozinho,
+    // mesmo princípio não-destrutivo já usado no fluxo knowledge_draft dos
+    // padrões de memória (ver rota .../memory-pattern-reviews/:id acima).
+    let knowledgeDraftCreated = false;
+    if (parsedStatus === 'approved' && review.kind !== 'knowledge' && review.corrected_value) {
+      const existingDrafts = await listQualityReviews(tenantId, { kind: 'knowledge' });
+      const alreadyDrafted = existingDrafts.some((draft) => draft.context?.sourceReviewId === review.id);
+      if (!alreadyDrafted) {
+        await createQualityReview({
+          tenantId,
+          kind: 'knowledge',
+          title: `Incorporar resposta aprovada: ${review.title}`,
+          description: `Achado aprovado (${review.id}): "${review.title}".\n\nResposta sugerida como correta:\n${review.corrected_value}\n\nAvalie se este padrão deve virar orientação/exemplo na Base de Conhecimento do tenant — esta abertura não publica nada sozinha.`,
+          context: { source: 'approved_review', sourceReviewId: review.id },
+          originalValue: review.original_value ?? null,
+          correctedValue: review.corrected_value,
+          createdBy: req.user?.id || null,
+        });
+        knowledgeDraftCreated = true;
+      }
+    }
+
     await recordQualityAuditEvent({
-      tenantId: tenantOf(req),
+      tenantId,
       eventType: 'quality_review_updated',
       source: 'quality_admin',
       entityType: 'quality_review',
       entityId: review.id,
       actorId: req.user?.id,
-      payload: { status: review.status, reviewNote: review.review_note || null },
+      payload: { status: review.status, reviewNote: review.review_note || null, knowledgeDraftCreated },
     });
-    res.json({ review });
+    res.json({ review, knowledgeDraftCreated });
   }));
 
   router.post('/api/quality-audit/feedback', authenticateToken, requireQualityModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
@@ -372,6 +522,68 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
       payload: { decision, note: note || null, originalValue: originalValue || null, correctedValue: correctedValue || null, context: safeContext(context) },
     });
     res.status(201).json({ success: true, reviewId: reviewIdToAudit, event });
+  }));
+
+  /**
+   * TASK-0375 (pedido direto): "digitar as perguntas que eu quero testar,
+   * tipo gerar uma conversa fictícia com roteiro, sem passar pelo webhook,
+   * mas recebendo respostas reais do agente" — um turno de cada vez, o
+   * operador digita, vê a resposta REAL, decide a próxima mensagem
+   * considerando o que a IA respondeu (chat interativo, não um roteiro
+   * inteiro mandado de uma vez).
+   *
+   * Mesmo pipeline real (`generateAutoReplyForText`) que processa mensagem
+   * de WhatsApp de verdade — só que com telefone fictício (nunca colide com
+   * um contato real) e SEM `messageId`/persistência nenhuma: nada é gravado
+   * em `messages`/`conversations`, nenhum escalonamento, nenhum evento de
+   * calendário real. Isso é seguro mesmo passando o calendário REAL do
+   * tenant: as 4 ações de escrita (criar/remarcar/cancelar agendamento,
+   * criar_pre_reserva) já são só "planejadas" nesta etapa de rascunho
+   * (`runAgendamentoTools`/`isDeferredCalendarActionName` em autoReply.ts) —
+   * a execução de verdade só acontece num passo SEPARADO
+   * (`executeApprovedCalendarActions`, chamado só depois do revisor de
+   * segurança aprovar o ENVIO real em webhooks.ts), que esta rota nunca
+   * chama. Só as consultas de disponibilidade (leitura) rodam de verdade,
+   * o que é o que torna o teste de agendamento útil de verdade.
+   *
+   * Histórico da conversa fictícia é mantido pelo PRÓPRIO CLIENTE (array
+   * `history` enviado a cada turno) — sem tabela nova, sem estado no
+   * servidor entre chamadas.
+   */
+  router.post('/api/quality-audit/manual-test', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const ai = getAi?.();
+    if (!ai) return res.status(503).json({ error: 'Gemini não configurado (GEMINI_API_KEY ausente) — teste manual indisponível.' });
+
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: 'text é obrigatório.' });
+    if (text.length > 2000) return res.status(400).json({ error: 'Mensagem muito longa (máximo 2000 caracteres).' });
+
+    const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+    if (rawHistory.length > 200) return res.status(400).json({ error: 'Histórico muito longo (máximo 200 mensagens).' });
+    const history = rawHistory
+      .filter((m: unknown): m is { sender: unknown; text: unknown } => !!m && typeof m === 'object')
+      .map((m: { sender: unknown; text: unknown }) => ({
+        sender: (m.sender === 'agent' ? 'agent' : 'lead') as 'lead' | 'agent',
+        text: typeof m.text === 'string' ? m.text.slice(0, 2000) : undefined,
+      }));
+
+    const tenantId = tenantOf(req);
+    const runtimeKb = await getRuntimeKnowledgeBase(tenantId);
+    if (runtimeKb.source === 'unavailable') {
+      return res.status(503).json({ error: 'Base de Conhecimento indisponível pra este tenant — não dá pra testar sem ela.' });
+    }
+    const kbContext = formatKnowledgeBaseForPrompt(runtimeKb.knowledgeBase);
+    const segment = await getTenantSegment(tenantId);
+    const fakePhone = `test-${randomUUID()}`;
+
+    const result = await generateAutoReplyForText(
+      tenantId, ai, text, undefined, kbContext, history, fakePhone,
+      calendarConfig, segment, undefined, undefined, undefined, undefined, groqApiKey, undefined, false
+    );
+    if (!result) {
+      return res.status(502).json({ error: 'Sem resposta (Gemini indisponível no momento — tente de novo).' });
+    }
+    res.json({ bubbles: result.bubbles, agent: result.agent, needsHumanConfirmation: result.needsHumanConfirmation });
   }));
 
   return router;

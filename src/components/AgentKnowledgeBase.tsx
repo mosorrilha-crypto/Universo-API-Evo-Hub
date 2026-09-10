@@ -6,6 +6,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { AgentKnowledgeBase, AgentProduct, ProductVariant, BeforeAfterPair, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
+import { ReconectarWhatsAppQrCode } from './ReconectarWhatsAppQrCode';
 import {
   Brain,
   Sparkles,
@@ -43,10 +44,12 @@ import {
   ChevronDown,
   GripVertical,
   ExternalLink,
-  Pencil
+  Pencil,
+  Search
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
 import { KnowledgeBaseDocumentation } from './KnowledgeBaseDocumentation';
+import { PromptAuditView } from './PromptAuditView';
 import {
   type KnowledgeBaseDocumentState,
   listKnowledgeBaseDocumentStates,
@@ -59,10 +62,10 @@ import {
   documentPayloadsMatch,
   splitVisualKnowledgeBaseIntoDocuments,
 } from '../lib/knowledgeBaseVisualDocuments';
+import { describeKnowledgeBaseDocumentDiff } from '../lib/knowledgeBaseDocumentDiff';
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
-  onSaveKnowledgeBase: (kb: AgentKnowledgeBase) => Promise<boolean>;
   businessHours: BusinessHours;
   onSaveBusinessHours: (hours: BusinessHours) => Promise<boolean>;
   onGoToWhatsAppSim: () => void;
@@ -78,6 +81,13 @@ interface AgentKnowledgeBaseProps {
   activeTenantId?: string;
   /** PR4: publicação tipada já é a fonte do agente; blob legado fica só como rollback. */
   usesPublishedKnowledgeBase?: boolean;
+  /** hasRoleAtLeast(currentUser?.role, 'admin') calculado em App.tsx — libera
+   * o botão "Reconectar WhatsApp (QR Code)" pra admin comum do tenant, não
+   * só saas_admin. Movido de `WhatsAppLeadsSim.tsx` (TASK-0167, 29/08/2026,
+   * pedido do dono do produto: "pode ficar nas configurações do tenant
+   * quando admin") — esta tela já é a de configuração operacional vista por
+   * admins. */
+  canManageWhatsAppConnection?: boolean;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -164,34 +174,30 @@ export function ensureUniqueIds<T extends { id?: string }>(items: T[] | undefine
 // `emptyKnowledgeBase` é o fallback correto pra esses casos — o catálogo
 // de exemplo da Monique continua disponível, mas só como escolha explícita
 // em PRESET_TEMPLATES abaixo (o admin escolhe carregar, nunca é automático).
-export const emptyKnowledgeBase: AgentKnowledgeBase = {
-  companyName: '',
-  agentGoal: '',
-  toneOfVoice: '',
-  businessModel: '',
-  pricingAndPolicies: '',
-  products: [],
-  businessRules: [],
-  faqs: [],
-  documents: [],
-};
+// TASK-0376: movido pra `lib/emptyKnowledgeBase.ts` (módulo pequeno, sem
+// puxar este arquivo inteiro) — reexportado aqui só pra não quebrar quem já
+// importava deste caminho.
+export { emptyKnowledgeBase } from '../lib/emptyKnowledgeBase';
 
 // Espelha o "PROMPT FINAL — MONIQUE SORRILHA BEAUTY STUDIO" (versão final
-// fechada em 07/08/2026, ver scripts/seed-monique-knowledge-base.ts pra a
-// cópia que roda de verdade no backend/Gemini). Essa cópia aqui alimenta só
-// o editor local da aba "Base de Conhecimento" — mantida em paridade com o
-// backend pra nunca voltar a divergir (achado numa auditoria: essa cópia
-// tinha só 10 dos 21 serviços e ainda mostrava a promoção de julho/2026 já
-// vencida, "[PROMO Gs 450.000]", hardcoded no preço). Usada só como PRESET
-// explícito (ver PRESET_TEMPLATES abaixo) — nunca mais como fallback
-// silencioso (ver App.tsx).
+// fechada em 07/08/2026). TASK-0327 — o script que antes gravava a cópia
+// "de verdade" no backend (scripts/seed-monique-knowledge-base.ts) foi
+// removido junto com a tabela legada `knowledge_base`: a fonte real do
+// tenant hoje é só o editor tipado (draft + publicação, painel). Esta
+// constante aqui é usada exclusivamente como PRESET explícito de onboarding
+// (ver PRESET_TEMPLATES abaixo) — nunca como fallback silencioso (ver
+// App.tsx) — então pode divergir do tenant real sem quebrar nada; revise
+// antes de aplicar num tenant novo (achado numa auditoria: chegou a ficar
+// com só 10 dos 21 serviços, uma promoção vencida hardcoded no preço, e um
+// dado bancário da conta antiga já trocada — TASK-0327 corrigiu esse
+// último).
 export const moniqueStudioKnowledgeBase: AgentKnowledgeBase = {
   companyName: 'Monique Sorrilha Beauty Studio',
   agentGoal: 'Atender clientes pelo WhatsApp e Instagram, entender o que elas desejam, recomendar serviços somente com base no catálogo oficial, consultar a agenda conectada e conduzir o atendimento até a reserva, sem confirmar horários antes da conclusão de todas as etapas obrigatórias. Quando perguntarem quem atende, responder: "Sou a Ana, assistente da Monique por aqui." Nunca dizer ou sugerir que é a própria Monique.',
   toneOfVoice: 'Espanhol paraguaio com voseo natural (vos, querés, buscás, podés, tenés, vení) e imperativos como escribime e mandame quando a cliente escreve em espanhol; português do Brasil quando ela escreve em português. Em idiomas mistos, usar o idioma predominante; em empate, perguntar a preferência. Tom caloroso, natural e direto, sem formalidade, rigidez ou pressão. Vocativos com moderação, cerca de 1 a cada 4-5 mensagens; evitar se a cliente demonstrar irritação. NUNCA use diminutivo. Escreva em frases curtas, sem parênteses nem dois-pontos explicativos. Evite usted, linguagem corporativa, excesso de emojis, falsa urgência, pressão para pagamento ou promessa de resultado. Nunca misture português em uma frase em espanhol.',
   businessModel: 'O Monique Sorrilha Beauty Studio oferece micropigmentação de sobrancelhas e lábios, procedimentos para pestañas e combos de beleza em Luque, Paraguai. O atendimento é personalizado, com foco em resultados naturais, harmônicos e adequados às preferências de cada cliente. Ana é a assistente virtual responsável pelo primeiro atendimento, esclarecimento de dúvidas, recomendação baseada no catálogo oficial, consulta de agenda e encaminhamento para aprovação humana quando necessário. A avaliação está incluída quando indicada no catálogo.',
   locationMapsUrl: 'https://www.google.com/maps?q=-25.2516845,-57.4997556&z=17&hl=pt-BR',
-  pricingAndPolicies: 'As únicas formas de recebimento são transferência bancária ou efetivo. Seña de Gs 50.000, abatida do total: só enviar os dados de transferência depois que serviço, valor e horário desejado estiverem claros e a cliente demonstrar intenção real de agendar. Alias/Cédula: 5286155. Titular: Sara Jazmin Escobar Ruiz. Efetivo só quando a cliente pedir ou demonstrar dificuldade com transferência; nesse caso, paga o total depois do atendimento e o turno não é confirmado automaticamente. Cancelamento: seña devolvida com 24h+ de antecedência, não devolvida com menos de 24h. Tolerância de atraso de 15 minutos; após isso, o agendamento poderá ser cancelado. Remarcação sem custo com 24h+ de antecedência. Ausência sem aviso não gera reembolso e exige nova seña. Retoque não está incluso, não é obrigatório, só ocorre quando Monique recomendar após avaliar a primeira aplicação feita por ela e não é feito em procedimentos de outras profissionais. Nunca desconto, parcelamento, cortesia ou alteração de política não autorizada.',
+  pricingAndPolicies: 'As únicas formas de recebimento são transferência bancária ou efetivo. Seña de Gs 50.000, abatida do total: só enviar os dados de transferência depois que serviço, valor e horário desejado estiverem claros e a cliente demonstrar intenção real de agendar. Alias/Cédula: 9518111. Titular: Monique Sorrilha. Efetivo só quando a cliente pedir ou demonstrar dificuldade com transferência; nesse caso, paga o total depois do atendimento e o turno não é confirmado automaticamente. Cancelamento: seña devolvida com 24h+ de antecedência, não devolvida com menos de 24h. Tolerância de atraso de 15 minutos; após isso, o agendamento poderá ser cancelado. Remarcação sem custo com 24h+ de antecedência. Ausência sem aviso não gera reembolso e exige nova seña. Retoque não está incluso, não é obrigatório, só ocorre quando Monique recomendar após avaliar a primeira aplicação feita por ela e não é feito em procedimentos de outras profissionais. Nunca desconto, parcelamento, cortesia ou alteração de política não autorizada.',
   products: [
     // PESTAÑAS
     { id: 'm1', name: 'Lash Lift', price: 'Gs 140.000', priceAmount: 140000, currency: 'PYG', durationMinutes: 90, bookable: false, description: 'Pestañas — curva e realça as próprias pestañas, sem extensões. Efeito natural que dura semanas.' },
@@ -383,6 +389,47 @@ const PRESET_TEMPLATES: { name: string; icon: string; desc: string; data: Partia
   }
 ];
 
+/**
+ * TASK-0218: preview de uma imagem da Base de Conhecimento que já migrou pro
+ * Storage — a rota (`GET /api/knowledge-base/images/:imageId`) exige o JWT
+ * no header `Authorization`, que um `<img src="...">` direto nunca envia, por
+ * isso busca via `apiFetch` (mesmo wrapper usado pro resto do painel) e
+ * converte pra Object URL local. `imageId` ausente cai pro `fallbackSrc`
+ * (Base64 legado inline, sem fetch nenhum). Cada instância gerencia seu
+ * próprio Object URL e revoga no unmount/troca de imageId — nunca vaza.
+ */
+const KnowledgeBaseImagePreview: React.FC<{ imageId?: string; fallbackSrc?: string; alt: string; className?: string }> = ({ imageId, fallbackSrc, alt, className }) => {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!imageId) {
+      setObjectUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setObjectUrl(null);
+    apiFetch(`/api/knowledge-base/images/${encodeURIComponent(imageId)}`)
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((blob) => {
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setObjectUrl(createdUrl);
+      })
+      .catch((err) => {
+        if (!cancelled) console.warn('Falha ao carregar preview da imagem:', err);
+      });
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [imageId]);
+
+  const src = imageId ? objectUrl : fallbackSrc;
+  if (!src) return null;
+  return <img src={src} alt={alt} className={className} />;
+};
+
 interface BeforeAfterEditorProps {
   label: string;
   pairs?: BeforeAfterPair[];
@@ -391,14 +438,15 @@ interface BeforeAfterEditorProps {
 
 const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onChange }) => {
   const comparisons = pairs || [];
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const addPair = () => onChange([...comparisons, {
     id: `before-after-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    beforeImageBase64: '',
-    afterImageBase64: '',
   }]);
   const removePair = (id: string) => onChange(comparisons.filter((pair) => pair.id !== id));
   const updatePair = (id: string, patch: Partial<BeforeAfterPair>) => onChange(comparisons.map((pair) => pair.id === id ? { ...pair, ...patch } : pair));
-  const uploadImage = (id: string, side: 'before' | 'after', event: React.ChangeEvent<HTMLInputElement>) => {
+  // TASK-0218: sobe pro Storage do backend na hora (mesmo padrão já usado
+  // pro vídeo) — só a referência (id) fica no formData, nunca mais Base64.
+  const uploadImage = async (id: string, side: 'before' | 'after', event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
@@ -406,15 +454,38 @@ const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onC
       alert('Selecione uma imagem para a comparação.');
       return;
     }
-    if (file.size > 4 * 1024 * 1024) {
-      alert('Cada imagem da comparação pode ter no máximo 4 MB.');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Cada imagem da comparação pode ter no máximo 5 MB.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => updatePair(id, side === 'before'
-      ? { beforeImageBase64: String(reader.result), beforeImageMimeType: file.type }
-      : { afterImageBase64: String(reader.result), afterImageMimeType: file.type });
-    reader.readAsDataURL(file);
+    const uploadKey = `${id}:${side}`;
+    setUploadingKey(uploadKey);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await apiFetch('/api/knowledge-base/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { imageId, mimeType, fileName, sizeBytes } = await res.json();
+      updatePair(id, side === 'before'
+        ? { beforeImageId: imageId, beforeImageMimeType: mimeType, beforeImageFileName: fileName, beforeImageSizeBytes: sizeBytes, beforeImageBase64: undefined }
+        : { afterImageId: imageId, afterImageMimeType: mimeType, afterImageFileName: fileName, afterImageSizeBytes: sizeBytes, afterImageBase64: undefined });
+    } catch (err: any) {
+      console.error('Falha ao enviar imagem da comparação:', err);
+      alert(`Não foi possível enviar a imagem: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingKey(null);
+    }
   };
 
   return (
@@ -433,12 +504,21 @@ const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onC
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             {(['before', 'after'] as const).map((side) => {
-              const image = side === 'before' ? pair.beforeImageBase64 : pair.afterImageBase64;
+              const imageId = side === 'before' ? pair.beforeImageId : pair.afterImageId;
+              const fallbackSrc = side === 'before' ? pair.beforeImageBase64 : pair.afterImageBase64;
+              const hasImage = !!imageId || !!fallbackSrc;
+              const isUploading = uploadingKey === `${pair.id}:${side}`;
               return (
                 <label key={side} className="group relative flex min-h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-md border border-dashed border-slate-700 bg-slate-900 text-[9px] font-medium text-slate-400 hover:border-violet-400/60 hover:text-violet-200">
-                  {image ? <img src={image} alt={side === 'before' ? 'Antes' : 'Depois'} className="absolute inset-0 h-full w-full object-cover" /> : <><ImageIcon className="mb-1 h-3.5 w-3.5" />{side === 'before' ? 'Foto do antes' : 'Foto do depois'}</>}
-                  {image && <span className="relative z-10 rounded bg-slate-950/80 px-1.5 py-0.5">Trocar {side === 'before' ? 'antes' : 'depois'}</span>}
-                  <input type="file" accept="image/*" className="hidden" onChange={(event) => uploadImage(pair.id, side, event)} />
+                  {isUploading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : hasImage ? (
+                    <KnowledgeBaseImagePreview imageId={imageId} fallbackSrc={fallbackSrc} alt={side === 'before' ? 'Antes' : 'Depois'} className="absolute inset-0 h-full w-full object-cover" />
+                  ) : (
+                    <><ImageIcon className="mb-1 h-3.5 w-3.5" />{side === 'before' ? 'Foto do antes' : 'Foto do depois'}</>
+                  )}
+                  {hasImage && !isUploading && <span className="relative z-10 rounded bg-slate-950/80 px-1.5 py-0.5">Trocar {side === 'before' ? 'antes' : 'depois'}</span>}
+                  <input type="file" accept="image/*" className="hidden" disabled={isUploading} onChange={(event) => uploadImage(pair.id, side, event)} />
                 </label>
               );
             })}
@@ -458,7 +538,6 @@ const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onC
 
 export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   knowledgeBase,
-  onSaveKnowledgeBase,
   businessHours,
   onSaveBusinessHours,
   onGoToWhatsAppSim,
@@ -468,6 +547,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   publicCatalogSlug,
   activeTenantId,
   usesPublishedKnowledgeBase = false,
+  canManageWhatsAppConnection = false,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -476,15 +556,49 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     documents: ensureUniqueIds(knowledgeBase.documents, 'doc'),
     firstContactBlocks: ensureUniqueIds(knowledgeBase.firstContactBlocks, 'fcblock'),
   }));
+  // "Reconectar WhatsApp (QR Code)" existe pra tenants já conectados via
+  // Evolution API OU que ainda não têm credencial própria nenhuma (nem Meta
+  // nem Evolution — ex: tenant recém-cadastrado, primeira conexão). Nunca
+  // aparece pra um tenant deliberadamente configurado com Meta Cloud API
+  // própria. TASK-0371 (pedido direto, print real: só saas_admin conseguia
+  // fazer a primeira conexão de um tenant novo, apesar do backend já aceitar
+  // `admin` comum pra isso) trocou de `/api/status/available` (que só cobre
+  // "já conectado", usado pela feature de Status/Stories) pro endpoint
+  // dedicado abaixo, que também cobre "ainda não conectado, mas pode
+  // conectar". Só busca quando a permissão de admin já libera o botão, pra
+  // não gastar uma chamada à toa pra quem nunca vai ver isso.
+  const [whatsAppQrAvailable, setWhatsAppQrAvailable] = useState(false);
+  const [whatsAppAlreadyConnected, setWhatsAppAlreadyConnected] = useState(false);
+  useEffect(() => {
+    if (!canManageWhatsAppConnection || !activeTenantId) return;
+    apiFetch(`/api/admin/tenants/${activeTenantId}/evolution-instance/available`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        setWhatsAppQrAvailable(!!data?.available);
+        setWhatsAppAlreadyConnected(!!data?.alreadyConnected);
+      })
+      .catch(() => {});
+  }, [canManageWhatsAppConnection, activeTenantId]);
   const [isSavedToast, setIsSavedToast] = useState(false);
   const [isSavingKnowledgeBase, setIsSavingKnowledgeBase] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isBusinessTemplatesOpen, setIsBusinessTemplatesOpen] = useState(false);
   const [showKnowledgeBaseDocumentation, setShowKnowledgeBaseDocumentation] = useState(false);
+  const [showPromptAudit, setShowPromptAudit] = useState(false);
   const [showHoursEditor, setShowHoursEditor] = useState(false);
   const [typedDocumentStates, setTypedDocumentStates] = useState<KnowledgeBaseDocumentState[]>([]);
   const [isLoadingTypedDocuments, setIsLoadingTypedDocuments] = useState(false);
   const [isPublishingTypedDocuments, setIsPublishingTypedDocuments] = useState(false);
+  // Achado real (26/08/2026, pedido do dono do produto): via "Rascunho
+  // pendente" no card mas não tinha como saber O QUE tinha mudado antes de
+  // publicar — o formulário só mostra uma versão por vez (rascunho OU
+  // publicado, nunca os dois). `diffOpenDocumentType` controla qual card tem
+  // o comparativo "Publicado vs. Rascunho" aberto; fecha sozinho depois de
+  // publicar (o rascunho deixa de existir, então não sobra nada pra comparar
+  // — não precisa de botão de "excluir versão anterior": a versão publicada
+  // antiga já vira status 'archived' no banco e nunca aparece nesta lista,
+  // que só busca status IN ('published','draft') — ver knowledgeBaseStore.ts).
+  const [diffOpenDocumentType, setDiffOpenDocumentType] = useState<string | null>(null);
 
   // Gavetas (accordion) das 6 seções da aba — pedido real (20/08/2026): a
   // aba tinha ficado extensa demais com tudo sempre visível de uma vez
@@ -526,9 +640,26 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   }, [activeTenantId, usesPublishedKnowledgeBase]);
 
   // Recurso separado (tabela `tenants`, não a base de conhecimento) — save
-  // próprio, não passa pelo handleSave/onSaveKnowledgeBase de cima.
+  // próprio, não passa pelo handleSave de cima.
+  //
+  // Bug real (28/08/2026): o inicializador de useState só roda uma vez, na
+  // primeira renderização — se este componente monta antes do GET
+  // /api/business-hours em App.tsx resolver (busca assíncrona, sem relação
+  // com o carregamento da própria Base de Conhecimento), esse valor inicial
+  // fica vazio {} PARA SEMPRE, mesmo depois da prop `businessHours` chegar
+  // com o horário real salvo — tanto o editor em modal quanto a seção
+  // inline (tenants ainda sem KB publicada, `!usesPublishedKnowledgeBase`
+  // abaixo) mostravam sempre "sem atendimento" em todo dia, dando a
+  // impressão de que o horário nunca persistiu, mesmo tendo sido salvo com
+  // sucesso no backend. O efeito abaixo resincroniza sempre que a prop
+  // muda — cobre a chegada tardia do fetch inicial e é inofensivo depois de
+  // um save (a prop só muda de novo pra devolver o mesmo valor que acabou
+  // de ser salvo).
   const [hoursForm, setHoursForm] = useState<BusinessHours>(() => businessHours);
   const [isSavingHours, setIsSavingHours] = useState(false);
+  useEffect(() => {
+    setHoursForm(businessHours);
+  }, [businessHours]);
 
   const handleToggleDay = (day: string, enabled: boolean) => {
     setHoursForm((prev) => {
@@ -662,31 +793,25 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setSaveError(null);
     setIsSavedToast(false);
     try {
-      if (usesPublishedKnowledgeBase) {
-        if (!activeTenantId) throw new Error('Empresa ativa indisponível para salvar a Base de Conhecimento.');
-        const payloads = splitVisualKnowledgeBaseIntoDocuments(updated);
-        const changedTypes = VISUAL_KNOWLEDGE_BASE_DOCUMENT_TYPES.filter((documentType) => {
-          const state = typedDocumentStates.find((item) => item.documentType === documentType);
-          const current = state?.draft?.data || state?.published?.data || {};
-          return !documentPayloadsMatch(current, payloads[documentType]);
-        });
-        for (const documentType of changedTypes) {
-          await saveKnowledgeBaseDocumentDraft(documentType, payloads[documentType]);
-        }
-        const refreshedStates = await listKnowledgeBaseDocumentStates();
-        setTypedDocumentStates(refreshedStates);
-        hydrateVisualFormFromTypedDocuments(refreshedStates);
-        setFormData((previous) => ({ ...previous, lastSaved: updated.lastSaved }));
-        setIsSavedToast(true);
-        setTimeout(() => setIsSavedToast(false), 4000);
-        return;
+      // TASK-0327 — a tabela legada `knowledge_base` (e a rota que gravava
+      // nela, POST /api/knowledge-base) foi eliminada: o salvamento é sempre
+      // via documentos tipados (draft + publicação), independente do valor
+      // de `usesPublishedKnowledgeBase` (hoje sempre true no único ponto de
+      // renderização real, App.tsx).
+      if (!activeTenantId) throw new Error('Empresa ativa indisponível para salvar a Base de Conhecimento.');
+      const payloads = splitVisualKnowledgeBaseIntoDocuments(updated);
+      const changedTypes = VISUAL_KNOWLEDGE_BASE_DOCUMENT_TYPES.filter((documentType) => {
+        const state = typedDocumentStates.find((item) => item.documentType === documentType);
+        const current = state?.draft?.data || state?.published?.data || {};
+        return !documentPayloadsMatch(current, payloads[documentType]);
+      });
+      for (const documentType of changedTypes) {
+        await saveKnowledgeBaseDocumentDraft(documentType, payloads[documentType]);
       }
-      const saved = await onSaveKnowledgeBase(updated);
-      if (!saved) {
-        setSaveError('Não foi possível salvar no servidor. Revise sua conexão e tente novamente.');
-        return;
-      }
-      setFormData(updated);
+      const refreshedStates = await listKnowledgeBaseDocumentStates();
+      setTypedDocumentStates(refreshedStates);
+      hydrateVisualFormFromTypedDocuments(refreshedStates);
+      setFormData((previous) => ({ ...previous, lastSaved: updated.lastSaved }));
       setIsSavedToast(true);
       setTimeout(() => setIsSavedToast(false), 4000);
     } catch {
@@ -716,8 +841,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       const refreshedStates = await listKnowledgeBaseDocumentStates();
       setTypedDocumentStates(refreshedStates);
       hydrateVisualFormFromTypedDocuments(refreshedStates);
+      setDiffOpenDocumentType(null);
       setIsSavedToast(true);
       setTimeout(() => setIsSavedToast(false), 4000);
+      // TASK-0308: App.tsx só re-busca a Base de Conhecimento no mount/troca
+      // de tenant — sem isso, o estado usado por WhatsAppLeadsSim e
+      // PublicCatalogSettings ficava com o valor antigo até a página ser
+      // recarregada, mesmo minutos depois de publicar aqui.
+      if (activeTenantId) {
+        window.dispatchEvent(new CustomEvent('universo:knowledge-base-published', { detail: { tenantId: activeTenantId } }));
+      }
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Não foi possível publicar todas as alterações. Revise os rascunhos e tente novamente.');
     } finally {
@@ -982,7 +1115,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const productStats = useMemo(() => {
     const active = formData.products.filter((p) => p.active !== false).length;
     const withVariants = formData.products.filter((p) => !!p.variants?.length).length;
-    const withMedia = formData.products.filter((p) => !!p.exampleImageBase64 || !!p.exampleVideoId).length;
+    const withMedia = formData.products.filter((p) => !!p.exampleImageId || !!p.exampleImageBase64 || !!p.exampleVideoId).length;
     return { active, withVariants, withMedia, pending: knowledgeAudit.actionableProductIds.size };
   }, [formData.products, knowledgeAudit.actionableProductIds]);
 
@@ -1073,39 +1206,94 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
-  const handleProductImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+  // Mesmo limite real da Meta Cloud API pra mensagem de imagem (MAX_IMAGE_BYTES em knowledgeBaseImageStore.ts).
+  const MAX_IMAGE_INPUT_SIZE_MB = 5;
+  const [uploadingImageForId, setUploadingImageForId] = useState<string | null>(null);
+
+  // TASK-0218: sobe pro Storage do backend na hora (mesmo padrão do vídeo,
+  // handleProductVideoUpload) — só a referência (exampleImageId) fica no
+  // formData local, nunca mais Base64 inline (era a causa raiz confirmada do
+  // estouro de egress documentado em TASK-0074/0075).
+  const handleProductImageChange = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result);
+    if (!file.type.startsWith('image/')) {
+      alert(`Arquivo não é uma imagem (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_IMAGE_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Imagem maior que ${MAX_IMAGE_INPUT_SIZE_MB}MB. Comprima antes de enviar.`);
+      return;
+    }
+    setUploadingImageForId(id);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { imageId, mimeType, fileName, sizeBytes } = await res.json();
       setFormData((prev) => ({
         ...prev,
-        products: prev.products.map((p) => (p.id === id ? { ...p, exampleImageBase64: base64, exampleImageMimeType: file.type } : p)),
+        products: prev.products.map((p) =>
+          p.id === id ? { ...p, exampleImageId: imageId, exampleImageMimeType: mimeType, exampleImageFileName: fileName, exampleImageSizeBytes: sizeBytes, exampleImageBase64: undefined } : p
+        ),
       }));
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('Falha ao enviar imagem:', err);
+      alert(`Não foi possível enviar a imagem: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingImageForId(null);
+    }
   };
 
-  const handleVariantImageChange = (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVariantImageChange = async (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result);
+    if (!file.type.startsWith('image/')) {
+      alert(`Arquivo não é uma imagem (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_IMAGE_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Imagem maior que ${MAX_IMAGE_INPUT_SIZE_MB}MB. Comprima antes de enviar.`);
+      return;
+    }
+    const uploadKey = `variant:${productId}:${index}`;
+    setUploadingImageForId(uploadKey);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { imageId, mimeType, fileName, sizeBytes } = await res.json();
       setFormData((prev) => ({
         ...prev,
         products: prev.products.map((product) => product.id !== productId || !product.variants ? product : {
           ...product,
           variants: product.variants.map((variant, variantIndex) => variantIndex === index
-            ? { ...variant, exampleImageBase64: base64, exampleImageMimeType: file.type }
+            ? { ...variant, exampleImageId: imageId, exampleImageMimeType: mimeType, exampleImageFileName: fileName, exampleImageSizeBytes: sizeBytes, exampleImageBase64: undefined }
             : variant),
         }),
       }));
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('Falha ao enviar imagem da variação:', err);
+      alert(`Não foi possível enviar a imagem: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingImageForId(null);
+    }
   };
 
   const handleProductBeforeAfterChange = (productId: string, pairs: BeforeAfterPair[]) => {
@@ -1295,16 +1483,42 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
   const handleFirstContactBlockTextChange = (id: string, value: string) => updateFirstContactBlock(id, { text: value });
 
-  const handleFirstContactBlockImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFirstContactBlockImageChange = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => updateFirstContactBlock(id, { imageBase64: String(reader.result), imageMimeType: file.type });
-    reader.readAsDataURL(file);
+    if (!file.type.startsWith('image/')) {
+      alert(`Arquivo não é uma imagem (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_IMAGE_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Imagem maior que ${MAX_IMAGE_INPUT_SIZE_MB}MB. Comprima antes de enviar.`);
+      return;
+    }
+    setUploadingImageForId(id);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { imageId, mimeType, fileName, sizeBytes } = await res.json();
+      updateFirstContactBlock(id, { imageId, imageMimeType: mimeType, imageFileName: fileName, imageSizeBytes: sizeBytes, imageBase64: undefined });
+    } catch (err: any) {
+      console.error('Falha ao enviar imagem:', err);
+      alert(`Não foi possível enviar a imagem: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingImageForId(null);
+    }
   };
 
-  const handleFirstContactBlockImageRemove = (id: string) => updateFirstContactBlock(id, { imageBase64: undefined, imageMimeType: undefined });
+  const handleFirstContactBlockImageRemove = (id: string) =>
+    updateFirstContactBlock(id, { imageId: undefined, imageMimeType: undefined, imageFileName: undefined, imageSizeBytes: undefined, imageBase64: undefined });
 
   const handleFirstContactBlockVideoUpload = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1503,9 +1717,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // Upload real (Storage do backend) — até aqui era só um registro visual
   // fictício, sem arquivo nenhum de verdade guardado em lugar algum (achado
   // real: os 2 "documentos" do preset da Monique nunca existiram, ninguém
-  // conseguia abrir). Cada arquivo sobe e grava direto (não fica esperando
-  // o botão "Salvar Regras no Agente" — mesmo motivo de horário de
-  // funcionamento ter save próprio: é outro recurso, não o formData local).
+  // conseguia abrir). TASK-0327 — o binário sobe pro Storage na hora
+  // (/api/knowledge-base/document-storage, sem tocar em tabela nenhuma), mas
+  // a referência só entra de fato na Base de Conhecimento quando o rascunho
+  // de `media_assets` é salvo e publicado — mesmo padrão já usado por
+  // vídeo/foto de exemplo, que também sobem na hora mas só "contam" depois
+  // do Salvar/Publicar.
   const handleRealFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     e.target.value = '';
@@ -1523,7 +1740,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     for (const file of accepted) {
       try {
         const base64 = await fileToBase64(file);
-        const res = await apiFetch('/api/knowledge-base/documents', {
+        const res = await apiFetch('/api/knowledge-base/document-storage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
@@ -1708,6 +1925,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     if (firstSection) window.setTimeout(() => document.getElementById(`knowledge-base-section-${firstSection}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   };
 
+  if (showPromptAudit) {
+    return <PromptAuditView onBack={() => setShowPromptAudit(false)} />;
+  }
+
   if (showKnowledgeBaseDocumentation) {
     return <KnowledgeBaseDocumentation isRuntimePublished={usesPublishedKnowledgeBase} onBack={() => setShowKnowledgeBaseDocumentation(false)} />;
   }
@@ -1751,6 +1972,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => setShowPromptAudit(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition-all hover:bg-fuchsia-500/20"
+            title="Ver exatamente o prompt (regras + Base de Conhecimento + conversa) que é mandado ao Gemini"
+            aria-label="Auditar prompt do agente"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Auditar Prompt</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setShowHoursEditor(true)}
             className="flex items-center gap-1.5 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-500/20"
             title="Configurar os horários reais de atendimento e agenda"
@@ -1770,6 +2001,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <ExternalLink className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Ver catálogo</span>
             </a>
+          )}
+          {/* Achado real, 29/08/2026 (pedido do dono do produto): morava no
+              painel de Ferramentas do Atendimento — mudou pra cá, a tela de
+              configuração operacional do tenant vista por admins (TASK-0167). */}
+          {canManageWhatsAppConnection && whatsAppQrAvailable && activeTenantId && (
+            <ReconectarWhatsAppQrCode tenantId={activeTenantId} alreadyConnected={whatsAppAlreadyConnected} />
           )}
           <button
             onClick={handleResetToDefault}
@@ -1810,14 +2047,64 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 const state = typedDocumentStates.find((documentState) => documentState.documentType === item.documentType);
                 const Icon = item.icon;
                 const status = state?.draft ? 'Rascunho pendente' : state?.published ? `Publicado v${state.published.version}` : 'Ainda não publicado';
+                // Só dá pra comparar quando existem as DUAS versões — um documento
+                // "Ainda não publicado" não tem base de comparação (tudo é novo).
+                const canShowDiff = Boolean(state?.draft && state?.published);
+                const isDiffOpen = diffOpenDocumentType === item.documentType;
                 return (
-                  <button key={item.documentType} type="button" onClick={() => handleOpenTypedDocument(item.documentType)} className="group flex min-h-20 items-start gap-2.5 rounded-xl border border-slate-800 bg-slate-950/65 p-3 text-left transition-colors hover:border-cyan-400/35 hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-300/60">
-                    <span className="mt-0.5 rounded-lg border border-cyan-400/20 bg-cyan-400/10 p-1.5 text-cyan-200"><Icon className="h-3.5 w-3.5" /></span>
-                    <span className="min-w-0"><span className="block text-[11px] font-bold text-slate-200 group-hover:text-cyan-100">{item.label}</span><span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{item.detail}</span><span className={`mt-1.5 block text-[10px] font-semibold ${state?.draft ? 'text-amber-200' : state?.published ? 'text-emerald-200' : 'text-slate-500'}`}>{status}</span></span>
-                  </button>
+                  <div key={item.documentType} className={`group flex min-h-20 flex-col gap-1.5 rounded-xl border p-3 transition-colors ${isDiffOpen ? 'border-cyan-400/50 bg-slate-900' : 'border-slate-800 bg-slate-950/65 hover:border-cyan-400/35 hover:bg-slate-900'}`}>
+                    <button type="button" onClick={() => handleOpenTypedDocument(item.documentType)} className="flex items-start gap-2.5 text-left focus:outline-none">
+                      <span className="mt-0.5 rounded-lg border border-cyan-400/20 bg-cyan-400/10 p-1.5 text-cyan-200"><Icon className="h-3.5 w-3.5" /></span>
+                      <span className="min-w-0"><span className="block text-[11px] font-bold text-slate-200 group-hover:text-cyan-100">{item.label}</span><span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{item.detail}</span><span className={`mt-1.5 block text-[10px] font-semibold ${state?.draft ? 'text-amber-200' : state?.published ? 'text-emerald-200' : 'text-slate-500'}`}>{status}</span></span>
+                    </button>
+                    {canShowDiff && (
+                      <button
+                        type="button"
+                        onClick={() => setDiffOpenDocumentType((previous) => (previous === item.documentType ? null : item.documentType))}
+                        className="self-start text-[10px] font-semibold text-cyan-300 underline decoration-cyan-400/40 underline-offset-2 hover:text-cyan-100"
+                      >
+                        {isDiffOpen ? 'Ocultar alterações' : 'Ver o que mudou'}
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>
+            {diffOpenDocumentType && (() => {
+              const state = typedDocumentStates.find((documentState) => documentState.documentType === diffOpenDocumentType);
+              const item = TYPED_DOCUMENT_NAVIGATION.find((navItem) => navItem.documentType === diffOpenDocumentType);
+              if (!state?.draft || !state?.published) return null;
+              const diffEntries = describeKnowledgeBaseDocumentDiff(state.documentType, state.published.data, state.draft.data);
+              return (
+                <div className="mt-3 rounded-xl border border-cyan-400/25 bg-slate-950/70 p-3">
+                  <p className="text-[11px] font-bold text-cyan-100">O que vai mudar em "{item?.label}" ao publicar</p>
+                  {diffEntries.length === 0 ? (
+                    <p className="mt-2 text-[11px] text-slate-500">Nenhuma diferença de conteúdo detectada entre a versão publicada e o rascunho.</p>
+                  ) : (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full min-w-[420px] border-collapse text-[11px]">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-left text-slate-500">
+                            <th className="py-1.5 pr-2 font-semibold">Campo</th>
+                            <th className="py-1.5 pr-2 font-semibold">Publicado</th>
+                            <th className="py-1.5 font-semibold">Rascunho</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diffEntries.map((entry, index) => (
+                            <tr key={`${entry.label}-${index}`} className="border-b border-slate-900 align-top">
+                              <td className="py-1.5 pr-2 font-semibold text-slate-300">{entry.label}</td>
+                              <td className="py-1.5 pr-2 text-rose-300/90">{entry.before}</td>
+                              <td className="py-1.5 text-emerald-300/90">{entry.after}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </section>
       )}
@@ -2103,6 +2390,20 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
               />
               <p className="text-[11px] text-slate-500 mt-1">Quando preenchido, o agente manda esse link sempre que o cliente pedir o endereço/localização.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Dados de Pagamento (PIX/conta bancária) — opcional:
+              </label>
+              <AutoResizeTextarea
+                minRows={2}
+                value={formData.paymentDetailsText || ''}
+                onChange={(e) => setFormData({ ...formData, paymentDetailsText: e.target.value })}
+                placeholder="Ex: Chave PIX: 12.345.678/0001-90 (CNPJ) — Titular: Nome da Empresa"
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none leading-relaxed"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">Diferente do link de localização acima, isto NUNCA é usado pelo agente automático — quando preenchido, só aparece como um botão manual no menu de anexos da conversa, pro operador mandar sob demanda quando a cliente pedir.</p>
             </div>
 
             <div>
@@ -2669,10 +2970,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-400/60"
                         />
                         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 p-2">
-                          {variant.exampleImageBase64 && <img src={variant.exampleImageBase64} alt={`Foto de ${variant.code || 'variação'}`} className="h-9 w-9 rounded-md border border-slate-700 object-cover" />}
+                          {(variant.exampleImageId || variant.exampleImageBase64) && (
+                            <KnowledgeBaseImagePreview imageId={variant.exampleImageId} fallbackSrc={variant.exampleImageBase64} alt={`Foto de ${variant.code || 'variação'}`} className="h-9 w-9 rounded-md border border-slate-700 object-cover" />
+                          )}
                           <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-sky-300 hover:text-sky-200">
-                            <ImageIcon className="h-3 w-3" /> {variant.exampleImageBase64 ? 'Trocar foto' : 'Foto desta variação'}
-                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleVariantImageChange(prod.id, vIndex, e)} />
+                            <ImageIcon className="h-3 w-3" /> {uploadingImageForId === `variant:${prod.id}:${vIndex}` ? 'Enviando foto…' : (variant.exampleImageId || variant.exampleImageBase64) ? 'Trocar foto' : 'Foto desta variação'}
+                            <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === `variant:${prod.id}:${vIndex}`} onChange={(e) => handleVariantImageChange(prod.id, vIndex, e)} />
                           </label>
                           <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-emerald-300 hover:text-emerald-200">
                             <Video className="h-3 w-3" /> {uploadingVideoForId === `variant:${prod.id}:${vIndex}` ? 'Enviando vídeo…' : variant.exampleVideoId ? 'Trocar vídeo' : 'Vídeo desta variação'}
@@ -2728,14 +3031,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     </div>
                   </div>}
                   <div className="flex items-center gap-2 pt-1">
-                    {prod.exampleImageBase64 ? (
-                      <img src={prod.exampleImageBase64} alt={prod.name} className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
+                    {uploadingImageForId === prod.id ? (
+                      <div className="w-10 h-10 rounded-lg border border-slate-700 flex items-center justify-center text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                    ) : (prod.exampleImageId || prod.exampleImageBase64) ? (
+                      <KnowledgeBaseImagePreview imageId={prod.exampleImageId} fallbackSrc={prod.exampleImageBase64} alt={prod.name} className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
                     ) : (
                       <div className="w-10 h-10 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px]">sem foto</div>
                     )}
                     <label className="text-[10px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
-                      {prod.exampleImageBase64 ? 'Trocar foto' : 'Adicionar foto de exemplo'}
-                      <input type="file" accept="image/*" className="hidden" onChange={(e) => handleProductImageChange(prod.id, e)} />
+                      {uploadingImageForId === prod.id ? 'Enviando foto…' : (prod.exampleImageId || prod.exampleImageBase64) ? 'Trocar foto' : 'Adicionar foto de exemplo'}
+                      <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === prod.id} onChange={(e) => handleProductImageChange(prod.id, e)} />
                     </label>
                   </div>
                   <div className="flex items-center gap-2 pt-1">
@@ -3104,17 +3409,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
                       {block.type === 'image' && (
                         <div className="flex items-center gap-3">
-                          {block.imageBase64 ? (
-                            <img src={block.imageBase64} alt="Bloco de imagem" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
+                          {uploadingImageForId === block.id ? (
+                            <div className="w-14 h-14 rounded-lg border border-slate-700 flex items-center justify-center text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                          ) : (block.imageId || block.imageBase64) ? (
+                            <KnowledgeBaseImagePreview imageId={block.imageId} fallbackSrc={block.imageBase64} alt="Bloco de imagem" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
                           ) : (
                             <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem imagem</div>
                           )}
                           <div className="flex flex-col gap-1.5">
                             <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
-                              {block.imageBase64 ? 'Trocar imagem' : 'Adicionar imagem'}
-                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFirstContactBlockImageChange(block.id, e)} />
+                              {uploadingImageForId === block.id ? 'Enviando…' : (block.imageId || block.imageBase64) ? 'Trocar imagem' : 'Adicionar imagem'}
+                              <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === block.id} onChange={(e) => handleFirstContactBlockImageChange(block.id, e)} />
                             </label>
-                            {block.imageBase64 && (
+                            {(block.imageId || block.imageBase64) && (
                               <button
                                 type="button"
                                 onClick={() => handleFirstContactBlockImageRemove(block.id)}

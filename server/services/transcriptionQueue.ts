@@ -1,5 +1,5 @@
 import type { GoogleGenAI } from '@google/genai';
-import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
+import { transcribeAudio, isRealTranscriptionSource, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia } from './mediaDownload';
 import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from './conversationStore';
 import { emitAiReplyStatus } from './conversationEvents';
@@ -9,11 +9,13 @@ import { isGeoRestrictedError } from './metaSend';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText } from './autoReply';
 import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
-import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
+import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { getTenantSegment } from './tenantProfileStore';
-import { logEscalation, isPaymentRelated, looksLikeHarassment } from './escalationStore';
+import { logEscalation, isPaymentRelated, looksLikeHarassment, bookingConfirmationEscalationSourceKey } from './escalationStore';
 import { redactMessageForLog } from './logRedaction';
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
+import { isPlausiblePersonalName } from './contactNameGuard';
+import { runWithTenantDbContext } from './tenantDbContext';
 import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
@@ -99,7 +101,31 @@ async function processLoop(deps: TranscriptionQueueDeps) {
   }
 }
 
-async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
+/**
+ * Exportado só pra teste direto (TASK-0209) — o worker real só é alcançável via startTranscriptionWorker/enqueueTranscriptionJob (loop infinito, difícil de testar sem fake timers frágeis).
+ *
+ * Achado real de produção (03/09/2026): este worker roda no loop assíncrono
+ * separado de `processLoop` (setTimeout entre iterações), fora da cadeia de
+ * qualquer requisição HTTP/webhook — nunca herdava o `TenantDbContext`
+ * (AsyncLocalStorage, ver `tenantDbContext.ts`) que `getDb()` exige pra
+ * liberar acesso sob RLS. Resultado: TODO áudio recebido de qualquer tenant
+ * ficava travado pra sempre no placeholder "🎤 Transcrevendo áudio..." — a
+ * chamada de verdade (`updateMessageText`, `getKnowledgeBase`, etc.) sempre
+ * falhava com "Acesso ao banco sem contexto de tenant... recusado pra
+ * preservar RLS", capturado silenciosamente pelo catch abaixo (só um log de
+ * warning, nunca reportado ao operador). Todos os outros jobs em background
+ * do projeto (`messageBuffer.ts`, `pendingFollowUpJob.ts`, etc.) já
+ * envolvem seu próprio trabalho em `runWithTenantDbContext({..., source:
+ * 'job'})` — só este ficou de fora. Os testes existentes não pegaram isso
+ * porque mockam a camada de dados inteira, nunca exercitando o `getDb()`
+ * real.
+ */
+export async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
+  const { resolvedTenant } = job;
+  return runWithTenantDbContext({ tenantId: resolvedTenant.tenantId, source: 'job' }, () => processJobWithTenantContext(job, deps));
+}
+
+async function processJobWithTenantContext(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
   const startedAt = Date.now();
   const { message, resolvedTenant } = job;
   const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
@@ -140,18 +166,33 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     // gravada (recordIncomingMessage em webhooks.ts).
     await saveMediaImage(deps.supabaseUrl, deps.supabaseKey, message.messageId, audioBase64!, mimeType || 'audio/ogg');
 
-    const outcome = await transcribeAudioWithGemini(deps.getAi(), audioBase64, mimeType, {
+    const outcome = await transcribeAudio(deps.getAi(), audioBase64, mimeType, {
       leadName: message.contactName,
-      customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+      customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
+      groqApiKey: deps.groqApiKey,
     });
+
+    // Achado real de auditoria (29/08/2026): um áudio sem fala nenhuma
+    // (silêncio) voltava com source: 'gemini' (chamada teve sucesso técnico)
+    // e uma transcrição inventada e plausível — o guard de "sem fallback
+    // inventado" em geminiTranscription.ts só cobria falha da CHAMADA, nunca
+    // o caso de sucesso técnico com conteúdo alucinado. O prompt agora pede
+    // transcription: "" quando não há fala real; aqui tratamos esse caso
+    // exatamente como uma falha técnica — nunca dispara resposta automática,
+    // sempre escala pra humano, e grava um texto legível (nunca vazio) no
+    // histórico da conversa.
+    const hasNoDetectedSpeech = isRealTranscriptionSource(outcome.source) && !outcome.result.transcription?.trim();
+    const messageTextForRecord = hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription;
 
     totalProcessed += 1;
     recordResult({ job, status: 'completed', outcome, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
-    await updateMessageText(tenantId, message.from, message.messageId, outcome.result.transcription);
-    console.log(`✅ [Fila de Transcrição] tenant=${tenantId} ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): ${redactMessageForLog(outcome.result.transcription)}`);
+    await updateMessageText(tenantId, message.from, message.messageId, messageTextForRecord);
+    console.log(`✅ [Fila de Transcrição] tenant=${tenantId} ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): ${redactMessageForLog(messageTextForRecord)}`);
 
     if (outcome.source === 'fallback') {
       await logEscalation(tenantId, message.from, message.contactName, 'Falha ao transcrever áudio automaticamente — operador precisa ouvir manualmente', outcome.result.transcription);
+    } else if (hasNoDetectedSpeech) {
+      await logEscalation(tenantId, message.from, message.contactName, 'Áudio sem fala detectável (silêncio/ruído) — operador precisa ouvir manualmente antes de responder', messageTextForRecord);
     } else if (isPaymentRelated(outcome.result.transcription)) {
       await logEscalation(tenantId, message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
     } else if (looksLikeHarassment(outcome.result.transcription)) {
@@ -159,11 +200,12 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     }
 
     // Resposta automática (Epic 1.3): só quando a análise veio do Gemini de
-    // verdade (não do fallback simulado), pra não responder algo genérico.
+    // verdade (não do fallback simulado) E detectou fala real, pra não
+    // responder algo genérico nem alucinado em cima de silêncio.
     // Reaproveita o mesmo motor de bolhas/humanização do caminho de texto
     // (generateAutoReplyForText), passando a transcrição como se fosse a
     // mensagem recebida — evita duplicar a lógica de estilo em dois lugares.
-    if (outcome.source === 'gemini' && !(await isAgentPaused(tenantId))) {
+    if (isRealTranscriptionSource(outcome.source) && !hasNoDetectedSpeech && !(await isAgentPaused(tenantId))) {
       runExclusive(message.from, async () => {
         const conversation = await getConversation(tenantId, message.from);
         // Mesmo bloqueio por lead individual do caminho de texto (ver
@@ -175,9 +217,31 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         // transcrição como o texto a comparar com os gatilhos configurados.
         await attachCatalogClickIfMatched(tenantId, message.from, outcome.result.transcription);
         if (await shouldBlockForAdsOnlyMode(tenantId, message.from, outcome.result.transcription)) return;
-        const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
+        const kbContext = formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase);
         const segment = await getTenantSegment(tenantId);
-        const history = conversation?.messages.slice(0, -1);
+        // TASK-0209 — achado real de auditoria estrutural (mesma classe do
+        // TASK-0172, achada aqui no caminho de ÁUDIO): cortar a última
+        // posição do array (`slice(0, -1)`) supõe que o próprio áudio é
+        // sempre o último item de `conversation.messages`. Mas entre o
+        // cliente mandar o áudio (gravado na hora por recordIncomingMessage,
+        // em webhooks.ts) e este job rodar (fila serial única de
+        // transcrição + download + chamada ao Gemini — latência real de
+        // vários segundos, plausivelmente mais que os 10s de silêncio do
+        // messageBuffer.ts), o MESMO cliente pode mandar uma mensagem nova
+        // — gravada imediatamente, fora desta fila. Quando isso acontece, o
+        // corte por posição pega o item errado: mantém o próprio áudio
+        // dentro do histórico (duplicado com `outcome.result.transcription`,
+        // já passado à parte como a "mensagem atual") e descarta a mensagem
+        // nova de verdade do cliente, perdida do contexto. Corta por
+        // IDENTIDADE (o messageId real do áudio, já em escopo) — permanece
+        // correto mesmo com mensagem nova chegando durante a espera; cai no
+        // corte antigo por posição só se o id não for encontrado (não
+        // deveria acontecer, updateMessageText já rodou pra esta mensagem
+        // logo acima, mas mantém o mesmo fallback do padrão já usado em
+        // webhooks.ts/triggerAutoReply).
+        const allMessages = conversation?.messages;
+        const audioIndex = allMessages ? allMessages.findIndex((m) => m.id === message.messageId) : -1;
+        const history = !allMessages ? undefined : audioIndex !== -1 ? allMessages.slice(0, audioIndex) : allMessages.slice(0, -1);
         // Mesmo sinal pro painel do caminho de texto (ver triggerAutoReply em webhooks.ts).
         emitAiReplyStatus(tenantId, message.from, 'generating');
         try {
@@ -210,6 +274,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             isBookingFlow: result.agent === 'agendamento',
             needsHumanConfirmation: result.needsHumanConfirmation,
             plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
+            contactName: isPlausiblePersonalName(message.contactName) ? message.contactName : undefined,
           }, { ai: deps.getAi(), groqApiKey: deps.groqApiKey });
           if (!safety.approved) {
             const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
@@ -224,6 +289,11 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             emitAiReplyStatus(tenantId, message.from, 'failed');
             return;
           }
+          // TASK-0297: quando o revisor corrige em vez de só aprovar/bloquear
+          // (hoje só remove uma bolha isolada de empurrão de agenda depois de
+          // pergunta informativa), envia a versão corrigida — nunca o
+          // rascunho original nesse caso.
+          const bubblesToSend = safety.correctedBubbles ?? result.bubbles;
           const calendarExecution = await executeApprovedCalendarActions(
             tenantId,
             message.from,
@@ -234,17 +304,17 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
           );
           if (calendarExecution.hadError) {
             const reason = calendarExecution.summaries.join(' ');
-            await logEscalation(tenantId, message.from, message.contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, outcome.result.transcription);
+            await logEscalation(tenantId, message.from, message.contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, outcome.result.transcription, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(message.from) });
             emitAiReplyStatus(tenantId, message.from, 'failed');
             return;
           }
           if (result.agent === 'reclamacao') {
             await logEscalation(tenantId, message.from, message.contactName, 'Cliente com reclamação — atendimento humano obrigatório, IA nunca resolve reclamação sozinha', outcome.result.transcription);
           } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
-            await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
+            await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(message.from) });
           }
           try {
-            await sendBubbles(channel, message.from, result.bubbles, async (bubbleText) => {
+            await sendBubbles(channel, message.from, bubblesToSend, async (bubbleText) => {
               await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
               console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
             }, message.messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);

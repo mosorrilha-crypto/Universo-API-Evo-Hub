@@ -257,7 +257,7 @@ function localizeCatalogText(value: string | undefined, language: CatalogLanguag
  * curto de emojis embutido, que o agente reconhece na mensagem recebida
  * pra ligar a conversa a este clique específico com certeza.
  */
-function whatsappUrl(slug: string, phone: string | undefined, productName: string | undefined, template: string | undefined, language: CatalogLanguage): string | null {
+function whatsappUrl(slug: string, phone: string | undefined, productName: string | undefined, template: string | undefined, language: CatalogLanguage, utmSource: string | undefined): string | null {
   if (!phone) return null;
   const copy = COPY[language];
   const defaultMessage = productName ? copy.whatsappWithProduct(productName) : copy.whatsappGeneral;
@@ -266,6 +266,7 @@ function whatsappUrl(slug: string, phone: string | undefined, productName: strin
     : defaultMessage;
   const params = new URLSearchParams({ msg: message, source: 'legacy' });
   if (productName) params.set('product', productName);
+  if (utmSource) params.set('utm_source', utmSource);
   return `/api/public/catalog/${encodeURIComponent(slug)}/whatsapp-click?${params.toString()}`;
 }
 
@@ -328,33 +329,37 @@ declare global {
 }
 
 /**
- * Base code padrão do Meta Pixel, injetada só uma vez (idempotente — várias
- * chamadas com o mesmo pixelId, ex: StrictMode rodando o effect 2x, não
- * duplicam o <script> nem re-inicializam). Fecha o funil desde o clique no
- * anúncio: sem isso, uma campanha que manda tráfego pra este catálogo em vez
- * de Clique-para-WhatsApp direto não tinha nenhum sinal de conversão real
- * pra Meta otimizar, só visualização de página (ver publicCatalogStore.ts).
+ * Base code padrão do Meta Pixel, injetada e com o PageView disparado só uma
+ * vez por pixelId (idempotente — StrictMode rodando o effect 2x, e agora
+ * também os dois caminhos que chamam isso: o fetch rápido de
+ * `/pixel-id` e o fetch completo do catálogo, que podem resolver em
+ * qualquer ordem). Fecha o funil desde o clique no anúncio: sem isso, uma
+ * campanha que manda tráfego pra este catálogo em vez de Clique-para-WhatsApp
+ * direto não tinha nenhum sinal de conversão real pra Meta otimizar, só
+ * visualização de página (ver publicCatalogStore.ts).
  */
+let pixelPageViewTrackedFor: string | null = null;
+
 function loadMetaPixel(pixelId: string): void {
-  if (window.fbq) {
-    window.fbq('init', pixelId);
-    window.fbq('track', 'PageView');
-    return;
+  if (pixelPageViewTrackedFor === pixelId) return;
+  pixelPageViewTrackedFor = pixelId;
+
+  if (!window.fbq) {
+    const fbq: Window['fbq'] = function (...args: unknown[]) {
+      (fbq.queue ??= []).push(args);
+    } as Window['fbq'];
+    fbq!.queue = [];
+    fbq!.loaded = true;
+    fbq!.version = '2.0';
+    window.fbq = fbq;
+    window._fbq = fbq;
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://connect.facebook.net/en_US/fbevents.js';
+    document.head.appendChild(script);
   }
-  const fbq: Window['fbq'] = function (...args: unknown[]) {
-    (fbq.queue ??= []).push(args);
-  } as Window['fbq'];
-  fbq!.queue = [];
-  fbq!.loaded = true;
-  fbq!.version = '2.0';
-  window.fbq = fbq;
-  window._fbq = fbq;
-  const script = document.createElement('script');
-  script.async = true;
-  script.src = 'https://connect.facebook.net/en_US/fbevents.js';
-  document.head.appendChild(script);
-  window.fbq('init', pixelId);
-  window.fbq('track', 'PageView');
+  window.fbq!('init', pixelId);
+  window.fbq!('track', 'PageView');
 }
 
 /** Clique num botão de WhatsApp do catálogo = intenção real de contato — evento padrão do Meta, não custom, pra poder ser usado direto como meta de otimização numa campanha. No-op silencioso se o tenant não tem pixel configurado. */
@@ -372,6 +377,14 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     return window.localStorage.getItem(LANGUAGE_STORAGE_KEY) === 'pt' ? 'pt' : 'es';
   });
   const copy = COPY[language];
+  // Captura uma vez, no primeiro carregamento — o link do anúncio pode
+  // incluir "?utm_source=meta_ads" (TASK-0149); sem isso não dava pra saber
+  // se um clique pro WhatsApp veio de anúncio pago ou de tráfego
+  // orgânico/direto, só o total. `undefined` = chegou sem esse parâmetro.
+  const [utmSource] = useState<string | undefined>(() => {
+    if (typeof window === 'undefined') return undefined;
+    return new URLSearchParams(window.location.search).get('utm_source') || undefined;
+  });
 
   useLayoutEffect(() => {
     const meta = document.createElement('meta');
@@ -393,6 +406,23 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     return () => { document.title = previousTitle; };
   }, [catalog, copy.documentTitle]);
 
+  // Caminho rápido: só o Pixel ID, sem esperar o catálogo completo (que
+  // comprime imagem de cada produto antes de responder — pode levar
+  // segundos numa conexão ruim). Reduz o intervalo entre o clique no
+  // anúncio e o evento PageView do Pixel, então menos gente que chegou de
+  // verdade na página é perdida como "visualização" na Meta.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/public/catalog/${encodeURIComponent(slug)}/pixel-id`, { headers: { Accept: 'application/json' } })
+      .then((response) => (response.ok ? response.json() : null) as Promise<{ pixelId?: string } | null>)
+      .then((payload) => { if (!cancelled && payload?.pixelId) loadMetaPixel(payload.pixelId); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  // Fallback: se o fetch rápido acima falhar por algum motivo mas o
+  // catálogo completo trouxer o pixelId mesmo assim, ainda dispara (loadMetaPixel
+  // já é seguro contra disparo duplo do PageView).
   useEffect(() => {
     if (catalog?.pixelId) loadMetaPixel(catalog.pixelId);
   }, [catalog?.pixelId]);
@@ -440,7 +470,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     );
   }
 
-  const generalWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, undefined, catalog.contact.whatsappMessageGeneral, language);
+  const generalWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, undefined, catalog.contact.whatsappMessageGeneral, language, utmSource);
   const faqs = FAQS[language];
 
   return (
@@ -482,7 +512,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                   <div className="product-grid">
                     {products.map((product) => {
                       const localizedName = localizeCatalogText(product.name, language);
-                      const productWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, localizedName, catalog.contact.whatsappMessageProduct, language);
+                      const productWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, localizedName, catalog.contact.whatsappMessageProduct, language, utmSource);
                       return (
                         <article className={`product-card${product.imageUrl ? ' has-image' : ''}`} key={`${category}-${product.name}`}>
                           {product.imageUrl && <img className="product-card-image" src={product.imageUrl} alt={localizedName} loading="lazy" />}
@@ -499,7 +529,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                               <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
                                 {product.variants.map((variant) => {
                                   const localizedVariantName = localizeCatalogText(variant.code, language);
-                                  const variantWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, `${localizedName} — ${localizedVariantName}`, variant.whatsappMessage || catalog.contact.whatsappMessageProduct, language);
+                                  const variantWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, `${localizedName} — ${localizedVariantName}`, variant.whatsappMessage || catalog.contact.whatsappMessageProduct, language, utmSource);
                                   return (
                                   <div className="variant-row" key={variant.code}>
                                     <div>

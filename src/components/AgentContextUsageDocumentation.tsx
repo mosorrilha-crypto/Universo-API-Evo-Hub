@@ -114,8 +114,12 @@ function FlowCard({ step }: { step: FlowStep }) {
 }
 
 export function AgentContextUsageDocumentation({ onBack }: AgentContextUsageDocumentationProps) {
+  // TASK-0231: mesma correção da QualityAuditCenter.tsx — `quality-workspace--clear`
+  // forçava cores fixas independente do tema (removido de index.css); esta
+  // subtela ("Como usar", acessada a partir da Central de Qualidade) tinha o
+  // mesmo problema.
   return (
-    <section className="quality-workspace quality-workspace--clear space-y-5 animate-fade-in" aria-labelledby="agent-context-guide-title">
+    <section className="quality-workspace space-y-5 animate-fade-in" aria-labelledby="agent-context-guide-title">
       <header className="rounded-card border border-sky-500/25 bg-gradient-to-br from-sky-500/10 via-slate-900/70 to-slate-900/70 p-4 sm:p-6">
         <button
           type="button"

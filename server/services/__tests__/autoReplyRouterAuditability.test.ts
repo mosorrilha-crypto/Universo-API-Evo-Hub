@@ -14,6 +14,7 @@ vi.mock('../metaSend', () => ({ uploadWhatsAppMedia: vi.fn(), sendWhatsAppMediaM
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage: vi.fn(async () => ({}) as any) }));
 vi.mock('../knowledgeBaseStore', () => ({
   getKnowledgeBase: vi.fn(async () => ({ products: [] })),
+  getRuntimeKnowledgeBase: vi.fn(async () => ({ knowledgeBase: { products: [] }, source: 'published_documents' as const })),
   resolveProductPriceAmount: vi.fn(() => 0),
   isNonBookableProduct: vi.fn(() => false),
   findProductDurationMinutes: vi.fn(() => undefined),

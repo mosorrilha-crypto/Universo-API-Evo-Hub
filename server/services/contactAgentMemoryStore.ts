@@ -57,12 +57,19 @@ export interface OperatorContactMemoryPatch {
   serviceInterest?: string | null;
   objections?: string[];
   nextBestAction?: string | null;
+  /**
+   * TASK-0375 (pedido direto): liberado pra edição humana — é só um resumo
+   * textual solto, não um dos estados vivos (`liveState`) que o prompt do
+   * agente instrui a nunca substituir por memória (agenda/pagamento/
+   * escalonamento continuam sempre vindos dos stores próprios, nunca daqui).
+   */
+  conversationSummary?: string | null;
 }
 
 const MAX_TEXT_LENGTH = 240;
 const MAX_SUMMARY_LENGTH = 900;
 const MAX_LIST_ITEMS = 8;
-const OPERATOR_EDITABLE_MEMORY_FIELDS = new Set(['preferredLanguage', 'preferredName', 'currentIntent', 'serviceInterest', 'objections', 'nextBestAction']);
+const OPERATOR_EDITABLE_MEMORY_FIELDS = new Set(['preferredLanguage', 'preferredName', 'currentIntent', 'serviceInterest', 'objections', 'nextBestAction', 'conversationSummary']);
 // Estados vivos são sempre resolvidos dos stores próprios a cada turno; memória
 // jamais pode virar uma cópia autorizativa de pagamento, agenda ou escalonamento.
 const DISALLOWED_FACT_KEY = /(?:token|secret|password|base64|media|receipt|comprovante|document|prompt|history|message|phone|email|payment|pagamento|appointment|agenda|booking|calendar|escalation|escalonamento)/i;
@@ -124,6 +131,7 @@ export function normalizeOperatorContactMemoryPatch(value: unknown): OperatorCon
     serviceInterest: readNullableText('serviceInterest', 160),
     objections,
     nextBestAction: readNullableText('nextBestAction', MAX_TEXT_LENGTH),
+    conversationSummary: readNullableText('conversationSummary', MAX_SUMMARY_LENGTH),
   };
 }
 
@@ -232,6 +240,14 @@ export function mergeContactAgentMemory(current: ContactAgentMemory | null, patc
 function assertScope(tenantId: string, phone: string): void {
   if (!tenantId?.trim()) throw new Error('tenantId é obrigatório para memória de contato.');
   if (!phone?.trim()) throw new Error('phone é obrigatório para memória de contato.');
+}
+
+/** Remove a memória operacional do contato — chamado junto com a exclusão da conversa, senão o próximo turno com o mesmo telefone carrega intenção/resumo/objeções de antes do "reset". */
+export async function deleteContactAgentMemory(tenantId: string, phone: string): Promise<void> {
+  assertScope(tenantId, phone);
+  const db = getDb();
+  const { error } = await db.from('contact_agent_memory').delete().eq('tenant_id', tenantId).eq('phone', phone);
+  if (error) throw error;
 }
 
 export async function getContactAgentMemory(tenantId: string, phone: string): Promise<ContactAgentMemory | null> {

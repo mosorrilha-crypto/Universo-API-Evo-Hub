@@ -11,11 +11,20 @@ const recordOutgoingMessage = vi.fn(async (..._args: any[]) => ({}) as any);
 const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' }));
 const getKnowledgeBaseDocument = vi.fn(async () => ({ buffer: Buffer.from('fake-pdf-bytes'), contentType: 'application/pdf' }));
 const saveMediaImage = vi.fn(async (..._args: any[]) => undefined);
+// TASK-0218: mesmo contrato real de resolveKnowledgeBaseImageBinary (Storage
+// se tiver imageId, senão fallback pro Base64 legado), sem fetch() de
+// verdade — sobrescrito nos testes que precisam simular Storage/ausência.
+const resolveKnowledgeBaseImageBinary = vi.fn(async (_url?: string, _key?: string, _tenantId?: string, imageId?: string, mimeType?: string, legacyBase64?: string) => {
+  if (imageId) return { buffer: Buffer.from('fake-storage-image-bytes'), mimeType: mimeType || 'image/jpeg' };
+  if (legacyBase64) return { buffer: Buffer.from(legacyBase64.replace(/^data:[^;]+;base64,/, ''), 'base64'), mimeType: mimeType || 'image/jpeg' };
+  return null;
+});
 
 vi.mock('../metaSend', () => ({ sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage, sendEvolutionMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
+vi.mock('../knowledgeBaseImageStore', () => ({ resolveKnowledgeBaseImageBinary }));
 vi.mock('../knowledgeBaseDocumentStore', () => ({ getKnowledgeBaseDocument }));
 vi.mock('../mediaImageStore', () => ({ saveMediaImage }));
 
@@ -35,6 +44,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   getKnowledgeBaseVideo.mockResolvedValue({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' });
   getKnowledgeBaseDocument.mockResolvedValue({ buffer: Buffer.from('fake-pdf-bytes'), contentType: 'application/pdf' });
+  resolveKnowledgeBaseImageBinary.mockImplementation(async (_url?: string, _key?: string, _tenantId?: string, imageId?: string, mimeType?: string, legacyBase64?: string) => {
+    if (imageId) return { buffer: Buffer.from('fake-storage-image-bytes'), mimeType: mimeType || 'image/jpeg' };
+    if (legacyBase64) return { buffer: Buffer.from(legacyBase64.replace(/^data:[^;]+;base64,/, ''), 'base64'), mimeType: mimeType || 'image/jpeg' };
+    return null;
+  });
 });
 
 describe('hasFirstContactMessage', () => {
@@ -197,6 +211,35 @@ describe('sendFirstContactMessage', () => {
     await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
 
     expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(1);
+    expect(recordOutgoingMessage).toHaveBeenCalledTimes(1);
+  });
+
+  // TASK-0218: bloco de imagem migrado pro Storage (imageId em vez de
+  // imageBase64 legado) — o binário deve vir de resolveKnowledgeBaseImageBinary.
+  it('manda um bloco de imagem via Storage (imageId) e salva o binário sob o id da mensagem, pro painel', async () => {
+    const kb: AgentKnowledgeBase = { firstContactBlocks: [{ id: '1', type: 'image', imageId: 'image-storage-1', imageMimeType: 'image/png' }] };
+
+    await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
+
+    expect(resolveKnowledgeBaseImageBinary).toHaveBeenCalledWith(
+      'https://fake.supabase.co', 'fake-key', TENANT_ID, 'image-storage-1', 'image/png', undefined, 'firstContactMessage:image'
+    );
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pnid-1', 'token-1', Buffer.from('fake-storage-image-bytes'), 'image/png', 'primeiro-contato.jpg');
+    expect(saveMediaImage).toHaveBeenCalledTimes(1);
+    const [, , savedMessageId, , savedMimeType] = saveMediaImage.mock.calls[0];
+    expect(savedMimeType).toBe('image/png');
+    expect(recordOutgoingMessage.mock.calls[0][6]).toBe(savedMessageId);
+  });
+
+  it('não quebra e não grava nada quando a imagem configurada (imageId) não é encontrada no Storage — mas continua pros próximos blocos', async () => {
+    resolveKnowledgeBaseImageBinary.mockResolvedValueOnce(null);
+    const kb: AgentKnowledgeBase = { firstContactBlocks: [{ id: '1', type: 'image', imageId: 'image-missing' }, textBlock('Depois da imagem que sumiu', '2')] };
+
+    await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(saveMediaImage).not.toHaveBeenCalled();
     expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(1);
     expect(recordOutgoingMessage).toHaveBeenCalledTimes(1);
   });

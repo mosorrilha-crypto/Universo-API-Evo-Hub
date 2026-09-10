@@ -19,6 +19,15 @@ const PRODUCT_WITH_VIDEO = { name: 'Efecto Volumen Brasileño', price: 'Gs 200.0
 const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO, PRODUCT_WITH_VIDEO] }));
 const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' }));
 const saveMediaImage = vi.fn(async (..._args: any[]) => undefined);
+// TASK-0218: mesmo contrato real de resolveKnowledgeBaseImageBinary (Storage
+// se tiver imageId, senão fallback pro Base64 legado), mas sem fetch() de
+// verdade — os testes abaixo sobrescrevem essa implementação default quando
+// precisam simular Storage encontrado/não encontrado.
+const resolveKnowledgeBaseImageBinary = vi.fn(async (_url?: string, _key?: string, _tenantId?: string, imageId?: string, mimeType?: string, legacyBase64?: string) => {
+  if (imageId) return { buffer: Buffer.from('fake-storage-image-bytes'), mimeType: mimeType || 'image/jpeg' };
+  if (legacyBase64) return { buffer: Buffer.from(legacyBase64.replace(/^data:[^;]+;base64,/, ''), 'base64'), mimeType: mimeType || 'image/jpeg' };
+  return null;
+});
 // null = sem override salvo pelo saas_admin — cai no DEFAULT_GLOBAL_LAYER hardcoded, que é o que os testes abaixo verificam.
 const getGlobalPromptLayerOverride = vi.fn(async () => null as string | null);
 // undefined = nenhum agendamento rastreado pra este telefone — o gate de
@@ -34,7 +43,12 @@ const findProductMatch = vi.fn((kb: { products: { name: string }[] } | null, nam
   const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
   return product ? { product } : undefined;
 });
-vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false), findProductDurationMinutes: vi.fn(() => undefined), findProductMatch }));
+// TASK-0327: a store real não exporta mais getKnowledgeBase (tabela legada
+// eliminada) — getRuntimeKnowledgeBase aqui só delega pro mock acima, então
+// os .mockResolvedValueOnce(...) espalhados pelo arquivo continuam valendo
+// sem precisar duplicar em cada caso.
+const getRuntimeKnowledgeBase = vi.fn(async () => ({ knowledgeBase: await getKnowledgeBase(), source: 'published_documents' as const }));
+vi.mock('../knowledgeBaseStore', () => ({ getRuntimeKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false), findProductDurationMinutes: vi.fn(() => undefined), findProductMatch }));
 vi.mock('../appointmentStore', () => ({
   getAppointmentForPhone,
   setAppointmentForPhone: vi.fn(async () => undefined),
@@ -42,13 +56,14 @@ vi.mock('../appointmentStore', () => ({
   confirmPayment: vi.fn(async () => undefined),
 }));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
+vi.mock('../knowledgeBaseImageStore', () => ({ resolveKnowledgeBaseImageBinary }));
 vi.mock('../mediaImageStore', () => ({ saveMediaImage }));
 vi.mock('../globalPromptStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../globalPromptStore')>();
   return { ...actual, getGlobalPromptLayerOverride };
 });
 
-const { generateAutoReplyForText } = await import('../autoReply');
+const { generateAutoReplyForText, executeApprovedMediaAction } = await import('../autoReply');
 
 const KB_MARKER = 'Retoque Gs 150.000 — MARCADOR-DE-BASE-DE-CONHECIMENTO';
 const SPECIALIST_REPLY = { phase: 'informacao', bubbles: ['Oi! O retoque sai Gs 150.000.'], needsHumanConfirmation: false };
@@ -231,6 +246,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('Nunca use parênteses nem dois-pontos explicativos dentro da mensagem');
   });
 
+  it('reforça a regra pra nunca inventar cidade/bairro ao mandar o link de localização (achado real em produção, TASK-0329: agente disse "Estamos en Asunción" sem esse dado estar no contexto, e o studio fica em Luque)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('NUNCA INVENTE CIDADE, BAIRRO OU QUALQUER DESCRIÇÃO DO LUGAR');
+    expect(systemInstruction).toContain('Coordenadas geográficas não são um dado que você consegue ler/traduzir pra nome de lugar com precisão');
+  });
+
   it('reforça a regra anti-repetição de pergunta já respondida (achado real em produção: agente perguntava "cejas, pestañas o labios?" de novo logo depois do cliente responder "Las cejas")', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
@@ -260,6 +283,23 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     const systemInstruction: string = calls[1].config.systemInstruction;
     expect(systemInstruction).toContain('qué gusto en escribirme/leerte/saludarte');
     expect(systemInstruction).toContain('responda a dúvida real da cliente já na mesma bolha ou na seguinte');
+  });
+
+  it('proíbe abrir quase toda mensagem com uma interjeição de entusiasmo (achado real de auditoria, 29/08/2026: conversas reais da Monique mostraram o agente abrindo praticamente toda mensagem consecutiva com "¡Dale!"/"¡Genial!"/"¡Buenísimo!"/"¡Súper!" etc., inclusive em trocas puramente transacionais)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('Não abra quase toda mensagem com uma interjeição/afirmação de entusiasmo');
+    expect(systemInstruction).toContain('nunca como reflexo automático em toda resposta');
+  });
+
+  it('proíbe recorrer sempre à mesma fórmula pronta de "evaluación presencial analiza tus rasgos" pra justificar personalização de técnica (achado real de auditoria, 30/08/2026: a mesma ideia apareceu em 3 conversas reais distintas de clientes diferentes na mesma janela de poucas horas)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('Não recorra sempre à mesma fórmula pronta');
+    expect(systemInstruction).toContain('tus rasgos');
+    expect(systemInstruction).toContain('nunca deixe uma mesma frase pronta de justificativa');
   });
 
   it('instrui a nunca repetir frase de exemplo do contexto do negócio palavra por palavra (pesquisa de mercado: repetir a mesma frase pronta é um dos sinais mais claros de bot)', async () => {
@@ -391,10 +431,10 @@ describe('generateAutoReplyForText — captura o nome que a cliente diz na conve
     expect(result?.capturedClientName).toBe('Camila');
   });
 
-  it('IGNORA nomeCapturado quando já existe contactName — nunca deixa a IA sobrescrever o nome real de perfil do WhatsApp', async () => {
+  it('TASK-0305: usa nomeCapturado mesmo quando o perfil do WhatsApp trouxe um valor — esse valor nunca é confiável como nome real (achado: "Pao Fretes" virando "Pao")', async () => {
     const ai = makeFakeAiWithName('Outro Nome');
     const result = await generateAutoReplyForText('tenant-a', ai, 'oi', 'Camila (perfil do WhatsApp)', undefined, []);
-    expect(result?.capturedClientName).toBeUndefined();
+    expect(result?.capturedClientName).toBe('Outro Nome');
   });
 
   it('não define capturedClientName quando o modelo não extraiu nenhum nome', async () => {
@@ -442,6 +482,38 @@ describe('generateAutoReplyForText — acompanhamento de funil (pedido real, 15/
     const ai = makeFakeAiWithFollowUp('   ', null);
     const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
     expect(result?.pendingOwnerReview).toBeUndefined();
+  });
+});
+
+describe('generateAutoReplyForText — servicoInteresse (TASK-0185, coluna "Interesse" do backup em Google Sheets)', () => {
+  function makeFakeAiWithInterest(servicoInteresse: string | null) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['¡Dale!'], needsHumanConfirmation: false, servicoInteresse }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  it('devolve interestedService quando o modelo identifica um serviço específico do catálogo', async () => {
+    const ai = makeFakeAiWithInterest('Micropigmentación de Cejas');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'quiero microblading', undefined, undefined, []);
+    expect(result?.interestedService).toBe('Micropigmentación de Cejas');
+  });
+
+  it('interestedService fica undefined quando o modelo não identifica nenhum serviço específico', async () => {
+    const ai = makeFakeAiWithInterest(null);
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
+    expect(result?.interestedService).toBeUndefined();
+  });
+
+  it('string vazia/só espaço conta como "não identificado" (nunca vira interesse vazio)', async () => {
+    const ai = makeFakeAiWithInterest('   ');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
+    expect(result?.interestedService).toBeUndefined();
   });
 });
 
@@ -499,21 +571,83 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     return { ai, calls };
   }
 
-  it('envia a foto real via Meta quando o modelo decide chamar a ferramenta', async () => {
+  // TASK-0241: o envio de verdade (upload + sendMediaMessage + gravação) foi
+  // adiado pra DEPOIS da aprovação do revisor pré-envio (executeApprovedMediaAction,
+  // chamado por webhooks.ts) — achado real de produção: enviar a mídia
+  // durante a própria geração do rascunho deixava a foto/vídeo sair mesmo
+  // quando o texto que a acompanhava era bloqueado depois, entregando uma
+  // mídia solta sem contexto nenhum pro cliente. generateAutoReplyForText
+  // agora só PLANEJA o envio (deferredMediaAction), nunca chama as funções
+  // de envio real diretamente.
+  it('planeja o envio da foto real via Meta (não envia ainda) quando o modelo decide chamar a ferramenta', async () => {
     uploadWhatsAppMedia.mockClear();
     sendWhatsAppMediaMessage.mockClear();
     recordOutgoingMessage.mockClear();
+    saveMediaImage.mockClear();
     const { ai } = makeFakeAiWithPhotoTool(true);
 
     const result = await generateAutoReplyForText(
       'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined, undefined,
-      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
     );
 
     expect(result).not.toBeNull();
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
-    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
-    expect(recordOutgoingMessage).toHaveBeenCalled();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
+    expect(recordOutgoingMessage).not.toHaveBeenCalled();
+    expect(saveMediaImage).not.toHaveBeenCalled();
+
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips', mimeType: 'image/jpeg' });
+    expect(result?.deferredMediaAction?.buffer).toBeInstanceOf(Buffer);
+  });
+
+  // TASK-0218: mesma foto, mas migrada pro Storage (exampleImageId em vez de
+  // exampleImageBase64) — o binário deve vir de resolveKnowledgeBaseImageBinary,
+  // nunca do campo Base64 legado (que nem existe mais nesse fixture).
+  it('resolve a foto real via Storage (planeja o envio) quando o produto já tem exampleImageId (migrado)', async () => {
+    uploadWhatsAppMedia.mockClear();
+    sendWhatsAppMediaMessage.mockClear();
+    saveMediaImage.mockClear();
+    resolveKnowledgeBaseImageBinary.mockClear();
+    getKnowledgeBase.mockResolvedValueOnce({
+      products: [{ name: 'Microlips', price: 'Gs 500.000', exampleImageId: 'image-storage-1', exampleImageMimeType: 'image/png' }],
+    } as any);
+    const { ai } = makeFakeAiWithPhotoTool(true);
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
+    );
+
+    expect(result).not.toBeNull();
+    expect(resolveKnowledgeBaseImageBinary).toHaveBeenCalledWith(
+      'https://fake.supabase.co', 'fake-key', 'tenant-a', 'image-storage-1', 'image/png', undefined, 'runMidiaTool:enviar_foto_exemplo'
+    );
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(saveMediaImage).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips', mimeType: 'image/png' });
+  });
+
+  // TASK-0218: imageId cadastrado mas o arquivo sumiu/nunca foi migrado de
+  // verdade no Storage — não pode travar o fluxo nem enviar nada quebrado.
+  it('avisa que a foto não foi encontrada no Storage sem travar, quando resolveKnowledgeBaseImageBinary devolve null', async () => {
+    uploadWhatsAppMedia.mockClear();
+    resolveKnowledgeBaseImageBinary.mockClear();
+    resolveKnowledgeBaseImageBinary.mockResolvedValueOnce(null);
+    getKnowledgeBase.mockResolvedValueOnce({
+      products: [{ name: 'Microlips', price: 'Gs 500.000', exampleImageId: 'image-storage-missing' }],
+    } as any);
+    const { ai, calls } = makeFakeAiWithPhotoTool(true);
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
+    );
+
+    expect(result).not.toBeNull();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).toContain('não foi encontrado no Storage');
   });
 
   it('não manda nada quando o modelo decide não chamar a ferramenta', async () => {
@@ -569,8 +703,9 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     );
 
     expect(result).not.toBeNull();
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
-    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips' });
   });
 
   // Achado real em produção (Monique, 20/08/2026): cliente perguntou "Tiene
@@ -702,6 +837,84 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     const mediaToolCall = calls.find((c) => c.config?.tools);
     expect(mediaToolCall.contents[0].parts[0].text).toContain('- Microlips\n');
   });
+
+  // Achado real em produção (Gladys, 30/08/2026, pós-fix TASK-0156): a mesma
+  // foto foi enviada 3 vezes seguidas em <2min — cada reação curta e
+  // entusiasmada da cliente ("Me gusta sabes 🥰") chegou fora da janela de
+  // silêncio do messageBuffer (10s), disparando um ciclo INDEPENDENTE de
+  // autoReply que decidia de novo, do zero, enviar a mesma foto — mesmo ela
+  // já aparecendo no histórico como enviada. Barreira determinística
+  // (TASK-0170): quando a bolha "📷 Foto de exemplo: X" já está no histórico
+  // recente, nunca reenvia, só avisa o especialista.
+  it('NÃO reenvia a mesma foto quando ela já aparece no histórico recente da conversa', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai, calls } = makeFakeAiWithPhotoTool(true);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'Me gusta sabes 🥰', 'Cliente', undefined,
+      [{ sender: 'agent', text: '📷 Foto de exemplo: Microlips' }],
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).toContain('Já enviou a foto de exemplo de "Microlips" há pouco');
+  });
+
+  it('planeja o envio normalmente quando o histórico não tem nenhum envio recente dessa foto', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai } = makeFakeAiWithPhotoTool(true);
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined,
+      [{ sender: 'lead', text: 'oi, vi o anúncio' }],
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips' });
+  });
+});
+
+describe('executeApprovedMediaAction (TASK-0241)', () => {
+  // Achado real de produção que motivou esta função existir: a foto/vídeo
+  // não pode mais sair durante a geração do rascunho — só depois que o
+  // texto que a acompanha for aprovado pelo revisor pré-envio. Esta função é
+  // o único lugar que ainda chama upload/envio de verdade.
+  it('envia a mídia planejada via Meta, salva o binário e grava a mensagem, só quando chamada explicitamente', async () => {
+    uploadWhatsAppMedia.mockClear();
+    sendWhatsAppMediaMessage.mockClear();
+    recordOutgoingMessage.mockClear();
+    saveMediaImage.mockClear();
+
+    const action = { kind: 'foto' as const, mediaName: 'Microlips', marker: '📷 Foto de exemplo: Microlips', buffer: Buffer.from('foto-bytes'), mimeType: 'image/jpeg', filename: 'Microlips.jpg' };
+    const result = await executeApprovedMediaAction('tenant-a', '595981234567', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }, action);
+
+    expect(result.sent).toBe(true);
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', action.buffer, 'image/jpeg', 'Microlips.jpg');
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
+    expect(saveMediaImage).toHaveBeenCalledTimes(1);
+    expect(recordOutgoingMessage).toHaveBeenCalledWith(
+      'tenant-a', '595981234567',
+      expect.objectContaining({ type: 'image', text: '📷 Foto de exemplo: Microlips' }),
+      'ai', undefined, undefined, expect.any(String),
+    );
+  });
+
+  it('não envia nada e devolve sent:false quando não há ação pendente', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const result = await executeApprovedMediaAction('tenant-a', '595981234567', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }, undefined);
+    expect(result.sent).toBe(false);
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+  });
+
+  it('devolve sent:false com o erro quando o envio falha, sem travar', async () => {
+    uploadWhatsAppMedia.mockRejectedValueOnce(new Error('Meta rejeitou o upload'));
+    const action = { kind: 'foto' as const, mediaName: 'Microlips', marker: '📷 Foto de exemplo: Microlips', buffer: Buffer.from('foto-bytes'), mimeType: 'image/jpeg', filename: 'Microlips.jpg' };
+    const result = await executeApprovedMediaAction('tenant-a', '595981234567', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }, action);
+    expect(result.sent).toBe(false);
+    expect(result.error).toBe('Meta rejeitou o upload');
+  });
 });
 
 describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade com Epic 4.5.2)', () => {
@@ -722,7 +935,9 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
     return { ai, calls };
   }
 
-  it('envia o vídeo real via Meta (busca o binário no Storage) quando o modelo decide chamar a ferramenta', async () => {
+  // TASK-0241: envio de verdade adiado pra depois da aprovação do revisor —
+  // ver mesmo achado no bloco de foto acima.
+  it('planeja o envio do vídeo real via Meta (busca o binário no Storage, não envia ainda) quando o modelo decide chamar a ferramenta', async () => {
     uploadWhatsAppMedia.mockClear();
     sendWhatsAppMediaMessage.mockClear();
     recordOutgoingMessage.mockClear();
@@ -737,18 +952,13 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
 
     expect(result).not.toBeNull();
     expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-a', 'video-1');
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'video/mp4', 'volumen.mp4');
-    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'video/mp4', 'Efecto Volumen Brasileño');
-    expect(recordOutgoingMessage).toHaveBeenCalled();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
+    expect(recordOutgoingMessage).not.toHaveBeenCalled();
+    expect(saveMediaImage).not.toHaveBeenCalled();
 
-    // Achado real (15/08/2026, Clic Piscinas): o vídeo abria no WhatsApp real
-    // do lead mas nunca no painel — salva o binário sob o MESMO id da
-    // mensagem gravada, pro painel conseguir tocar de volta (GET /api/media/:messageId).
-    expect(saveMediaImage).toHaveBeenCalledTimes(1);
-    const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
-    expect(savedBase64).toBe(Buffer.from('fake-video-bytes').toString('base64'));
-    expect(savedMimeType).toBe('video/mp4');
-    expect(recordOutgoingMessage.mock.calls[0][6]).toBe(savedMessageId);
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'video', mediaName: 'Efecto Volumen Brasileño', mimeType: 'video/mp4', filename: 'volumen.mp4' });
+    expect(result?.deferredMediaAction?.buffer.toString()).toBe('fake-video-bytes');
   });
 
   it('acha o produto mesmo quando o Gemini devolve o nome com caixa/espaçamento diferente do catálogo (achado real em produção: match exato falhava silenciosamente)', async () => {
@@ -769,13 +979,14 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
       },
     } as unknown as GoogleGenAI;
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', ai, 'tem vídeo?', 'Cliente', undefined, undefined,
       '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
     );
 
     expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-a', 'video-1');
-    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'video/mp4', 'Efecto Volumen Brasileño');
+    expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'video', mediaName: 'Efecto Volumen Brasileño' });
   });
 
   it('não manda nada quando o modelo decide não chamar a ferramenta', async () => {
@@ -803,10 +1014,26 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
 
     expect(result).not.toBeNull();
     expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-piscinas', 'video-1');
-    expect(sendEvolutionMediaMessage).toHaveBeenCalledWith(
-      'inst-1', 'https://evo.example.com', 'evo-key', '595981234567',
-      Buffer.from('fake-video-bytes').toString('base64'), 'video/mp4', 'volumen.mp4', 'Efecto Volumen Brasileño'
+    expect(sendEvolutionMediaMessage).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'video', mediaName: 'Efecto Volumen Brasileño', mimeType: 'video/mp4', filename: 'volumen.mp4' });
+    expect(result?.deferredMediaAction?.buffer.toString('base64')).toBe(Buffer.from('fake-video-bytes').toString('base64'));
+  });
+
+  // Mesma barreira do teste equivalente de foto (TASK-0170) — paridade
+  // foto/vídeo, mesmo achado real (Gladys, 30/08/2026).
+  it('NÃO reenvia o mesmo vídeo quando ele já aparece no histórico recente da conversa', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai, calls } = makeFakeAiWithVideoTool(true);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'me encantó ese resultado 🥰', 'Cliente', undefined,
+      [{ sender: 'agent', text: '🎥 Vídeo de exemplo: Efecto Volumen Brasileño' }],
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
     );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).toContain('Já enviou o vídeo de exemplo de "Efecto Volumen Brasileño" há pouco');
   });
 });
 

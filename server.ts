@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 
 import { loadConfig } from './server/config';
@@ -18,6 +19,7 @@ import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
 import { createRoadmapRouter } from './server/routes/roadmap';
+import { createBroadcastRouter } from './server/routes/broadcast';
 import { createCrmRouter } from './server/routes/crm';
 import { createFinancialRouter } from './server/routes/financial';
 import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
@@ -31,10 +33,12 @@ import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 import { startPendingFollowUpJob } from './server/services/pendingFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
+import { startBroadcastSenderJob, runBroadcastSenderTick, type BroadcastSenderJobDeps } from './server/services/broadcastSenderJob';
 import { startEvolutionConnectionAlertJob } from './server/services/evolutionConnectionAlertJob';
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { startHeldAppointmentExpiryJob } from './server/services/heldAppointmentExpiryJob';
 import { startRecurringExpenseJob } from './server/services/recurringExpenseJob';
+import { reconcileOrphanedAgentEvalRuns } from './server/services/agentEvalRunStore';
 import { initWebPush } from './server/services/webPush';
 import { notifySystemError } from './server/services/systemErrorAlertService';
 import { configureAdminAlertChannel } from './server/services/adminAlertChannel';
@@ -90,6 +94,21 @@ async function startServer() {
   initDb(supabase, config);
   if (!supabase) {
     console.warn('⚠️  SUPABASE_URL/SUPABASE_KEY ausentes — conversas, agenda, base de conhecimento e login real não vão funcionar até configurar.');
+  } else {
+    // Achado real (03/09/2026): a avaliação automática do agente
+    // (agentEvalService.runAgentEvaluation) roda em background dentro do
+    // processo Node que recebeu o POST — se um deploy reinicia o processo
+    // no meio de uma rodada (comum: cada merge nesta sessão redeployou
+    // enquanto uma rodada de teste estava em andamento), a linha em
+    // agent_eval_runs fica presa em "running" pra sempre, porque nenhum
+    // outro processo sabe que ela existe pra terminar. O painel então
+    // mostra a barra de progresso girando indefinidamente. Como este
+    // processo ACABOU de subir, qualquer linha "running" já existente
+    // nesse momento é, por definição, órfã — marcada como "failed" pra não
+    // enganar o painel.
+    reconcileOrphanedAgentEvalRuns().catch((err) => {
+      console.error('⚠️  Falha ao reconciliar rodadas de avaliação automática órfãs:', (err as Error)?.message || err);
+    });
   }
 
   // Credencial compartilhada (.env) pro canal de alerta AO OPERADOR (não é o
@@ -112,13 +131,33 @@ async function startServer() {
     }
   }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  // TASK-0311 (TASK-0249 item 1): o cookie de sessão (`universo_session`,
+  // ver auth.ts) precisa de `req.cookies` pra ser lido pelo middleware de
+  // autenticação — sem cookie assinado/criptografado por dentro do
+  // cookie-parser, porque o próprio valor já é um JWT verificado.
+  //
+  // CodeQL (js/missing-token-validation, "Missing CSRF middleware") sinaliza
+  // isso porque o padrão que reconhece é uma lib de token CSRF (ex: csurf)
+  // — não avalia o atributo SameSite do cookie em si. A defesa real aqui é
+  // `sameSite: 'strict'` no próprio cookie (auth.ts, sessionCookieOptions):
+  // suficiente porque o app é 100% same-origin (mesmo processo Express serve
+  // API e SPA, sem CORS, sem nenhum fluxo cross-site legítimo que precise
+  // deste cookie) — o navegador nunca o anexa numa requisição disparada por
+  // outro site, o que já fecha CSRF clássico. Adicionar uma lib de token
+  // CSRF por cima não fecharia nenhuma lacuna real nesta arquitetura, só
+  // duplicaria a defesa em ~141 rotas sem ganho. Decisão registrada em
+  // docs/task-registry/TASK-0311.md. Regra excluída via
+  // .github/codeql/codeql-config.yml (comentário `// lgtm[...]`/`// codeql[...]`
+  // inline NÃO é honrado pelo github/codeql-action — confirmado nesta mesma
+  // tarefa: um push com esse comentário continuou gerando o alerta).
+  app.use(cookieParser());
 
   // O catálogo público é montado sem autenticação, mas resolve o tenant pelo
   // slug e só publica tenants explicitamente habilitados na migration 0042.
-  app.use(createPublicCatalogRouter());
+  app.use(createPublicCatalogRouter({ supabaseUrl: config.supabaseUrl, supabaseKey: config.supabaseKey }));
   app.use(createCommercialOfferRouter());
 
-  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));
+  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase, authenticateToken, isProduction: config.isProduction }));
   app.use(createEntitlementsRouter({ authenticateToken }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken }));
@@ -163,13 +202,39 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
     jwtSecret: config.jwtSecret,
   }));
-  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl, sharedMetaPhoneNumberId: config.metaPhoneNumberId }));
+  app.use(createAdminRouter({ authenticateToken, supabase, jwtSecret: config.jwtSecret, isProduction: config.isProduction, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl, sharedMetaPhoneNumberId: config.metaPhoneNumberId }));
   app.use(createRoadmapRouter({ authenticateToken }));
+  // TASK-0206 — deps compartilhadas com startBroadcastSenderJob logo abaixo,
+  // pra que criar/ativar uma campanha (broadcast.ts) dispare um tick
+  // imediato com as mesmas credenciais do job de fundo, em vez de esperar
+  // o próximo intervalo (que virou uma rede de segurança de 5min).
+  const broadcastSenderJobDeps: BroadcastSenderJobDeps = {
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
+  };
+  app.use(createBroadcastRouter({
+    authenticateToken,
+    triggerImmediateBroadcastTick: () => {
+      runBroadcastSenderTick(broadcastSenderJobDeps).catch((err) => {
+        console.warn('⚠️  [Disparo] Falha no tick imediato disparado por ação do operador:', (err as Error)?.message || err);
+      });
+    },
+  }));
   app.use(createCrmRouter({ authenticateToken }));
   app.use(createFinancialRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
   app.use(createPushSubscriptionsRouter({ authenticateToken, vapidPublicKey: config.vapidPublicKey }));
-  app.use(createQualityAuditRouter({ authenticateToken }));
+  app.use(createQualityAuditRouter({
+    authenticateToken,
+    getAi: () => getGeminiClient(config),
+    groqApiKey: config.groqApiKey,
+    googleClientId: config.googleClientId,
+    googleClientSecret: config.googleClientSecret,
+    googleRedirectUri: config.googleRedirectUri,
+  }));
 
   // Middleware de erro global do Express — precisa vir DEPOIS de todas as
   // rotas de API acima (é assim que o Express decide quem trata um
@@ -180,7 +245,7 @@ async function startServer() {
   // completo do bug que isso corrige).
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
-    console.error(`❌ [Erro não tratado] ${req.method} ${req.path}:`, err?.stack || err?.message || err);
+    console.error('❌ [Erro não tratado]', { method: req.method, path: req.path, error: err?.stack || err?.message || err });
     notifySystemError({ source: `${req.method} ${req.path}`, message: err?.message || String(err) }).catch(() => {});
     res.status(500).json({ error: 'Erro interno do servidor.' });
   });
@@ -245,6 +310,13 @@ async function startServer() {
     evolutionInstanceName: config.evolutionInstanceName,
   });
 
+  // Job em background que envia as campanhas de disparo em massa
+  // (broadcast/marketing) respeitando a cota de cada número — cadência é o
+  // que evita banimento, não é opcional. Nunca inicia/pausa uma campanha
+  // sozinho, só processa o que já está `running`. Ver
+  // server/services/broadcastSenderJob.ts (TASK-0171).
+  startBroadcastSenderJob(broadcastSenderJobDeps);
+
   // Job em background que alerta o operador quando a sessão Baileys/Evolution
   // de um tenant cai silenciosamente (investigação real, 24/08/2026 — cliente
   // manda mensagem, IA nunca responde, ninguém vê erro nenhum porque o
@@ -286,11 +358,23 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // TASK-0323 — achado real (usuário reportou "não vejo nenhuma mudança"
+    // logo após um deploy confirmado ao vivo no Render): nem os arquivos
+    // estáticos nem o index.html tinham `Cache-Control` explícito, então o
+    // navegador podia manter uma cópia antiga do index.html em cache e
+    // continuar carregando os nomes de arquivo JS/CSS (com hash) da build
+    // anterior mesmo com o deploy novo já no ar. `index: false` impede que
+    // express.static sirva o index.html com o `maxAge` longo abaixo (ele só
+    // deve valer pros arquivos com hash no nome, que são imutáveis por
+    // definição — o build do Vite gera um hash novo sempre que o conteúdo
+    // muda); o index.html continua batendo só na rota de fallback logo
+    // abaixo, que agora força `no-cache` (sempre revalida com o servidor).
+    app.use(express.static(distPath, { index: false, maxAge: '1y', immutable: true }));
     // Express 5/path-to-regexp não aceita mais o wildcard literal `*`.
     // A expressão regular mantém o fallback GET da SPA sem depender da sintaxe
     // específica do parser de rotas.
     app.get(/.*/, spaFallbackRateLimiter, (_req, res) => {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

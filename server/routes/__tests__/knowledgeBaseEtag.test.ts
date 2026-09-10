@@ -5,8 +5,15 @@
  * foto de exemplo de produto inline em base64, e essa rota mandava o
  * objeto inteiro de novo TODA VEZ que o painel recarregava, mesmo sem
  * nenhum lead real ainda, só de desenvolvimento/teste repetido. Fix é só
- * de transporte (ETag baseado em `updated_at`) — não muda o formato
- * salvo nem o contrato de dados, POST/save continuam idênticos.
+ * de transporte — não muda o formato salvo nem o contrato de dados,
+ * POST/save continuam idênticos.
+ *
+ * TASK-0308/TASK-0327: a rota lê via `getRuntimeKnowledgeBase` (fonte
+ * tipada/publicada — o blob legado foi eliminado, sem fallback). O ETag
+ * deixou de vir de `updated_at` (não existe mais uma única linha/timestamp
+ * — a fonte é a composição de 8 documentos tipados) e passou a ser um hash
+ * do CONTEÚDO devolvido. Este fixture semeia os 8 documentos publicados,
+ * com o catálogo dentro de `service_catalog`.
  */
 import express from 'express';
 import type { Server } from 'http';
@@ -41,10 +48,15 @@ function makeApp() {
   return app;
 }
 
+const OTHER_DOCUMENT_TYPES = ['business_profile', 'brand_voice', 'pricing_policies', 'opening_hours', 'faq', 'human_handoff_rules', 'media_assets'] as const;
+
 beforeAll(async () => {
   supabase = createFakeSupabase({
     tenants: [{ id: TENANT_ID, name: 'Tenant A' }],
-    knowledge_base: [{ tenant_id: TENANT_ID, data: { products: [{ id: 'p1', name: 'Produto 1', price: '100', exampleImageBase64: 'data:image/jpeg;base64,AAAA' }] }, updated_at: '2026-08-25T10:00:00.000Z' }],
+    knowledge_base_documents: [
+      { id: `${TENANT_ID}-service_catalog`, tenant_id: TENANT_ID, document_type: 'service_catalog', version: 1, status: 'published', data: { products: [{ id: 'p1', name: 'Produto 1', price: '100', exampleImageBase64: 'data:image/jpeg;base64,AAAA' }] } },
+      ...OTHER_DOCUMENT_TYPES.map((documentType) => ({ id: `${TENANT_ID}-${documentType}`, tenant_id: TENANT_ID, document_type: documentType, version: 1, status: 'published', data: {} })),
+    ],
   });
   initDb(supabase as any);
 
@@ -89,13 +101,16 @@ describe('GET /api/knowledge-base — ETag', () => {
     const first = await fetch(`${baseUrl}/api/knowledge-base`);
     const staleEtag = first.headers.get('etag')!;
 
-    // Simula um save real (POST /api/knowledge-base faria isso) mudando updated_at.
-    const row = (supabase as any).__tables.knowledge_base.find((r: any) => r.tenant_id === TENANT_ID);
-    row.updated_at = '2026-08-25T11:00:00.000Z';
+    // ETag é hash do CONTEÚDO — simula uma publicação real de verdade
+    // (draft + publish no service_catalog faria isso) adicionando um produto.
+    const row = (supabase as any).__tables.knowledge_base_documents.find((r: any) => r.tenant_id === TENANT_ID && r.document_type === 'service_catalog');
+    row.data = { ...row.data, products: [...row.data.products, { id: 'p2', name: 'Produto 2', price: '200' }] };
 
     const second = await fetch(`${baseUrl}/api/knowledge-base`, { headers: { 'If-None-Match': staleEtag } });
     expect(second.status).toBe(200);
     const secondEtag = second.headers.get('etag');
     expect(secondEtag).not.toBe(staleEtag);
+    const body = await second.json();
+    expect(body.knowledgeBase.products).toHaveLength(2);
   });
 });

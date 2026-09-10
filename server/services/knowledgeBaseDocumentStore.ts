@@ -2,13 +2,17 @@
  * Upload real dos documentos anexados à base de conhecimento (aba
  * "Documentos Anexados" do painel) — até aqui era só um registro visual
  * fictício (o preset da Monique tinha 2 "documentos" hardcoded que nunca
- * existiram de verdade, achado real numa auditoria). Mesmo bucket privado
- * "app-data" já usado por mediaImageStore.ts, sob o prefixo
+ * existiram de verdade, achado real numa auditoria). Sob o prefixo
  * kb-docs/{tenantId}/{docId} — nunca público, autenticado por rota.
+ *
+ * TASK-0332 (achado real, 07/09/2026): migrado pra Cloudflare R2 junto com
+ * knowledgeBaseImageStore.ts/knowledgeBaseVideoStore.ts/mediaImageStore.ts
+ * — mesmo motivo (egress do Supabase Storage estourando a cota do plano
+ * Free). Ver comentário completo em knowledgeBaseImageStore.ts.
  */
-import pdfParse from 'pdf-parse';
-
-const BUCKET = 'app-data';
+import { PDFParse } from 'pdf-parse';
+import { getObjectStorageConfig, putObject, getObject, deleteObject } from './objectStorage';
+import { getLegacySupabaseStorageObject } from './legacySupabaseStorage';
 
 /** Tamanho máximo do texto extraído guardado por documento — o teto de prompt real (DOCUMENTS_PROMPT_CHAR_BUDGET, knowledgeBaseStore.ts) já limita o que entra no Gemini; isso só evita guardar um texto gigante no banco à toa. */
 const MAX_EXTRACTED_TEXT_CHARS = 8000;
@@ -25,8 +29,17 @@ const TEXT_MIME_TYPES = new Set(['text/plain', 'text/csv', 'application/json', '
 export async function extractTextFromDocument(buffer: Buffer, mimeType: string, fileName: string): Promise<string | undefined> {
   try {
     if (mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
-      const parsed = await pdfParse(buffer);
-      return parsed.text?.trim().slice(0, MAX_EXTRACTED_TEXT_CHARS) || undefined;
+      // pdf-parse v2 trocou a função direta por uma classe (`PDFParse`) — o
+      // `pageJoiner: ''` evita o novo marcador de fim de página que a lib
+      // passou a inserir por padrão ("-- N of M --"), mantendo o texto
+      // extraído limpo (mesmo formato que ia pro prompt do agente antes).
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const parsed = await parser.getText({ pageJoiner: '' });
+        return parsed.text?.trim().slice(0, MAX_EXTRACTED_TEXT_CHARS) || undefined;
+      } finally {
+        await parser.destroy();
+      }
     }
     if (TEXT_MIME_TYPES.has(mimeType) || /\.(txt|csv|json|md)$/i.test(fileName)) {
       return buffer.toString('utf-8').trim().slice(0, MAX_EXTRACTED_TEXT_CHARS) || undefined;
@@ -45,28 +58,16 @@ function storagePath(tenantId: string, docId: string): string {
 }
 
 export async function uploadKnowledgeBaseDocument(
-  supabaseUrl: string | undefined,
-  supabaseKey: string | undefined,
+  _supabaseUrl: string | undefined,
+  _supabaseKey: string | undefined,
   tenantId: string,
   docId: string,
   buffer: Buffer,
   mimeType: string
 ): Promise<void> {
-  if (!supabaseUrl || !supabaseKey) throw new Error('Storage não configurado (SUPABASE_URL/SUPABASE_KEY ausentes).');
-  const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath(tenantId, docId)}`, {
-    method: 'POST',
-    headers: {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${supabaseKey}`,
-      'Content-Type': mimeType || 'application/octet-stream',
-      'x-upsert': 'true',
-    },
-    body: buffer as any,
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Falha ao enviar arquivo pro Storage: HTTP ${res.status} — ${body.slice(0, 300)}`);
-  }
+  const config = getObjectStorageConfig();
+  if (!config) throw new Error('Storage não configurado (R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET_NAME ausentes).');
+  await putObject(config, storagePath(tenantId, docId), buffer, mimeType || 'application/octet-stream');
 }
 
 export async function getKnowledgeBaseDocument(
@@ -75,29 +76,25 @@ export async function getKnowledgeBaseDocument(
   tenantId: string,
   docId: string
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
-  if (!supabaseUrl || !supabaseKey) return null;
-  const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath(tenantId, docId)}`, {
-    headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-  });
-  if (!res.ok) return null;
-  const buffer = Buffer.from(await res.arrayBuffer());
-  const contentType = res.headers.get('content-type') || 'application/octet-stream';
-  return { buffer, contentType };
+  const config = getObjectStorageConfig();
+  const result = config ? await getObject(config, storagePath(tenantId, docId)) : null;
+  const legacy = result ? null : await getLegacySupabaseStorageObject(supabaseUrl, supabaseKey, storagePath(tenantId, docId));
+  const found = result || legacy;
+  if (!found) return null;
+  return { buffer: found.buffer, contentType: found.contentType || 'application/octet-stream' };
 }
 
 export async function deleteKnowledgeBaseDocument(
-  supabaseUrl: string | undefined,
-  supabaseKey: string | undefined,
+  _supabaseUrl: string | undefined,
+  _supabaseKey: string | undefined,
   tenantId: string,
   docId: string
 ): Promise<void> {
-  if (!supabaseUrl || !supabaseKey) return;
-  const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath(tenantId, docId)}`, {
-    method: 'DELETE',
-    headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    console.warn(`⚠️  [KB Documentos] Falha ao apagar arquivo do Storage (tenant=${tenantId}, doc=${docId}): HTTP ${res.status} — ${body.slice(0, 300)}`);
+  const config = getObjectStorageConfig();
+  if (!config) return;
+  try {
+    await deleteObject(config, storagePath(tenantId, docId));
+  } catch (err: any) {
+    console.warn('⚠️  [KB Documentos] Falha ao apagar arquivo do Storage:', { tenantId, docId, error: err.message });
   }
 }

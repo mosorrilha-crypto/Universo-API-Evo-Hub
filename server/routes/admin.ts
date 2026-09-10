@@ -1,9 +1,12 @@
 import { Router, type RequestHandler } from 'express';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireRole, isSaasAdmin } from '../middleware/rbac';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { SESSION_COOKIE_NAME, sessionCookieOptions } from './auth';
+import { recordOperatorImpersonationEvent } from '../services/operatorImpersonationStore';
 import { setEvolutionWebhook } from '../services/evolutionSend';
 import { getGlobalPromptLayerRow, setGlobalPromptLayer } from '../services/globalPromptStore';
 import { getRuntimeKnowledgeBaseForPlatform } from '../services/knowledgeBaseStore';
@@ -17,10 +20,14 @@ import {
   revokeTenantFeatureOverride,
 } from '../services/featureEntitlementService';
 import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
+import { decryptSecret, encryptSecret } from '../services/tokenCrypto';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
   supabase: SupabaseClient | null;
+  /** Usados só pela rota de impersonação (POST /api/admin/operators/:id/impersonate) — assina/grava o mesmo cookie de sessão do login normal. */
+  jwtSecret: string;
+  isProduction: boolean;
   /** Credencial "admin" da Evolution API (servidor self-hosted) usada só pra provisionar instância nova — depois de criada, cada instância tem sua própria linha em tenant_evolution_credentials (Epic 4.6). */
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
@@ -41,13 +48,21 @@ interface AdminRouterDeps {
  * vai precisar chamar pra deixar de ser decorativo — essa reconexão do
  * frontend ainda não foi feita, fica pro próximo passo.
  */
-export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey, publicBaseUrl, sharedMetaPhoneNumberId }: AdminRouterDeps): Router {
+export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isProduction, evolutionApiUrl, evolutionApiKey, publicBaseUrl, sharedMetaPhoneNumberId }: AdminRouterDeps): Router {
   const router = Router();
 
   function db() {
     if (!supabase) throw new Error('Supabase não configurado.');
     return supabase;
   }
+
+  // Sessão de impersonação (TASK-0363) expira bem mais rápido que um login
+  // normal (24h) — reduz a janela de risco de uma sessão "acessando como
+  // outro operador" ficar esquecida aberta. Quem esquecer de clicar "Voltar
+  // para admin" simplesmente perde a sessão e precisa logar de novo como
+  // saas_admin depois desse tempo.
+  const IMPERSONATION_SESSION_TTL = '2h';
+  const IMPERSONATION_SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
   // ── Tenants ──────────────────────────────────────────────────────────
   // Só saas_admin cria/lista tenants — são os clientes do SaaS, não algo
@@ -137,7 +152,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (phoneNumberId && accessToken) {
       const { error: credError } = await db()
         .from('tenant_meta_credentials')
-        .insert({ tenant_id: tenant.id, phone_number_id: phoneNumberId, access_token: accessToken, waba_id: wabaId || null, mode: mode || 'shared' });
+        .insert({ tenant_id: tenant.id, phone_number_id: phoneNumberId, access_token: encryptSecret(accessToken), waba_id: wabaId || null, mode: mode || 'shared' });
       if (credError) {
         return res.status(201).json({ tenant, warning: `Tenant criado, mas falha ao gravar credenciais do WhatsApp: ${credError.message}` });
       }
@@ -380,7 +395,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // admin cria operador só dentro do próprio tenant; saas_admin pode
   // escolher qualquer tenant.
   router.get('/api/admin/operators', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    let query = db().from('operators').select('id, tenant_id, email, name, role, created_at');
+    let query = db().from('operators').select('id, tenant_id, email, name, role, created_at, is_active');
     if (!isSaasAdmin(req)) {
       query = query.eq('tenant_id', req.user?.tenantId);
     }
@@ -430,9 +445,21 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // password, além da role já suportada. Continua um PATCH parcial — só os
   // campos enviados são alterados, mesma convenção do PATCH de tenant acima.
   router.patch('/api/admin/operators/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { role, email, name, password } = req.body || {};
+    const { role, email, name, password, isActive } = req.body || {};
     const saasAdmin = isSaasAdmin(req);
     const patch: Record<string, unknown> = {};
+
+    // Bloqueio reversível de operador (TASK-0261) — separado da exclusão
+    // definitiva já existente (DELETE abaixo). Nunca deixa ninguém bloquear
+    // a própria conta: travaria a sessão de quem está fazendo a chamada sem
+    // ninguém pra reverter (mesmo saas_admin teria que pedir pra outro
+    // saas_admin desbloquear).
+    if (isActive !== undefined) {
+      if (isActive === false && req.params.id === req.user?.id) {
+        return res.status(400).json({ error: 'Você não pode bloquear seu próprio acesso.' });
+      }
+      patch.is_active = Boolean(isActive);
+    }
 
     if (role !== undefined) {
       if (!['operator', 'manager', 'admin', 'saas_admin'].includes(role)) {
@@ -461,7 +488,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (!saasAdmin) {
       query = query.eq('tenant_id', req.user?.tenantId);
     }
-    const { data, error } = await query.select('id, tenant_id, email, name, role, created_at').maybeSingle();
+    const { data, error } = await query.select('id, tenant_id, email, name, role, created_at, is_active').maybeSingle();
     if (error) {
       // e-mail único por tenant (unique(tenant_id, email), migration 0001) —
       // devolve mensagem legível em vez do erro cru do Postgres.
@@ -486,6 +513,62 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   }));
 
   /**
+   * Impersonação (TASK-0363, pedido real: "como saas_admin eu consigo trocar
+   * de empresa, mas se um tenant tem vários operadores não tenho como agir
+   * como um específico") — troca a sessão do saas_admin pela do operador
+   * alvo (mesmo cookie único `universo_session`, sem tabela de sessão nova),
+   * pra ver/usar o painel exatamente como aquele operador. Restaurado via
+   * POST /api/auth/end-impersonation (server/routes/auth.ts). `requireRole
+   * ('saas_admin')` — mais restrito que as outras rotas de operador acima
+   * (`admin`) — só o topo da hierarquia pode assumir a identidade de outra
+   * conta.
+   */
+  router.post('/api/admin/operators/:id/impersonate', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const targetId = req.params.id;
+    if (targetId === req.user?.id) {
+      return res.status(400).json({ error: 'Você já está logado como você mesmo.' });
+    }
+
+    const { data: target, error } = await db()
+      .from('operators')
+      .select('id, tenant_id, email, name, role, is_active')
+      .eq('id', targetId)
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!target) return res.status(404).json({ error: 'Operador não encontrado.' });
+    // Nunca outro saas_admin — evita um saas_admin se escondendo atrás de
+    // outro (decisão explícita do dono do produto).
+    if (target.role === 'saas_admin') {
+      return res.status(403).json({ error: 'Não é possível impersonar outro saas_admin.' });
+    }
+    if (target.is_active === false) {
+      return res.status(400).json({ error: 'Este operador está bloqueado — não é possível acessar como ele.' });
+    }
+
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) || undefined : undefined;
+
+    // Auditoria ANTES de trocar o cookie — uma falha aqui bloqueia a troca
+    // de sessão (diferente da jornada do contato, best-effort); impersonação
+    // nunca pode acontecer sem deixar rastro auditável.
+    await recordOperatorImpersonationEvent(db(), {
+      tenantId: target.tenant_id,
+      targetOperatorId: target.id,
+      actorId: req.user!.id,
+      eventType: 'started',
+      reason,
+    });
+
+    const token = jwt.sign(
+      { id: target.id, tenantId: target.tenant_id, role: target.role, impersonatedBy: req.user!.id },
+      jwtSecret,
+      { expiresIn: IMPERSONATION_SESSION_TTL }
+    );
+    res.cookie(SESSION_COOKIE_NAME, token, { ...sessionCookieOptions(isProduction), maxAge: IMPERSONATION_SESSION_MAX_AGE_MS });
+
+    res.json({ operator: { id: target.id, tenantId: target.tenant_id, email: target.email, name: target.name, role: target.role } });
+  }));
+
+  /**
    * Reconecta uma instância Evolution já existente: busca um QR Code novo e
    * reafirma o webhook (corrige de graça instâncias criadas antes da
    * correção do webhook, sem precisar desconectar/reconectar o número).
@@ -499,8 +582,29 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   /** Erro de "connect" numa instância que a Evolution API já não conhece (deletada por fora, ex: recriação que falhou no meio) — distinto de outras falhas pra quem chama poder se autocurar recriando em vez de só devolver erro. */
   class InstanceNotFoundError extends Error {}
 
-  async function reconnectExistingInstance(cred: { instance_name: string; api_url: string; api_key: string }) {
-    const connectRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`, {
+  /**
+   * Normaliza um número pra pairing code (alternativa ao QR — WhatsApp >
+   * Aparelhos conectados > Conectar com número de telefone): remove tudo
+   * que não é dígito e exige formato internacional plausível (DDI+DDD+
+   * número, 8 a 15 dígitos, mesma faixa do E.164). `undefined`/vazio
+   * devolve `undefined` (fluxo de QR normal, sem pairing code); qualquer
+   * outra coisa que não vire um número plausível lança erro explícito em
+   * vez de mandar lixo pra Evolution API.
+   */
+  function normalizePairingPhoneNumber(value: unknown): string | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value !== 'string') throw new Error('Número para pairing code precisa ser texto.');
+    const digits = value.replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 15) {
+      throw new Error('Número para pairing code inválido — use o formato internacional, só dígitos (ex: 5567999249351).');
+    }
+    return digits;
+  }
+
+  async function reconnectExistingInstance(cred: { instance_name: string; api_url: string; api_key: string }, phoneNumber?: string) {
+    const connectUrl = new URL(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`);
+    if (phoneNumber) connectUrl.searchParams.set('number', phoneNumber);
+    const connectRes = await fetch(connectUrl, {
       headers: { apikey: cred.api_key },
       signal: AbortSignal.timeout(20000),
     });
@@ -511,15 +615,16 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       throw new Error(message);
     }
     const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
+    const pairingCode: string | undefined = data?.pairingCode || data?.qrcode?.pairingCode;
 
     let webhookWarning: string | undefined;
     try {
       await setEvolutionWebhook(cred.instance_name, cred.api_url, cred.api_key, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
     } catch (err: any) {
-      webhookWarning = `QR Code pronto, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+      webhookWarning = `${pairingCode ? 'Código' : 'QR Code'} pronto, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
     }
 
-    return { instanceName: cred.instance_name, qrCodeBase64, warning: webhookWarning };
+    return { instanceName: cred.instance_name, qrCodeBase64, pairingCode, warning: webhookWarning };
   }
 
   /**
@@ -534,13 +639,13 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
    * `persist: 'insert'` quando não existe nenhuma linha ainda pra esse
    * tenant, `'update'` quando já existe (troca instance_name + api_key).
    */
-  async function createFreshInstance(tenantId: string, instanceName: string, persist: 'insert' | 'update'): Promise<{ instanceName: string; qrCodeBase64?: string; warning?: string }> {
+  async function createFreshInstance(tenantId: string, instanceName: string, persist: 'insert' | 'update', phoneNumber?: string): Promise<{ instanceName: string; qrCodeBase64?: string; pairingCode?: string; warning?: string }> {
     let created: any;
     try {
       const createRes = await fetch(`${evolutionApiUrl!.replace(/\/$/, '')}/instance/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey! },
-        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS', ...(phoneNumber ? { number: phoneNumber } : {}) }),
         signal: AbortSignal.timeout(20000),
       });
       created = await createRes.json().catch(() => ({}));
@@ -553,11 +658,12 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
 
     const instanceApiKey: string = created?.hash?.apikey || created?.hash || evolutionApiKey!;
     const qrCodeBase64: string | undefined = created?.qrcode?.base64 || created?.qrcode || created?.base64;
+    const pairingCode: string | undefined = created?.qrcode?.pairingCode || created?.pairingCode;
 
     const { error: credError } =
       persist === 'insert'
-        ? await db().from('tenant_evolution_credentials').insert({ tenant_id: tenantId, instance_name: instanceName, api_url: evolutionApiUrl, api_key: instanceApiKey })
-        : await db().from('tenant_evolution_credentials').update({ instance_name: instanceName, api_key: instanceApiKey }).eq('tenant_id', tenantId);
+        ? await db().from('tenant_evolution_credentials').insert({ tenant_id: tenantId, instance_name: instanceName, api_url: evolutionApiUrl, api_key: encryptSecret(instanceApiKey) })
+        : await db().from('tenant_evolution_credentials').update({ instance_name: instanceName, api_key: encryptSecret(instanceApiKey) }).eq('tenant_id', tenantId);
     if (credError) {
       throw new Error(`Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}`);
     }
@@ -572,7 +678,8 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     return {
       instanceName,
       qrCodeBase64,
-      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
+      pairingCode,
+      warning: webhookWarning || (qrCodeBase64 || pairingCode ? undefined : 'Instância criada, mas a resposta não trouxe QR Code nem pairing code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
     };
   }
 
@@ -598,11 +705,44 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     return req.user.tenantId;
   }
 
+  /**
+   * TASK-0197 — CodeQL sinalizou SSRF (Critical/High) nos fetches que usam
+   * `cred.api_url` lido de `tenant_evolution_credentials`: por análise
+   * estática, um valor vindo do banco é tratado como potencialmente
+   * externally-controlled. Comparar contra o `evolutionApiUrl` (env) atual
+   * NÃO é a checagem certa aqui — um teste real (`adminEvolutionInstance.test.ts`)
+   * cobre o caso legítimo de reconectar/consultar status usando a credencial
+   * já salva de um tenant mesmo com EVOLUTION_API_URL/KEY globais ausentes
+   * neste servidor (env usada só pra *provisionar instância nova*, não pra
+   * validar uma já existente). A checagem estrutural (URL bem-formada,
+   * protocolo http/https) é a mesma usada em `evolutionSend.ts` — impede um
+   * SSRF de verdade (`javascript:`, `file:`, string malformada) sem quebrar
+   * esse caso legítimo.
+   */
+  function assertValidHttpUrl(url: string): string {
+    let protocol: string;
+    try {
+      protocol = new URL(url).protocol;
+    } catch {
+      throw new Error(`URL da Evolution API inválida: "${url}".`);
+    }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      throw new Error(`Protocolo não permitido pra Evolution API: "${protocol}".`);
+    }
+    return url;
+  }
+
   router.post('/api/admin/tenants/:id/evolution-instance', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (!evolutionApiUrl || !evolutionApiKey) {
       return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível provisionar instância nova.' });
     }
     const tenantId = resolveEvolutionTenantId(req);
+    let phoneNumber: string | undefined;
+    try {
+      phoneNumber = normalizePairingPhoneNumber(req.body?.number);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
     const { data: tenant, error: tenantError } = await db().from('tenants').select('id, slug, name').eq('id', tenantId).maybeSingle();
     if (tenantError) return res.status(500).json({ error: tenantError.message });
     if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
@@ -617,8 +757,10 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (existingCredError) return res.status(500).json({ error: existingCredError.message });
     if (existingCred) {
+      existingCred.api_key = decryptSecret(existingCred.api_key);
+      assertValidHttpUrl(existingCred.api_url);
       try {
-        const result = await reconnectExistingInstance(existingCred as any);
+        const result = await reconnectExistingInstance(existingCred as any, phoneNumber);
         return res.json(result);
       } catch (err: any) {
         if (err instanceof InstanceNotFoundError) {
@@ -627,7 +769,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
           // apagou a antiga mas falhou ao recriar) — recria do zero com nome
           // novo em vez de devolver 502 pra sempre com nenhuma saída no painel.
           try {
-            const result = await createFreshInstance(tenantId, withFreshSuffix(existingCred.instance_name), 'update');
+            const result = await createFreshInstance(tenantId, withFreshSuffix(existingCred.instance_name), 'update', phoneNumber);
             return res.json(result);
           } catch (recreateErr: any) {
             return res.status(502).json({ error: recreateErr.message });
@@ -644,53 +786,12 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     const baseName = (requestedName || tenant.slug || tenant.id.slice(0, 8)).toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const instanceName = withFreshSuffix(baseName);
 
-    let created: any;
     try {
-      const createRes = await fetch(`${evolutionApiUrl.replace(/\/$/, '')}/instance/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey },
-        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
-        signal: AbortSignal.timeout(20000),
-      });
-      created = await createRes.json().catch(() => ({}));
-      if (!createRes.ok) {
-        return res.status(502).json({ error: `Falha ao criar instância na Evolution API: HTTP ${createRes.status} — ${JSON.stringify(created).slice(0, 300)}` });
-      }
+      const result = await createFreshInstance(tenantId, instanceName, 'insert', phoneNumber);
+      res.status(201).json(result);
     } catch (err: any) {
-      return res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
+      res.status(502).json({ error: err.message });
     }
-
-    // A resposta de /instance/create varia por versão do servidor Evolution
-    // — tenta os formatos conhecidos antes de desistir. A instância em si já
-    // foi criada do lado da Evolution mesmo se não conseguirmos ler o QR
-    // daqui; por isso devolve um aviso em vez de erro puro nesse caso.
-    const instanceApiKey: string = created?.hash?.apikey || created?.hash || evolutionApiKey;
-    const qrCodeBase64: string | undefined = created?.qrcode?.base64 || created?.qrcode || created?.base64;
-
-    const { error: credError } = await db()
-      .from('tenant_evolution_credentials')
-      .insert({ tenant_id: tenant.id, instance_name: instanceName, api_url: evolutionApiUrl, api_key: instanceApiKey });
-    if (credError) {
-      return res.status(500).json({ error: `Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}` });
-    }
-
-    // Bug real em produção (12/08/2026): sem isso, a instância recebe a
-    // mensagem normalmente (por isso aparece no WhatsApp do celular, síncrono
-    // direto com a Meta) mas nunca avisa o Universo — o agente nunca vê nada
-    // chegar. Melhor esforço: instância+credencial já estão salvas mesmo se
-    // isso falhar, e reabrir o QR Code (rota abaixo) tenta de novo.
-    let webhookWarning: string | undefined;
-    try {
-      await setEvolutionWebhook(instanceName, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
-    } catch (err: any) {
-      webhookWarning = `Instância e QR Code prontos, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
-    }
-
-    res.status(201).json({
-      instanceName,
-      qrCodeBase64,
-      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
-    });
   }));
 
   // Reconecta/renova o QR Code de uma instância já criada — o QR do
@@ -698,6 +799,12 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // onboarding depois desse tempo.
   router.get('/api/admin/tenants/:id/evolution-instance/qrcode', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = resolveEvolutionTenantId(req);
+    let phoneNumber: string | undefined;
+    try {
+      phoneNumber = normalizePairingPhoneNumber(req.query?.number);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
     const { data: cred, error: credError } = await db()
       .from('tenant_evolution_credentials')
       .select('instance_name, api_url, api_key')
@@ -705,16 +812,18 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    cred.api_key = decryptSecret(cred.api_key);
+    assertValidHttpUrl(cred.api_url);
 
     try {
-      const result = await reconnectExistingInstance(cred as any);
+      const result = await reconnectExistingInstance(cred as any, phoneNumber);
       res.json(result);
     } catch (err: any) {
       // Mesma autocura do POST .../evolution-instance acima — ver comentário
       // na definição de createFreshInstance.
       if (err instanceof InstanceNotFoundError && evolutionApiUrl && evolutionApiKey) {
         try {
-          const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update');
+          const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update', phoneNumber);
           return res.json(result);
         } catch (recreateErr: any) {
           return res.status(502).json({ error: recreateErr.message });
@@ -722,6 +831,52 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       }
       res.status(502).json({ error: err.message });
     }
+  }));
+
+  /**
+   * TASK-0371 (pedido direto, print real do painel SaaS Admin — tenant "Dr.
+   * Daniel" com "Sem conexão" e o botão "WhatsApp QR" só visível pra
+   * saas_admin): antes disso, o botão self-service "Reconectar WhatsApp
+   * (QR Code)" (`ReconectarWhatsAppQrCode.tsx`, dentro da Base de
+   * Conhecimento) já era liberado pra `admin` comum de tenant no backend —
+   * mas só *aparecia* quando `GET /api/status/available` respondia `true`,
+   * e esse endpoint só responde `true` quando o tenant JÁ tem uma linha em
+   * `tenant_evolution_credentials` (ver tenantResolver.ts,
+   * resolveCredentialsForTenant). Resultado: um tenant que nunca teve
+   * NENHUMA credencial própria (nem Meta nem Evolution — como um recém-
+   * cadastrado) nunca via o botão, então só saas_admin conseguia fazer a
+   * PRIMEIRA conexão — mesmo o endpoint que o botão chama
+   * (POST .../evolution-instance, abaixo) já sendo idempotente e já
+   * suportando provisionar do zero pra esse mesmo tenant.
+   *
+   * Endpoint separado de `/api/status/available` de propósito — aquele
+   * outro alimenta a feature de Status/Stories (só faz sentido `true` pra
+   * quem JÁ está conectado de verdade), não o gate de "posso tentar
+   * conectar". Aqui: `true` se (a) o tenant já usa Evolution (reconectar) ou
+   * (b) o tenant não tem credencial Meta própria configurada E o servidor
+   * tem EVOLUTION_API_URL/EVOLUTION_API_KEY (senão o POST abaixo simplesmente
+   * falharia com 503) — nunca oferece Evolution pra um tenant que a equipe
+   * deliberadamente configurou com Meta Cloud API própria.
+   */
+  router.get('/api/admin/tenants/:id/evolution-instance/available', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = resolveEvolutionTenantId(req);
+    const { data: evoCred, error: evoError } = await db()
+      .from('tenant_evolution_credentials')
+      .select('tenant_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (evoError) return res.status(500).json({ error: evoError.message });
+    if (evoCred) return res.json({ available: true, alreadyConnected: true });
+
+    if (!evolutionApiUrl || !evolutionApiKey) return res.json({ available: false, alreadyConnected: false });
+
+    const { data: metaCred, error: metaError } = await db()
+      .from('tenant_meta_credentials')
+      .select('phone_number_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (metaError) return res.status(500).json({ error: metaError.message });
+    res.json({ available: !metaCred?.phone_number_id, alreadyConnected: false });
   }));
 
   // Estado da conexão (aberta/fechada/conectando) — pro painel saber quando
@@ -735,6 +890,8 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    cred.api_key = decryptSecret(cred.api_key);
+    assertValidHttpUrl(cred.api_url);
 
     try {
       const stateRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connectionState/${cred.instance_name}`, {
@@ -776,6 +933,12 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível recriar a instância.' });
     }
     const tenantId = resolveEvolutionTenantId(req);
+    let phoneNumber: string | undefined;
+    try {
+      phoneNumber = normalizePairingPhoneNumber(req.body?.number);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
     const { data: cred, error: credError } = await db()
       .from('tenant_evolution_credentials')
       .select('instance_name, api_url, api_key')
@@ -783,6 +946,8 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    cred.api_key = decryptSecret(cred.api_key);
+    assertValidHttpUrl(cred.api_url);
 
     const apiBase = cred.api_url.replace(/\/$/, '');
 
@@ -809,7 +974,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     }
 
     try {
-      const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update');
+      const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update', phoneNumber);
       res.json(result);
     } catch (err: any) {
       res.status(502).json({ error: `Instância apagada — ${err.message}` });
@@ -887,7 +1052,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     // Campo em branco no formulário nunca apaga um token já salvo — só troca
     // de verdade quando o admin digita um valor novo (ver comentário do GET
     // acima sobre nunca devolver o token em texto puro).
-    if (capiAccessToken) update.capi_access_token = capiAccessToken;
+    if (capiAccessToken) update.capi_access_token = encryptSecret(capiAccessToken);
 
     const { error: upsertError } = await db()
       .from('tenant_meta_credentials')
@@ -972,7 +1137,8 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
 
     const finalInstagramAccountId: string | undefined = instagramAccountId?.trim() || existing?.instagram_account_id;
-    const finalAccessToken: string | undefined = accessToken?.trim() || existing?.access_token;
+    const trimmedAccessToken: string | undefined = accessToken?.trim();
+    const finalAccessToken: string | undefined = trimmedAccessToken ? encryptSecret(trimmedAccessToken) : existing?.access_token;
     if (!finalInstagramAccountId || !finalAccessToken) {
       return res.status(400).json({ error: 'ID da conta Instagram e access token são obrigatórios.' });
     }

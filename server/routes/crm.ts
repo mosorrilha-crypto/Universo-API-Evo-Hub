@@ -118,7 +118,7 @@ export function createCrmRouter({ authenticateToken, isFinancialModuleEnabled }:
     if (Array.isArray(tasks)) patch.tasks = tasks;
 
     const tenantId = tenantOf(req);
-    const state = await upsertCrmLeadState(tenantId, req.params.phone, patch);
+    const state = await upsertCrmLeadState(tenantId, req.params.phone, patch, req.user?.id);
 
     if (patch.stage === 'ganho') {
       await recordFinancialTransactionForWonDeal(tenantId, state, financialModuleEnabled);

@@ -4,7 +4,7 @@ Descreva em poucas linhas o problema e o resultado esperado.
 
 ## Checklist de segurança e qualidade
 
-- [ ] Consultei a issue #290 e registrei a tarefa com `npm run task:start` quando aplicável.
+- [ ] Consultei a issue #504 e registrei a tarefa com `npm run task:start` quando aplicável.
 - [ ] Verifiquei o isolamento por `tenant_id`; não há leitura ou gravação cruzada entre tenants.
 - [ ] Não incluí segredos hardcoded, tokens, dados pessoais, comprovantes ou payloads reais.
 - [ ] Se esta alteração depende de migration, confirmei que ela foi aplicada em produção antes do merge; caso contrário, marquei como não aplicável.

@@ -9,7 +9,7 @@ describe('AgentContextUsageDocumentation', () => {
   it('documenta o fluxo supervisionado e os gates humanos obrigatórios', () => {
     const html = renderToStaticMarkup(<AgentContextUsageDocumentation onBack={() => undefined} />);
 
-    expect(html).toContain('quality-workspace--clear');
+    expect(html).toContain('quality-workspace');
     expect(html).toContain('Como utilizar o contexto supervisionado');
     expect(html).toContain('Fluxograma de utilização');
     expect(html).toContain('Correção auditável');
@@ -39,7 +39,7 @@ describe('AgentContextUsageDocumentation', () => {
       </AppPreferencesProvider>,
     );
 
-    expect(html).toContain('quality-workspace--clear');
+    expect(html).toContain('quality-workspace');
     expect(html).toContain('Como usar');
     expect(html).toContain('Melhorias do atendimento');
   });

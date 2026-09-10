@@ -1,8 +1,12 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ContactContextPanel } from '../ContactContextPanel';
 import type { ContactAgentContext } from '../../types';
+
+afterEach(() => cleanup());
 
 const context: ContactAgentContext = {
   available: true,
@@ -53,6 +57,23 @@ describe('ContactContextPanel', () => {
 
     expect(html).toContain('As proteções humanas continuam ativas.');
   });
+
+  it('some (não renderiza nada) na variante compacta quando a fonte está disponível mas ainda não há memória nem decisão — achado real, 29/08/2026: mostrava uma faixa só pra dizer "ainda não há nada aqui"', () => {
+    const html = renderToStaticMarkup(
+      <ContactContextPanel context={{ ...context, memory: null, latestDecision: null }} isLoading={false} variant="compact" />,
+    );
+
+    expect(html).toBe('');
+  });
+
+  it('continua mostrando a faixa compacta normalmente quando já existe memória ou decisão', () => {
+    const html = renderToStaticMarkup(
+      <ContactContextPanel context={context} isLoading={false} variant="compact" />,
+    );
+
+    expect(html).toContain('CONTEXTO SUPERVISIONADO');
+    expect(html).toContain('Aguardar a decisão do operador sobre o comprovante.');
+  });
 });
 
 
@@ -65,4 +86,22 @@ it('oferece a correção humana supervisionada sem criar controles para estados 
   expect(html).not.toContain('name="paymentStatus"');
   expect(html).not.toContain('name="appointment"');
   expect(html).not.toContain('name="openLoops"');
+});
+
+// TASK-0375 (pedido direto): "Observações" (conversation_summary) passou a
+// ser editável aqui também — mesmo campo já mostrado como "Observações" na
+// Ficha do Contato (ConversationContextSidebar), agora com edição nos dois
+// lugares.
+it('campo "Observações" aparece pré-preenchido com o conversationSummary atual e salva só o que mudou', () => {
+  const onSaveMemory = vi.fn(async () => undefined);
+  render(
+    <ContactContextPanel context={context} isLoading={false} variant="detail" onSaveMemory={onSaveMemory} />,
+  );
+
+  fireEvent.click(screen.getByText('Corrigir'));
+  const textarea = screen.getByDisplayValue('Cliente demonstrou interesse.');
+  fireEvent.change(textarea, { target: { value: 'Cliente confirmou o horário de terça.' } });
+  fireEvent.click(screen.getByText('Salvar correção'));
+
+  expect(onSaveMemory).toHaveBeenCalledWith({ conversationSummary: 'Cliente confirmou o horário de terça.' });
 });

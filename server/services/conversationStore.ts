@@ -11,6 +11,7 @@ import { emitConversationUpdated } from './conversationEvents';
 import { registerPendingEcho } from './outboundEchoTracker';
 import { isAdsOnlyMode, getAdTriggerMessages, matchesAdTriggerMessage } from './agentStatus';
 import { matchCatalogClickCode, consumeCatalogClick } from './publicCatalogClickStore';
+import { deleteContactAgentMemory } from './contactAgentMemoryStore';
 
 /**
  * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
@@ -35,8 +36,10 @@ export interface StoredMessage {
   /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
   forwardedFromMessageId?: string;
   reactions?: MessageReaction[];
-  /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel (ver issue #126). */
-  sentBy?: 'ai' | 'operator';
+  /** Só presente quando sender='agent' — distingue resposta automática da IA, mensagem digitada manualmente por um operador no painel (ver issue #126), ou envio automático de campanha de disparo em massa (TASK-0171). */
+  sentBy?: 'ai' | 'operator' | 'campaign';
+  /** TASK-0370 — nome do operador que digitou (snapshot no momento do envio, não um join ao vivo com `operators` — mostra o nome de quem mandou mesmo que o operador seja renomeado/removido depois). Só presente quando `sentBy === 'operator'`; `undefined` em mensagens antigas de antes desta coluna existir (painel cai no rótulo genérico "Você (equipe)"). */
+  operatorName?: string;
 }
 
 export interface GeoRestriction {
@@ -60,14 +63,22 @@ export interface StoredConversation {
   manuallyUnread?: boolean;
   /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver attachAdReferralIfMissing) — undefined se a conversa não veio de um anúncio. */
   adHeadline?: string;
+  /** TASK-0185 (parte 2) — serviço/produto do catálogo que a cliente demonstrou interesse mais recentemente, captado pelo especialista a cada turno (autoReply.ts, campo "servicoInteresse"). Sempre sobrescrito com o valor mais recente (diferente de `name`, fixo uma vez sabido) — usado como coluna "Interesse" no backup em Google Sheets quando não há adHeadline de anúncio real. */
+  interest?: string;
   /** Conversa identificada como vinda de anúncio — automaticamente (ctwa_clid real ou texto batendo com um gatilho configurado, ver markAdGreetingMatched) ou manualmente pelo operador (ver updateConversationState, campo adLead). Só importa no modo "Só Anúncios" (agentStatus.isAdsOnlyMode): libera a resposta automática pra essa conversa mesmo sem referral real. */
   adGreetingMatchedAt?: string;
   /** IA para de responder automaticamente só pra esse número — ligado manualmente pelo operador (lead não qualificado/insistente) OU automaticamente pelo próprio autoReply.ts (alucinação de agenda sem ferramenta pra sustentar, ver stopAutoReply em autoReply.ts). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
   aiBlockedAt?: string;
+  /** Quando o operador pediu explicitamente pra devolver o controle pra IA agora (ver ConversationStatePatch.releaseAiNow) — usado só pelo gate "operador ativo" de webhooks.ts, nunca exibido como estado persistente no painel. */
+  operatorAiReleaseAt?: string;
   /** Quantidade de mensagens do lead recebidas depois da última vez que o operador abriu esta conversa (ver markConversationRead). Não confundir com manuallyUnread (override manual do operador) — o painel trata a conversa como não lida quando qualquer um dos dois é verdadeiro. */
   unreadCount: number;
   /** Só na resposta resumida da lista: identifica mudança sem transportar todo o histórico. */
   lastMessageId?: string;
+  /** Número do tenant que esta conversa usa (nulo = número principal/legado) — ver resolveCredentialsForConversation. */
+  phoneNumberId?: string | null;
+  /** TASK-0243 — timestamp da última mensagem do LEAD (não da conversa em geral, que normalmente termina com uma resposta do agente/operador) — só na resposta resumida da lista, pra filtrar "dentro/fora da janela de 24h" em lote sem 1 consulta por conversa (ver conversation_list_summaries, migration 0076). `undefined` = lead nunca escreveu. */
+  lastLeadMessageAt?: string;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -90,9 +101,13 @@ type ConversationRow = {
   muted: boolean | null;
   manually_unread: boolean | null;
   ad_headline: string | null;
+  interest: string | null;
   ai_blocked_at: string | null;
+  operator_ai_release_at: string | null;
   ad_greeting_matched_at: string | null;
   last_read_at: string;
+  /** Qual número do tenant esta conversa usa (principal, ou um broadcast_numbers) — ver getOrCreateConversationForBroadcast/resolveCredentialsForConversation. */
+  phone_number_id: string | null;
   messages?: MessageRow[];
 };
 
@@ -107,6 +122,7 @@ type ConversationSummaryRow = Omit<ConversationRow, 'messages'> & {
   last_message_reactions: MessageReaction[] | null;
   last_message_sent_by: MessageRow['sent_by'] | null;
   unread_count: number | null;
+  last_lead_message_at: string | null;
 };
 
 type MessageRow = {
@@ -118,7 +134,8 @@ type MessageRow = {
   reply_to_message_id: string | null;
   forwarded_from_message_id: string | null;
   reactions: MessageReaction[] | null;
-  sent_by: 'ai' | 'operator' | null;
+  sent_by: 'ai' | 'operator' | 'campaign' | null;
+  operator_name: string | null;
 };
 
 /** Conta mensagens do lead chegadas depois de lastReadAt — extraída à parte pra ser testável sem depender do formato de embed relacional do Supabase. */
@@ -137,8 +154,11 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     muted: !!row.muted,
     manuallyUnread: !!row.manually_unread,
     adHeadline: row.ad_headline || undefined,
+    interest: row.interest || undefined,
     aiBlockedAt: row.ai_blocked_at || undefined,
+    operatorAiReleaseAt: row.operator_ai_release_at || undefined,
     adGreetingMatchedAt: row.ad_greeting_matched_at || undefined,
+    phoneNumberId: row.phone_number_id ?? null,
     unreadCount: countUnreadMessages(row.messages || [], row.last_read_at),
     messages: (row.messages || [])
       .slice()
@@ -153,11 +173,12 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
         forwardedFromMessageId: m.forwarded_from_message_id || undefined,
         reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
         sentBy: m.sent_by || undefined,
+        operatorName: m.operator_name || undefined,
       })),
   };
 }
 
-const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by)';
+const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by, operator_name)';
 
 // A lista é atualizada por SSE + polling de segurança. Não deve transportar o
 // histórico inteiro de todas as conversas a cada rodada: a view 0041 devolve
@@ -191,9 +212,14 @@ function toStoredConversationSummary(row: ConversationSummaryRow): StoredConvers
     forwarded_from_message_id: message.forwardedFromMessageId || null,
     reactions: message.reactions || null,
     sent_by: message.sentBy || null,
+    // A view de lista (conversation_list_summaries) não expõe operator_name —
+    // só a mensagem completa (getConversation/paginação) carrega isso; o
+    // preview da lista nunca precisou do nome específico do operador.
+    operator_name: null,
   })) });
   conversation.unreadCount = row.unread_count || 0;
   conversation.lastMessageId = row.last_message_id || undefined;
+  conversation.lastLeadMessageAt = row.last_lead_message_at || undefined;
   return conversation;
 }
 
@@ -220,7 +246,13 @@ export async function markConversationRead(tenantId: string, phone: string): Pro
   emitConversationUpdated(tenantId, phone);
 }
 
-async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string): Promise<{ id: string }> {
+/**
+ * `phoneNumberId` (opcional, TASK-0171) só é usado na CRIAÇÃO — protege o
+ * caso raro de alguém mandar mensagem pra um número de disparo antes de
+ * qualquer campanha ter existido (a conversa ainda não existiria). Uma
+ * conversa já existente nunca tem esse campo alterado aqui.
+ */
+async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string, phoneNumberId?: string): Promise<{ id: string }> {
   const db = getDb();
   const { data: existing } = await db
     .from('conversations')
@@ -238,7 +270,7 @@ async function getOrCreateConversationRow(tenantId: string, phone: string, name?
 
   const { data: created, error } = await db
     .from('conversations')
-    .insert({ tenant_id: tenantId, phone, name: name || null })
+    .insert({ tenant_id: tenantId, phone, name: name || null, phone_number_id: phoneNumberId || null })
     .select('id')
     .single();
   if (error) {
@@ -261,6 +293,63 @@ async function getOrCreateConversationRow(tenantId: string, phone: string, name?
   return created;
 }
 
+/**
+ * TASK-0171 (disparo em massa) — mesmo achar-ou-criar de
+ * `getOrCreateConversationRow`, mas grava `phone_number_id` SÓ na criação.
+ * Uma conversa já existente (contato já conhecido do tenant, ex: já
+ * conversa pelo número operacional do agente) nunca tem seu `phone_number_id`
+ * sobrescrito por um envio de campanha — é exatamente essa reatribuição
+ * silenciosa que quebraria o roteamento de uma relação já em andamento (ver
+ * "Deduplicação e colisão com contato existente" no planejamento da
+ * feature). O chamador usa o `phoneNumberId` retornado (não necessariamente
+ * o do broadcast_number original) para resolver as credenciais de envio via
+ * `resolveCredentialsForConversation`.
+ */
+export async function getOrCreateConversationForBroadcast(
+  tenantId: string,
+  phone: string,
+  name: string | null,
+  // TASK-0367: `null` pra campanhas via Evolution API — não existe "número
+  // de disparo" separado do operacional pra Evolution (Baileys só tem UM
+  // número por instância), então a conversa fica sem phone_number_id
+  // próprio e sai pelo operacional de sempre via resolveCredentialsForConversation
+  // (mesmo comportamento de uma conversa comum, nunca criada por disparo).
+  broadcastPhoneNumberId: string | null
+): Promise<{ id: string; phoneNumberId: string | null }> {
+  const db = getDb();
+  const { data: existing } = await db
+    .from('conversations')
+    .select('id, phone_number_id')
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone)
+    .maybeSingle();
+  if (existing) {
+    return { id: existing.id, phoneNumberId: existing.phone_number_id ?? null };
+  }
+
+  const { data: created, error } = await db
+    .from('conversations')
+    .insert({ tenant_id: tenantId, phone, name: name || null, phone_number_id: broadcastPhoneNumberId })
+    .select('id, phone_number_id')
+    .single();
+  if (error) {
+    if (error.code === '23505') {
+      // race: outra chamada concorrente já criou essa conversa entre o
+      // SELECT e o INSERT acima — busca a linha real (com o phone_number_id
+      // que ela ficou tendo de verdade) em vez de propagar o erro.
+      const { data: existingAfterRace } = await db
+        .from('conversations')
+        .select('id, phone_number_id')
+        .eq('tenant_id', tenantId)
+        .eq('phone', phone)
+        .maybeSingle();
+      if (existingAfterRace) return { id: existingAfterRace.id, phoneNumberId: existingAfterRace.phone_number_id ?? null };
+    }
+    throw new Error(`Falha ao criar/buscar conversa pra disparo em massa: ${error.message}`);
+  }
+  return { id: created.id, phoneNumberId: created.phone_number_id ?? null };
+}
+
 export interface AdReferral {
   ctwaClid?: string;
   adSourceId?: string;
@@ -274,16 +363,26 @@ export interface AdReferral {
  * Conversions API (Epic 4.5.6) pra amarrar eventos de conversão ao anúncio
  * real; sem isso gravado, o CAPI nunca dispara pra essa conversa (nunca
  * manda atribuição incompleta/inventada).
+ *
+ * TASK-0364: `ctwaClid` sozinho deixou de ser exigido — a Evolution API
+ * (self-hosted, sem o conceito de ctwa_clid da Meta Cloud API) só entrega
+ * `adHeadline`/`adSourceId` na maioria dos casos (ver
+ * extractEvolutionAdReferral em webhookParsers.ts). Exigir ctwaClid faria
+ * TODA atribuição de anúncio via Evolution nunca ser gravada, mesmo tendo
+ * título real disponível pro operador ver de qual anúncio o lead veio. O
+ * CAPI continua seguro: `fireMetaConversionEvent` (metaCapiService.ts) já
+ * checa `ctwaClid` antes de disparar e não faz nada sem ele — gravar
+ * headline/sourceId sem ctwaClid não muda esse comportamento.
  */
 export async function attachAdReferralIfMissing(tenantId: string, phone: string, referral: AdReferral | undefined): Promise<void> {
-  if (!referral?.ctwaClid) return;
+  if (!referral?.ctwaClid && !referral?.adSourceId && !referral?.adHeadline) return;
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone);
-  const { data: existing } = await db.from('conversations').select('ctwa_clid').eq('id', conv.id).maybeSingle();
-  if (existing?.ctwa_clid) return;
+  const { data: existing } = await db.from('conversations').select('ctwa_clid, ad_headline').eq('id', conv.id).maybeSingle();
+  if (existing?.ctwa_clid || existing?.ad_headline) return;
   await db
     .from('conversations')
-    .update({ ctwa_clid: referral.ctwaClid, ad_source_id: referral.adSourceId || null, ad_headline: referral.adHeadline || null })
+    .update({ ctwa_clid: referral.ctwaClid || null, ad_source_id: referral.adSourceId || null, ad_headline: referral.adHeadline || null })
     .eq('id', conv.id);
 }
 
@@ -305,6 +404,18 @@ export async function setConversationNameIfMissing(tenantId: string, phone: stri
   if (existing?.name) return;
   await db.from('conversations').update({ name }).eq('id', conv.id);
   emitConversationUpdated(tenantId, phone);
+}
+
+/**
+ * TASK-0185 (parte 2) — diferente de setConversationNameIfMissing acima,
+ * SEMPRE sobrescreve com o valor mais recente: uma cliente pode mudar de
+ * ideia sobre qual serviço quer no meio da conversa, e a planilha de backup
+ * deve refletir o interesse atual, não o primeiro que apareceu.
+ */
+export async function updateConversationInterest(tenantId: string, phone: string, interest: string): Promise<void> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  await db.from('conversations').update({ interest }).eq('id', conv.id);
 }
 
 /**
@@ -383,10 +494,12 @@ export async function recordIncomingMessage(
   name: string | undefined,
   message: Omit<StoredMessage, 'id' | 'sender'>,
   customId?: string,
-  replyToMessageId?: string
+  replyToMessageId?: string,
+  /** TASK-0171 — número (Meta) que essa mensagem chegou, só usado se a conversa ainda não existir (ver getOrCreateConversationRow). */
+  phoneNumberId?: string
 ): Promise<StoredConversation> {
   const db = getDb();
-  const conv = await getOrCreateConversationRow(tenantId, phone, name);
+  const conv = await getOrCreateConversationRow(tenantId, phone, name, phoneNumberId);
   const id = customId || `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const { error } = await db
     .from('messages')
@@ -410,12 +523,14 @@ export async function recordOutgoingMessage(
   tenantId: string,
   phone: string,
   message: Omit<StoredMessage, 'id' | 'sender'>,
-  /** Quem gerou esta mensagem de verdade — resposta automática da IA ou digitada manualmente por um operador no painel (ver issue #126). Sempre obrigatório: toda chamada precisa decidir explicitamente qual dos dois é. */
-  sentBy: 'ai' | 'operator',
+  /** Quem gerou esta mensagem de verdade — resposta automática da IA, digitada manualmente por um operador no painel (ver issue #126), ou um envio automático de campanha de disparo em massa (TASK-0171, nunca confundir com 'operator': ninguém digitou isso na hora). Sempre obrigatório: toda chamada precisa decidir explicitamente qual das três é. */
+  sentBy: 'ai' | 'operator' | 'campaign',
   replyToMessageId?: string,
   forwardedFromMessageId?: string,
   /** ID pré-gerado pra essa mensagem — usado quando quem chama precisa saber o id ANTES de gravar (ex: pra salvar a mídia real sob o mesmo id em mediaImageStore, ver /send-media em conversations.ts). Sem isso, o id só existia dentro desta função e ninguém conseguia associar o áudio/imagem enviado à mensagem gravada. */
-  customId?: string
+  customId?: string,
+  /** TASK-0370 (pedido direto — identificar qual operador específico escreveu) — só faz sentido quando `sentBy === 'operator'`; nome já resolvido pelo chamador (ver /send em conversations.ts), gravado como snapshot (não muda se o operador for renomeado depois). */
+  operatorName?: string
 ): Promise<StoredConversation> {
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone);
@@ -432,13 +547,14 @@ export async function recordOutgoingMessage(
       reply_to_message_id: replyToMessageId || null,
       forwarded_from_message_id: forwardedFromMessageId || null,
       sent_by: sentBy,
+      operator_name: sentBy === 'operator' ? operatorName || null : null,
     });
   if (error) {
     // Mesmo bug do recordIncomingMessage (ver comentário lá): engolir o erro
     // aqui faz o chamador (ex: triggerAutoReply em webhooks.ts) achar que a
     // resposta do agente foi salva quando não foi — relança pra que o
     // try/catch de quem chama trate de verdade (ex: registrar escalonamento).
-    console.error(`❌ [Conversas] tenant=${tenantId} falha ao gravar mensagem ENVIADA pra ${phone} (id=${id}) — resposta do agente perdida do histórico:`, error.message);
+    console.error('❌ [Conversas] falha ao gravar mensagem ENVIADA — resposta do agente perdida do histórico:', { tenantId, phone, id, message: error.message });
     throw new Error(`Falha ao gravar mensagem enviada: ${error.message}`);
   }
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
@@ -584,6 +700,20 @@ export async function listConversations(tenantId: string, opts: { includeArchive
   return visible.sort(sortConversations);
 }
 
+/**
+ * Consulta leve (sem histórico de mensagens) só do `phone_number_id` da
+ * conversa — usado antes de qualquer envio de resposta (manual ou da IA)
+ * pra saber qual número usar (ver `resolveCredentialsForConversation`).
+ * `null` tanto pra conversa legada (nunca setou) quanto pra conversa
+ * inexistente ainda — em ambos os casos o resolvedor cai no número
+ * operacional do tenant, que é o comportamento de sempre.
+ */
+export async function getConversationPhoneNumberId(tenantId: string, phone: string): Promise<string | null> {
+  const db = getDb();
+  const { data } = await db.from('conversations').select('phone_number_id').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+  return data?.phone_number_id ?? null;
+}
+
 export async function getConversation(tenantId: string, phone: string): Promise<StoredConversation | undefined> {
   const db = getDb();
   const { data } = await db
@@ -596,6 +726,87 @@ export async function getConversation(tenantId: string, phone: string): Promise<
   const conv = toStoredConversation(data as unknown as ConversationRow);
   conv.labels = await listLabels(tenantId, phone);
   return conv;
+}
+
+const MESSAGE_PAGE_COLUMNS = 'id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by, operator_name';
+
+function toStoredMessages(rows: MessageRow[]): StoredMessage[] {
+  return rows.map((m) => ({
+    id: m.id,
+    sender: m.sender,
+    type: m.type,
+    text: m.text || undefined,
+    timestamp: m.created_at,
+    replyToMessageId: m.reply_to_message_id || undefined,
+    forwardedFromMessageId: m.forwarded_from_message_id || undefined,
+    reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
+    sentBy: m.sent_by || undefined,
+    operatorName: m.operator_name || undefined,
+  }));
+}
+
+export interface ConversationMessagesPage {
+  messages: StoredMessage[];
+  /** Só relevante numa página "mais antigas" (beforeTimestamp) — indica se ainda existe histórico anterior a paginar. */
+  hasMore: boolean;
+}
+
+/**
+ * Página de mensagens — achado real, 04/09/2026 ("Carregando histórico
+ * completo" toda vez que abre uma conversa, demora e atrapalha em rede
+ * fraca): `getConversation` acima carrega TODO o histórico de uma vez, e o
+ * painel chamava ele inteiro só pra abrir o chat. Este endpoint busca uma
+ * janela por vez, igual ao WhatsApp real — as mais recentes na abertura,
+ * mensagens antigas conforme o operador rola pra cima (`beforeTimestamp`), e
+ * as novas que chegam com a conversa já aberta (`afterTimestamp`, usado pelo
+ * SSE em vez de recarregar a página inteira de novo).
+ * `getConversation` continua intacto e usado pelos outros consumidores
+ * (prompt da IA, backup em planilha, retry de transcrição) que precisam do
+ * histórico completo pra funcionar direito — nunca trocar esses pela versão
+ * paginada.
+ */
+export async function getConversationMessagesPage(
+  tenantId: string,
+  phone: string,
+  opts: { limit?: number; beforeTimestamp?: string; afterTimestamp?: string } = {}
+): Promise<ConversationMessagesPage> {
+  const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
+  const db = getDb();
+  const { data: convRow } = await db
+    .from('conversations')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone)
+    .maybeSingle();
+  if (!convRow) return { messages: [], hasMore: false };
+
+  // Ordena em memória (não no banco): a conversa já é buscada inteira por
+  // um índice único (tenant_id, conversation_id) — o volume por conversa
+  // aqui é pequeno o bastante (mensagens de WhatsApp, ritmo humano) pra isso
+  // não pesar, e evita depender de ORDER BY/operador ">" corretos num client
+  // Supabase (real ou fake de teste) que nem sempre garante a ordem sozinho.
+  const { data, error } = await db
+    .from('messages')
+    .select(MESSAGE_PAGE_COLUMNS)
+    .eq('tenant_id', tenantId)
+    .eq('conversation_id', convRow.id);
+  if (error) throw error;
+  const allSorted = ((data || []) as MessageRow[])
+    .slice()
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+
+  if (opts.afterTimestamp) {
+    const after = opts.afterTimestamp;
+    const newer = allSorted.filter((m) => m.created_at > after).slice(0, limit);
+    return { messages: toStoredMessages(newer), hasMore: false };
+  }
+
+  const upperBoundExclusive = opts.beforeTimestamp
+    ? allSorted.filter((m) => m.created_at < opts.beforeTimestamp!)
+    : allSorted;
+  const hasMore = upperBoundExclusive.length > limit;
+  const page = upperBoundExclusive.slice(Math.max(0, upperBoundExclusive.length - limit));
+  return { messages: toStoredMessages(page), hasMore };
 }
 
 /**
@@ -623,6 +834,20 @@ export interface ConversationStatePatch {
   aiBlocked?: boolean;
   /** Pedido real (20/08/2026): no modo "Só Anúncios", um lead real de anúncio às vezes chega sem ctwa_clid e sem bater em nenhum gatilho de texto configurado — a IA fica calada e o operador precisa assumir manualmente (ex: Olga Ayala, conversa iniciada por "Buenas precio??" sem referral nenhum). Deixa o operador sinalizar manualmente "esse lead é de anúncio, pode liberar a IA" sem precisar configurar um gatilho novo — mesmo efeito de markAdGreetingMatched, só que via ação humana em vez do texto batendo automaticamente. Sempre true (não existe "desmarcar" — mesma semântica idempotente/nunca-sobrescreve do resto do fluxo de ad referral). */
   adLead?: true;
+  /**
+   * TASK-0181 (parte 2) — pedido real do operador (01/09/2026): o gate
+   * "operador ativo = IA cede a vez" (webhooks.ts, TASK-0177) pausa a IA por
+   * 5min a partir da ÚLTIMA mensagem manual do operador nesta conversa —
+   * numa troca rápida com o cliente, cada resposta manual renova os 5min e a
+   * IA nunca recupera a vez sozinha, sem nenhum jeito de liberar na hora.
+   * Sempre true (idempotente, sem "desmarcar" — mesmo padrão de adLead
+   * acima): registra em operator_ai_release_at que o operador pediu
+   * explicitamente pra devolver o controle agora. O gate ignora a pausa
+   * automática quando esse timestamp for mais recente que a última mensagem
+   * manual do operador; uma nova mensagem manual dele depois disso volta a
+   * pausar normalmente (o "release" não desativa o gate pra sempre).
+   */
+  releaseAiNow?: true;
 }
 
 /**
@@ -646,6 +871,7 @@ export async function updateConversationState(tenantId: string, phone: string, p
   if (patch.unread !== undefined) update.manually_unread = patch.unread;
   if (patch.name !== undefined) update.name = patch.name;
   if (patch.aiBlocked !== undefined) update.ai_blocked_at = patch.aiBlocked ? new Date().toISOString() : null;
+  if (patch.releaseAiNow) update.operator_ai_release_at = new Date().toISOString();
   if (patch.adLead) await markAdGreetingMatched(tenantId, phone);
 
   if (Object.keys(update).length > 0) {
@@ -673,7 +899,23 @@ export async function deleteConversation(tenantId: string, phone: string): Promi
   const { data, error } = await db.from('conversations').delete().eq('tenant_id', tenantId).eq('phone', phone).select('id');
   if (error) throw error;
   const deleted = !!data?.length;
-  if (deleted) emitConversationUpdated(tenantId, phone);
+  if (deleted) {
+    // Achado real (04/09/2026, TASK-0260): `conversations`/`messages` são
+    // apagadas aqui (cascade via FK), mas `contact_agent_memory` (intenção
+    // atual, resumo, objeções, fatos confirmados — a "memória operacional"
+    // que `loadAgentContextPack` recarrega a cada turno) é uma tabela à
+    // parte, chaveada só por tenant_id+phone, sem FK pra `conversations` —
+    // nunca era limpa. Resultado: apagar a conversa pra um teste limpo não
+    // zerava o contexto de verdade; a próxima mensagem do mesmo telefone
+    // ainda carregava a memória antiga. `appointments`/`escalations`
+    // continuam intocados de propósito (são fonte de verdade de agenda/
+    // escalonamento real, não "memória de chat" — ver comentário da
+    // migration 0042).
+    await deleteContactAgentMemory(tenantId, phone).catch((err) =>
+      console.warn(`⚠️  [Contact Memory] tenant=${tenantId} falha não bloqueante ao apagar memória junto com a conversa:`, (err as Error).message)
+    );
+    emitConversationUpdated(tenantId, phone);
+  }
   return deleted;
 }
 

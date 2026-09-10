@@ -18,6 +18,19 @@
  */
 import { getPlatformDb } from './db';
 import { LEGACY_DEFAULT_TENANT_ID } from './tenantContext';
+import { decryptSecret } from './tokenCrypto';
+
+/**
+ * Item 2 (fase 2) da auditoria de segurança, 02/09/2026: access_token/api_key
+ * podem estar cifrados (tenant_meta_credentials, tenant_evolution_credentials,
+ * tenant_instagram_credentials, broadcast_numbers — ver tokenCrypto.ts) ou em
+ * texto puro legado. decryptSecret já reconhece os dois formatos; este helper
+ * só evita repetir a checagem de null/undefined em cada leitura abaixo, no
+ * caminho quente de toda mensagem recebida/enviada.
+ */
+function maybeDecrypt(value: string | null | undefined): string | undefined {
+  return value ? decryptSecret(value) : undefined;
+}
 
 export interface ResolvedTenant {
   tenantId: string;
@@ -60,8 +73,28 @@ export async function resolveTenantByPhoneNumberId(
       if (data) {
         return {
           tenantId: data.tenant_id,
-          metaAccessToken: data.access_token || shared.metaAccessToken,
+          metaAccessToken: maybeDecrypt(data.access_token) || shared.metaAccessToken,
           metaPhoneNumberId: data.phone_number_id,
+        };
+      }
+
+      // TASK-0171 — disparo em massa: um número de broadcast_numbers não é
+      // o número operacional do agente (tenant_meta_credentials), mas
+      // também pertence a um tenant. Sem este passo, toda RESPOSTA de um
+      // contato de disparo cairia na regra abaixo ("canal desconhecido") e
+      // seria descartada silenciosamente pra sempre — bug crítico já
+      // identificado no planejamento da feature, corrigido aqui antes de
+      // qualquer disparo real existir.
+      const { data: broadcastNumber } = await db
+        .from('broadcast_numbers')
+        .select('tenant_id, access_token, phone_number_id')
+        .eq('phone_number_id', phoneNumberId)
+        .maybeSingle();
+      if (broadcastNumber) {
+        return {
+          tenantId: broadcastNumber.tenant_id,
+          metaAccessToken: maybeDecrypt(broadcastNumber.access_token) || shared.metaAccessToken,
+          metaPhoneNumberId: broadcastNumber.phone_number_id,
         };
       }
     } catch (err) {
@@ -102,7 +135,7 @@ export async function resolveTenantByEvolutionInstance(
           provider: 'evolution',
           evolutionInstanceName: data.instance_name,
           evolutionApiUrl: data.api_url || shared.evolutionApiUrl,
-          evolutionApiKey: data.api_key || shared.evolutionApiKey,
+          evolutionApiKey: maybeDecrypt(data.api_key) || shared.evolutionApiKey,
         };
       }
     } catch (err) {
@@ -146,7 +179,7 @@ export async function resolveTenantByInstagramAccountId(instagramAccountId: stri
         tenantId: data.tenant_id,
         provider: 'instagram',
         instagramAccountId: data.instagram_account_id,
-        instagramAccessToken: data.access_token,
+        instagramAccessToken: maybeDecrypt(data.access_token),
       };
     }
   } catch (err) {
@@ -177,7 +210,7 @@ export async function resolveMetaCredentialsForTenant(
       .maybeSingle();
     if (data) {
       return {
-        metaAccessToken: data.access_token || shared.metaAccessToken,
+        metaAccessToken: maybeDecrypt(data.access_token) || shared.metaAccessToken,
         metaPhoneNumberId: data.phone_number_id || shared.metaPhoneNumberId,
       };
     }
@@ -185,6 +218,37 @@ export async function resolveMetaCredentialsForTenant(
     console.warn('⚠️  [Tenant] Falha ao resolver credencial Meta do tenant, usando credencial compartilhada:', (err as Error).message);
   }
   return shared;
+}
+
+export interface MetaTemplateCredentials {
+  accessToken: string;
+  wabaId: string;
+}
+
+/**
+ * Resolve o `waba_id` (WhatsApp Business Account) + token real do tenant,
+ * pra listar/enviar templates de mensagem aprovados de verdade na conta dele
+ * (GET/POST via Graph API — ver listApprovedMetaMessageTemplates em
+ * metaSend.ts). Sem credencial compartilhada de fallback aqui de propósito:
+ * um `waba_id` é específico de cada negócio — cair num WABA compartilhado
+ * listaria/enviaria templates de OUTRO tenant, quebrando isolamento
+ * multi-tenant. `null` quando o tenant não tem WABA cadastrado ainda.
+ */
+export async function resolveMetaTemplateCredentialsForTenant(tenantId: string): Promise<MetaTemplateCredentials | null> {
+  try {
+    const db = getPlatformDb();
+    const { data } = await db
+      .from('tenant_meta_credentials')
+      .select('access_token, waba_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    const accessToken = maybeDecrypt(data?.access_token);
+    if (!accessToken || !data?.waba_id) return null;
+    return { accessToken, wabaId: data.waba_id };
+  } catch (err) {
+    console.warn('⚠️  [Tenant] Falha ao resolver credencial de template Meta do tenant:', (err as Error).message);
+    return null;
+  }
 }
 
 /**
@@ -212,7 +276,7 @@ export async function resolveCredentialsForTenant(
         provider: 'evolution',
         evolutionInstanceName: evo.instance_name,
         evolutionApiUrl: evo.api_url || sharedEvo.evolutionApiUrl,
-        evolutionApiKey: evo.api_key || sharedEvo.evolutionApiKey,
+        evolutionApiKey: maybeDecrypt(evo.api_key) || sharedEvo.evolutionApiKey,
       };
     }
 
@@ -227,7 +291,7 @@ export async function resolveCredentialsForTenant(
       return {
         tenantId,
         provider: 'meta',
-        metaAccessToken: meta.access_token || sharedMeta.metaAccessToken,
+        metaAccessToken: maybeDecrypt(meta.access_token) || sharedMeta.metaAccessToken,
         metaPhoneNumberId: meta.phone_number_id || sharedMeta.metaPhoneNumberId,
       };
     }
@@ -242,4 +306,55 @@ export async function resolveCredentialsForTenant(
     metaAccessToken: sharedMeta.metaAccessToken,
     metaPhoneNumberId: sharedMeta.metaPhoneNumberId,
   };
+}
+
+/**
+ * TASK-0171 (disparo em massa) — resolve as credenciais certas pra responder
+ * uma CONVERSA específica, não o tenant como um todo. Necessário porque,
+ * diferente do resto do sistema (que sempre assumia um único número por
+ * tenant), agora um tenant pode ter vários números de disparo além do
+ * número operacional do agente — e uma conversa precisa continuar saindo
+ * pelo mesmo número que o cliente recebeu/mandou mensagem (do ponto de
+ * vista do cliente, números diferentes são contatos diferentes).
+ *
+ * `conversationPhoneNumberId` nulo/indefinido = conversa legada ou criada
+ * antes desta feature existir → usa o número operacional do tenant, igual
+ * sempre foi (`resolveCredentialsForTenant`). Só busca em `broadcast_numbers`
+ * quando o valor não bate com o número operacional do tenant.
+ */
+export async function resolveCredentialsForConversation(
+  tenantId: string,
+  conversationPhoneNumberId: string | null | undefined,
+  sharedMeta: SharedMetaCredentials,
+  sharedEvo: SharedEvolutionCredentials
+): Promise<ResolvedTenant> {
+  const tenantCredentials = await resolveCredentialsForTenant(tenantId, sharedMeta, sharedEvo);
+  if (!conversationPhoneNumberId || conversationPhoneNumberId === tenantCredentials.metaPhoneNumberId) {
+    return tenantCredentials;
+  }
+
+  try {
+    const db = getPlatformDb();
+    const { data } = await db
+      .from('broadcast_numbers')
+      .select('phone_number_id, access_token')
+      .eq('tenant_id', tenantId)
+      .eq('phone_number_id', conversationPhoneNumberId)
+      .maybeSingle();
+    if (data) {
+      return {
+        tenantId,
+        provider: 'meta',
+        metaAccessToken: maybeDecrypt(data.access_token) || sharedMeta.metaAccessToken,
+        metaPhoneNumberId: data.phone_number_id,
+      };
+    }
+  } catch (err) {
+    console.warn('⚠️  [Tenant] Falha ao resolver credencial de número de disparo pra conversa, usando número operacional do tenant:', (err as Error).message);
+  }
+
+  // Número da conversa não é nem o operacional nem um broadcast_numbers
+  // conhecido (ex: número de disparo removido depois) — cai no operacional
+  // do tenant em vez de falhar o envio.
+  return tenantCredentials;
 }

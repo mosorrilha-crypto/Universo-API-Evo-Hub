@@ -1,11 +1,12 @@
 import { Router, type RequestHandler } from 'express';
 import type { ServerConfig } from '../config';
 import { getGeminiClient, withGeminiRetry } from '../gemini';
-import { transcribeAudioWithGemini } from '../services/geminiTranscription';
-import { callGroqJsonCompletion } from '../services/groqClient';
+import { transcribeAudio } from '../services/geminiTranscription';
+import { callGroqJsonCompletion, GROQ_SPECIALIST_MODEL, GROQ_SPECIALIST_TIMEOUT_MS } from '../services/groqClient';
 import { formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { buildChronologicalConversationContext, guardContinuationReply } from '../services/conversationReplyGuard';
 import { freshnessFor, getLatestConversationAnalysis, saveConversationAnalysis } from '../services/conversationAnalysisStore';
+import { HISTORY_WINDOW_SIZE } from '../services/autoReply';
 
 /**
  * Achado real em produção (18/08/2026): os quatro endpoints deste arquivo
@@ -46,15 +47,30 @@ import { freshnessFor, getLatestConversationAnalysis, saveConversationAnalysis }
  * json_object) — o base64 nunca era usado, só inflava o payload. Mesmo
  * princípio já aplicado à Base de Conhecimento (formatKnowledgeBaseForPrompt
  * em vez de JSON.stringify cru): manda só o que o texto precisa.
+ *
+ * TASK-0315 (05/09/2026): a correção original trocava `mediaBase64` fora de
+ * um JSON.stringify ainda cru do resto da mensagem — resolvia o 413, mas
+ * não a causa mais ampla (histórico sem formatação cronológica clara nem
+ * limite de tamanho, ver ANALYSIS_HISTORY_WINDOW_SIZE/HISTORY_WINDOW_SIZE
+ * abaixo). Os 3 endpoints agora usam buildChronologicalConversationContext
+ * (conversationReplyGuard.ts) em vez de JSON.stringify(messages) — já
+ * ignora mediaBase64 (só lê `.text`), então a função dedicada de antes
+ * (stripMediaBase64ForPrompt) não é mais necessária.
  */
-function stripMediaBase64ForPrompt(messages: any): any {
-  if (!Array.isArray(messages)) return messages;
-  return messages.map((m) => {
-    if (!m || typeof m !== 'object' || !m.mediaBase64) return m;
-    const { mediaBase64, ...rest } = m;
-    return rest;
-  });
-}
+/**
+ * Janela do histórico só pro endpoint de análise de CRM (leadStage,
+ * extractedCRMData, etc) — bem maior que HISTORY_WINDOW_SIZE (o mesmo valor
+ * usado pelo agente principal e pelos outros dois endpoints abaixo,
+ * reply-from-hint/ask, que só precisam do fim recente da conversa pra gerar
+ * a PRÓXIMA mensagem). Um dado de CRM real (orçamento, objeção, critério de
+ * decisão) pode ter sido dito bem no início de uma conversa longa — cortar
+ * pra só 24 mensagens perderia justamente esse tipo de informação que essa
+ * análise existe pra capturar. Ainda assim, limitada (não é "sem limite"
+ * como antes) — achado real via consulta direta ao Postgres de produção:
+ * conversas reais chegam a 255 mensagens, e mandar isso inteiro no prompt
+ * incha custo/tokens sem necessidade.
+ */
+const ANALYSIS_HISTORY_WINDOW_SIZE = 80;
 
 interface AiRouterDeps {
   config: ServerConfig;
@@ -66,6 +82,22 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
   const router = Router();
   const ai = getGeminiClient(config);
   const groqApiKey = config.groqApiKey;
+  // TASK-0350 (achado real em produção durante o incidente ativo de créditos
+  // Gemini esgotados: "Groq falhou (analyze-conversation), caindo pro
+  // Gemini: Groq respondeu 400 json_validate_failed" — e o Gemini, sem
+  // crédito, também falhou, deixando o operador sem nenhuma resposta na
+  // Ficha IA). Os 4 endpoints deste arquivo usavam o modelo default de
+  // callGroqJsonCompletion (openai/gpt-oss-20b, dimensionado pro roteador —
+  // uma classificação curta) pra gerar JSON bem mais complexo (schema de
+  // análise de CRM com objetos aninhados, texto de resposta longo) — mais
+  // sujeito a falhar a validação de JSON do próprio Groq. Reaproveita o
+  // mesmo modelo mais forte já usado pra resposta do especialista em
+  // autoReply.ts (TASK-0346, GROQ_SPECIALIST_MODEL — ver groqClient.ts pro
+  // valor atual) e seu timeout maior (12s) — reduz a chance da 1ª tentativa
+  // falhar, sem mudar a rede de
+  // segurança (Gemini de fallback, depois anti-fabricação) já existente.
+  const groqModel = GROQ_SPECIALIST_MODEL;
+  const groqTimeoutMs = GROQ_SPECIALIST_TIMEOUT_MS;
 
   // ✅ Endpoint de teste do Gemini
   router.get('/api/test-gemini', authenticateToken, rateLimiter, async (req, res) => {
@@ -110,12 +142,12 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
           return await saveConversationAnalysis(tenantId, leadPhone, Array.isArray(messages) ? messages : [], agentKnowledgeBase || null, analysis, source, { model, actorId: (req as any).user?.id });
         } catch (persistError: any) {
           // A análise continua utilizável na sessão atual; a falha de persistência nunca deve produzir uma resposta inventada nem mascarar o erro do modelo.
-          console.warn(`⚠️ [Ficha IA] análise gerada mas não persistida (tenant=${tenantId}, phone=${leadPhone}):`, persistError?.message || persistError);
+          console.warn('⚠️ [Ficha IA] análise gerada mas não persistida:', { tenantId, leadPhone, message: persistError?.message || persistError });
           return undefined;
         }
       };
 
-      const chronologicalHistory = buildChronologicalConversationContext(messages);
+      const chronologicalHistory = buildChronologicalConversationContext(messages, ANALYSIS_HISTORY_WINDOW_SIZE);
       const prompt = `Você é um analista de Vendas e CRM inteligente para um sistema SaaS no WhatsApp.
 Analise o histórico da conversa a seguir e a base de conhecimento do agente e responda estritamente em formato JSON com a seguinte estrutura:
 {
@@ -159,7 +191,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
 
       if (groqApiKey) {
         try {
-          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt, groqTimeoutMs, groqModel);
           if (!parsed || typeof parsed.leadStage !== 'string') {
             throw new Error(`Groq retornou análise sem "leadStage" válido: ${JSON.stringify(parsed)?.slice(0, 200)}`);
           }
@@ -282,6 +314,10 @@ INSTRUÇÃO DO OPERADOR: "${hint.trim()}"
 
 Use o histórico da conversa e a base de conhecimento SÓ pra manter o tom, o idioma e o contexto consistentes com o que já foi dito — nunca pra contrariar ou ignorar a instrução do operador. Mesmo quando a instrução for comercial, não ignore uma pergunta específica e ainda sem resposta da última mensagem do lead: responda-a primeiro, salvo se a instrução disser explicitamente o contrário. Não diga que enviou ou vai anexar foto, vídeo, catálogo ou outro arquivo se você não tiver uma ferramenta real de envio de mídia. Não invente disponibilidade, preço, desconto ou confirmação de agenda.
 
+Antes de escrever, releia o histórico da conversa abaixo com atenção (achado real de produção: sem este aviso, o rascunho às vezes repetia um cumprimento e uma informação que já tinham sido enviadas há poucas mensagens). O histórico abaixo já está em ORDEM CRONOLÓGICA, numerado, marcando CLIENTE/ATENDIMENTO — a última linha é a mais recente:
+- Se o histórico mostra que vocês já se falaram nesta conversa (qualquer linha ATENDIMENTO antes da última linha CLIENTE), NUNCA se apresente ou cumprimente de novo (nada de "¡Hola!"/"Olá!" de abertura) — continue a conversa naturalmente, como quem lembra o que já foi dito. Isso vale mesmo quando a instrução do operador for pra "retomar contato" depois de um tempo sem resposta — retomar não é a mesma coisa que recomeçar.
+- Nunca repita uma informação (preço, prazo, condição, link) que já foi enviada ao lead nas mensagens anteriores do "ATENDIMENTO" — se a instrução do operador pede pra reforçar algo já dito, reformule ou avance a conversa a partir dali, não copie a mesma informação de novo como se fosse a primeira vez.
+
 Responda estritamente em formato JSON:
 {
   "reply": "mensagem pronta pra enviar ao lead, seguindo a instrução do operador, no MESMO idioma que o lead usa na conversa",
@@ -290,13 +326,14 @@ Responda estritamente em formato JSON:
 }
 
 Dados do Lead: ${JSON.stringify(leadInfo)}
-Histórico de Mensagens: ${JSON.stringify(stripMediaBase64ForPrompt(messages))}
+Histórico cronológico de Mensagens (as mais antigas podem ter sido omitidas; a numeração recomeça em 1, não é a posição real na conversa completa):
+${buildChronologicalConversationContext(messages, HISTORY_WINDOW_SIZE)}
 Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)}
 `;
 
       if (groqApiKey) {
         try {
-          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt, groqTimeoutMs, groqModel);
           if (!parsed || typeof parsed.reply !== 'string' || !parsed.reply.trim()) {
             throw new Error(`Groq retornou "reply" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);
           }
@@ -355,7 +392,8 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
 O operador pode perguntar sobre a conversa com o lead abaixo (ex: "esse cliente já falou de orçamento?", "resume o que falta pra fechar") OU fazer uma pergunta geral sem relação nenhuma com essa conversa (ex: traduções, datas, cálculos, feriados) — responda da forma mais direta e útil possível, em Português, a menos que a pergunta peça outro idioma.
 
 Dados do Lead (contexto, use se for relevante pra pergunta): ${JSON.stringify(leadInfo || {})}
-Histórico da Conversa (contexto, use se for relevante pra pergunta): ${JSON.stringify(stripMediaBase64ForPrompt(messages || []))}
+Histórico cronológico da Conversa, numerado, marcando CLIENTE/ATENDIMENTO — use se for relevante pra pergunta (as mais antigas podem ter sido omitidas; a numeração recomeça em 1, não é a posição real na conversa completa):
+${buildChronologicalConversationContext(messages || [], ANALYSIS_HISTORY_WINDOW_SIZE)}
 
 Pergunta do operador: "${question.trim()}"
 
@@ -363,7 +401,7 @@ Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
 
       if (groqApiKey) {
         try {
-          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt, groqTimeoutMs, groqModel);
           if (!parsed || typeof parsed.answer !== 'string' || !parsed.answer.trim()) {
             throw new Error(`Groq retornou "answer" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);
           }
@@ -403,7 +441,7 @@ Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
   router.post('/api/transcribe', authenticateToken, rateLimiter, async (req, res) => {
     try {
       const { audioBase64, mimeType, leadName, customInstructions } = req.body || {};
-      const outcome = await transcribeAudioWithGemini(ai, audioBase64, mimeType, { leadName, customInstructions });
+      const outcome = await transcribeAudio(ai, audioBase64, mimeType, { leadName, customInstructions, groqApiKey });
       return res.json({ success: true, source: outcome.source, result: outcome.result });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message || 'Erro ao processar áudio.' });
@@ -422,7 +460,9 @@ Leads: ${JSON.stringify(leads || [])}`;
         try {
           const { parsed } = await callGroqJsonCompletion(
             groqApiKey,
-            `${reportInstructions}\n\nResponda estritamente em formato JSON: { "report": "o relatório completo em texto" }`
+            `${reportInstructions}\n\nResponda estritamente em formato JSON: { "report": "o relatório completo em texto" }`,
+            groqTimeoutMs,
+            groqModel
           );
           if (!parsed || typeof parsed.report !== 'string' || !parsed.report.trim()) {
             throw new Error(`Groq retornou "report" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);

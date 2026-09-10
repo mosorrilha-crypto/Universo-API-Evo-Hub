@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -13,6 +13,7 @@ import {
   Filter,
   Lightbulb,
   LockKeyhole,
+  MessageCircle,
   RefreshCw,
   RotateCcw,
   Search,
@@ -118,6 +119,37 @@ interface ControlledExperimentResult {
   windowHours: number;
   metrics: Array<{ key: 'human_corrections' | 'escalations' | 'blocked_responses'; label: string; before: number; after: number; delta: number; interpretation: 'improved' | 'worsened' | 'stable' }>;
   limitations: string[];
+}
+
+/** TASK-0208 — status de uma rodada de avaliação automática sintética (ver server/services/agentEvalService.ts). Os achados de falha aparecem na lista normal de reviews (kind='bug'), esta é só o progresso da execução em background. */
+interface AgentEvalRun {
+  id: string;
+  status: 'running' | 'completed' | 'failed';
+  requestedCount: number;
+  completedCount: number;
+  passCount: number;
+  failCount: number;
+  repeatedPhraseCount: number;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+/** TASK-0249 — cada caso sintético de uma rodada (pergunta + resposta real + veredito), aprovado ou não — ver server/services/agentEvalRunCaseStore.ts. */
+interface AgentEvalRunCase {
+  id: string;
+  category: string;
+  question: string;
+  history?: { sender: 'lead' | 'agent'; text: string }[];
+  agent?: string;
+  bubbles?: string[];
+  passed: boolean;
+  safetyApproved?: boolean;
+  safetyReason?: string;
+  qualityIssues?: string[];
+  suggestedFix?: string;
+  error?: string;
+  createdAt: string;
 }
 
 interface QualityAuditCenterProps {
@@ -312,6 +344,42 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [composerTitle, setComposerTitle] = useState('');
   const [composerDescription, setComposerDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [evalRuns, setEvalRuns] = useState<AgentEvalRun[]>([]);
+  const [evalCount, setEvalCount] = useState(10);
+  const [startingEval, setStartingEval] = useState(false);
+  const [evalError, setEvalError] = useState<string | null>(null);
+  const [viewingRunId, setViewingRunId] = useState<string | null>(null);
+  const [runCases, setRunCases] = useState<AgentEvalRunCase[]>([]);
+  const [loadingRunCases, setLoadingRunCases] = useState(false);
+  const [runCasesError, setRunCasesError] = useState<string | null>(null);
+
+  // TASK-0375 (pedido direto): "roteiro manual" — chat interativo turno a
+  // turno com o agente REAL (mesmo generateAutoReplyForText do WhatsApp),
+  // sem telefone/conversa real nenhuma envolvida. Histórico vive só neste
+  // estado local (nunca persiste no servidor) — recarregar a página começa
+  // uma conversa fictícia nova.
+  const [manualTestMessages, setManualTestMessages] = useState<{ sender: 'lead' | 'agent'; text: string }[]>([]);
+  const [manualTestInput, setManualTestInput] = useState('');
+  const [manualTestSending, setManualTestSending] = useState(false);
+  const [manualTestError, setManualTestError] = useState<string | null>(null);
+
+  /** TASK-0249 — pedido direto do dono do produto: ver a lista completa de pergunta+resposta de uma rodada, inclusive os casos APROVADOS, não só os que viraram achado de bug. */
+  const openRunCases = async (runId: string) => {
+    setViewingRunId(runId);
+    setRunCases([]);
+    setRunCasesError(null);
+    setLoadingRunCases(true);
+    try {
+      const response = await apiFetch(`/api/quality-audit/eval-runs/${encodeURIComponent(runId)}/cases`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível carregar os casos desta rodada.');
+      setRunCases(Array.isArray(data?.cases) ? data.cases : []);
+    } catch (error: any) {
+      setRunCasesError(error?.message || 'Não foi possível carregar os casos desta rodada.');
+    } finally {
+      setLoadingRunCases(false);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -338,6 +406,88 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   useEffect(() => {
     loadData();
   }, []);
+
+  const loadEvalRuns = async () => {
+    try {
+      const response = await apiFetch('/api/quality-audit/eval-runs');
+      const data = await response.json().catch(() => null);
+      if (!response.ok) return; // rota exige admin — silencioso pra operador sem permissão, igual ao resto do painel
+      setEvalRuns(Array.isArray(data?.runs) ? data.runs : []);
+    } catch {
+      // best-effort — não trava o painel se isto falhar
+    }
+  };
+
+  useEffect(() => {
+    loadEvalRuns();
+  }, []);
+
+  // Enquanto alguma rodada estiver "running", faz polling a cada 3s pra
+  // acompanhar o progresso — uma rodada de 100 casos leva minutos, não dá
+  // pra manter a requisição original aberta (ver POST .../eval-runs).
+  // Some findings pro painel principal quando terminar: recarrega a lista
+  // de reviews também, pra os achados novos (kind=bug) aparecerem sem
+  // precisar recarregar a página.
+  useEffect(() => {
+    if (!evalRuns.some((run) => run.status === 'running')) return;
+    const interval = setInterval(async () => {
+      await loadEvalRuns();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [evalRuns]);
+
+  const previousRunningIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const stillRunning = new Set(evalRuns.filter((run) => run.status === 'running').map((run) => run.id));
+    const justFinished = [...previousRunningIdsRef.current].some((id) => !stillRunning.has(id));
+    if (justFinished) loadData();
+    previousRunningIdsRef.current = stillRunning;
+  }, [evalRuns]);
+
+  const handleStartEval = async () => {
+    setStartingEval(true);
+    setEvalError(null);
+    try {
+      const response = await apiFetch('/api/quality-audit/eval-runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: evalCount }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível iniciar a avaliação automática.');
+      setEvalRuns((prev) => [data.run, ...prev]);
+      onToast(isSpanish ? 'Evaluación automática iniciada — puede tardar algunos minutos.' : 'Avaliação automática iniciada — pode levar alguns minutos.');
+    } catch (error: any) {
+      setEvalError(error?.message || 'Não foi possível iniciar a avaliação automática.');
+    } finally {
+      setStartingEval(false);
+    }
+  };
+
+  const handleSendManualTest = async () => {
+    const text = manualTestInput.trim();
+    if (!text || manualTestSending) return;
+    const historyBeforeThisTurn = manualTestMessages;
+    setManualTestMessages((prev) => [...prev, { sender: 'lead', text }]);
+    setManualTestInput('');
+    setManualTestError(null);
+    setManualTestSending(true);
+    try {
+      const response = await apiFetch('/api/quality-audit/manual-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, history: historyBeforeThisTurn }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível obter a resposta do agente.');
+      const bubbles: string[] = Array.isArray(data?.bubbles) ? data.bubbles : [];
+      setManualTestMessages((prev) => [...prev, ...bubbles.map((b) => ({ sender: 'agent' as const, text: b }))]);
+    } catch (error: any) {
+      setManualTestError(error?.message || 'Não foi possível obter a resposta do agente.');
+    } finally {
+      setManualTestSending(false);
+    }
+  };
 
   const filteredReviews = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -372,7 +522,9 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       setReviews((current) => current.map((review) => review.id === reviewId ? data.review : review));
       setSelectedReviewId(null);
       setReviewNote('');
-      onToast(`Item ${STATUS_LABELS[status].toLowerCase()} com sucesso.`);
+      onToast(data?.knowledgeDraftCreated
+        ? 'Aprovado — resposta sugerida virou rascunho de conhecimento para revisão.'
+        : `Item ${STATUS_LABELS[status].toLowerCase()} com sucesso.`);
       await loadData();
     } catch (error: any) {
       onToast(error?.message || 'Não foi possível atualizar a revisão.');
@@ -522,8 +674,18 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     return <AgentContextUsageDocumentation onBack={() => setShowUsageDocumentation(false)} />;
   }
 
+  // TASK-0231 (pedido direto, 03/09/2026): esta seção usava a classe
+  // `quality-workspace--clear` (index.css), que forçava cores fixas
+  // "claras" com `!important` INDEPENDENTE do tema selecionado — achado
+  // real ao investigar um print: a página sempre aparecia clara/branca em
+  // qualquer um dos 4 temas (dark/light/blue/clean), porque essa regra
+  // sobrescrevia o sistema de temas já existente (que já remapeia
+  // corretamente `bg-slate-900`/`text-white`/`text-slate-400`/etc. pra
+  // cada tema, usado pelo resto do app). Removida — a página agora herda
+  // o mesmo sistema de temas já usado em todo o resto do painel, em vez
+  // de uma paleta fixa própria.
   return (
-    <section className="quality-workspace quality-workspace--clear space-y-5 animate-fade-in">
+    <section className="quality-workspace space-y-5 animate-fade-in">
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-sky-300 text-xs font-semibold uppercase tracking-[0.18em]">
@@ -621,6 +783,142 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
                 <ControlPill label="Pagamento" value="Humano" tone="emerald" />
               </div>
             </div>
+          </div>
+
+          <div className="bg-slate-900/70 border border-slate-800 rounded-card p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">{isSpanish ? 'Evaluación automática del agente' : 'Avaliação automática do agente'}</h3>
+                <p className="text-xs text-slate-500 mt-1">{isSpanish ? 'Genera preguntas sintéticas basadas en el catálogo real, las corre en el agente de verdad y registra cada falla aquí abajo para revisión — nunca corrige nada solo.' : 'Gera perguntas sintéticas baseadas no catálogo real, roda no agente de verdade e registra cada falha logo abaixo pra revisão — nunca corrige nada sozinho.'}</p>
+              </div>
+              <Sparkles className="w-5 h-5 text-sky-300" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-slate-400 flex items-center gap-2">
+                {isSpanish ? 'Cantidad de casos' : 'Quantidade de casos'}
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={evalCount}
+                  onChange={(e) => setEvalCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+                  disabled={startingEval}
+                  className="w-20 bg-slate-800 border border-slate-700 rounded-control px-2 py-1.5 text-xs text-white"
+                />
+              </label>
+              <button
+                onClick={handleStartEval}
+                disabled={startingEval}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-semibold hover:bg-sky-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                {startingEval ? (isSpanish ? 'Iniciando...' : 'Iniciando...') : (isSpanish ? 'Ejecutar ahora' : 'Rodar avaliação agora')}
+              </button>
+            </div>
+            {evalError && <p className="text-xs text-rose-400 mt-2">{evalError}</p>}
+            {evalRuns.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {evalRuns.slice(0, 5).map((run) => {
+                  const canViewCases = run.completedCount > 0;
+                  return (
+                    <div
+                      key={run.id}
+                      onClick={canViewCases ? () => openRunCases(run.id) : undefined}
+                      className={`flex items-center justify-between gap-3 p-2.5 rounded-panel border border-slate-800 text-xs ${canViewCases ? 'cursor-pointer hover:border-sky-400/40 hover:bg-slate-900/60 transition-colors' : ''}`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {run.status === 'running' && <Clock3 className="w-3.5 h-3.5 text-amber-300 flex-shrink-0 animate-pulse" />}
+                        {run.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" />}
+                        {run.status === 'failed' && <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />}
+                        <span className="text-slate-300 truncate">
+                          {run.status === 'running'
+                            ? (isSpanish ? `Ejecutando: ${run.completedCount}/${run.requestedCount}` : `Rodando: ${run.completedCount}/${run.requestedCount}`)
+                            : run.status === 'completed'
+                            ? (isSpanish ? `${run.passCount}/${run.requestedCount} aprobaron, ${run.failCount} fallaron` : `${run.passCount}/${run.requestedCount} passaram, ${run.failCount} falharam`)
+                            : (isSpanish ? `Falló: ${run.error || 'error desconocido'}` : `Falhou: ${run.error || 'erro desconhecido'}`)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {canViewCases && <span className="text-[10px] text-sky-300 underline underline-offset-2">{isSpanish ? 'Ver preguntas y respuestas' : 'Ver perguntas e respostas'}</span>}
+                        <span className="text-slate-500">{new Date(run.startedAt).toLocaleString(isSpanish ? 'es-PY' : 'pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-slate-900/70 border border-slate-800 rounded-card p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">{isSpanish ? 'Probar guion manual' : 'Testar roteiro manual'}</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  {isSpanish
+                    ? 'Escribí lo que quieras y recibí la respuesta REAL del agente (mismo pipeline del WhatsApp) — sin pasar por webhook, sin número/conversa real, sin guardar nada. Conversación ficticia, se pierde al recargar la página.'
+                    : 'Digite o que quiser e receba a resposta REAL do agente (mesmo pipeline do WhatsApp) — sem passar pelo webhook, sem número/conversa real, sem gravar nada. Conversa fictícia, some ao recarregar a página.'}
+                </p>
+              </div>
+              <MessageCircle className="w-5 h-5 text-sky-300" />
+            </div>
+
+            {manualTestMessages.length > 0 && (
+              <div className="mb-3 max-h-80 overflow-y-auto space-y-2 pr-1">
+                {manualTestMessages.map((m, i) => (
+                  <div key={i} className={`flex ${m.sender === 'lead' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[80%] rounded-panel px-3 py-2 text-xs whitespace-pre-wrap ${
+                        m.sender === 'lead' ? 'bg-sky-500/20 border border-sky-400/30 text-sky-100' : 'bg-slate-800 border border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      {m.text}
+                    </div>
+                  </div>
+                ))}
+                {manualTestSending && (
+                  <div className="flex justify-start">
+                    <div className="rounded-panel px-3 py-2 text-xs bg-slate-800 border border-slate-700 text-slate-500 italic">
+                      {isSpanish ? 'El agente está escribiendo...' : 'O agente está digitando...'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {manualTestError && <p className="text-xs text-rose-400 mb-2">{manualTestError}</p>}
+
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleSendManualTest(); }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={manualTestInput}
+                onChange={(e) => setManualTestInput(e.target.value)}
+                placeholder={isSpanish ? 'Escribí como si fueras un cliente...' : 'Digite como se fosse um cliente...'}
+                disabled={manualTestSending}
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-control px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-400/50 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={manualTestSending || !manualTestInput.trim()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-semibold hover:bg-sky-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Send className="w-3.5 h-3.5" />
+                {isSpanish ? 'Enviar' : 'Enviar'}
+              </button>
+              {manualTestMessages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setManualTestMessages([]); setManualTestError(null); }}
+                  disabled={manualTestSending}
+                  title={isSpanish ? 'Empezar una conversación ficticia nueva' : 'Começar uma conversa fictícia nova'}
+                  className="p-2 rounded-control border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 transition-colors disabled:opacity-50"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </form>
           </div>
         </>
       )}
@@ -741,10 +1039,112 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
             <div className="flex items-start justify-between gap-4"><div className="flex items-start gap-3"><div className="w-9 h-9 rounded-control bg-slate-800 flex items-center justify-center">{kindIcon(selectedReview.kind)}</div><div><p className="text-[10px] uppercase tracking-wider text-slate-500">{KIND_LABELS[selectedReview.kind]}</p><h3 className="text-lg font-bold text-white mt-1">{selectedReview.title}</h3></div></div><button onClick={() => setSelectedReviewId(null)} className="p-1.5 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button></div>
             <div className="flex flex-wrap items-center gap-2 mt-4"><span className={`px-2 py-1 rounded-pill border text-[10px] font-bold ${STATUS_CLASSES[selectedReview.status]}`}>{STATUS_LABELS[selectedReview.status]}</span><span className="text-[10px] text-slate-500">Criado em {formatDate(selectedReview.created_at)}</span>{selectedReview.kind === 'ai_suggestion' && <span className="text-[10px] text-sky-300">Confiança: {confidenceLabel(selectedReview.confidence)}</span>}</div>
             <div className="mt-5 rounded-panel border border-slate-800 bg-slate-950/50 p-4"><p className="text-xs leading-relaxed text-slate-300 whitespace-pre-wrap">{selectedReview.description}</p></div>
-            {(selectedReview.original_value || selectedReview.corrected_value) && <div className="grid sm:grid-cols-2 gap-3 mt-3"><ValueBlock label="Sugestão original" value={selectedReview.original_value || '—'} tone="rose" /><ValueBlock label="Resultado corrigido" value={selectedReview.corrected_value || '—'} tone="emerald" /></div>}
-            {Object.keys(selectedReview.context || {}).length > 0 && <div className="mt-3"><p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Contexto registrado</p><pre className="text-[10px] text-slate-400 whitespace-pre-wrap break-words bg-slate-950 border border-slate-800 rounded-control p-3">{JSON.stringify(selectedReview.context, null, 2)}</pre></div>}
+            {(() => {
+              const ctx = selectedReview.context || {};
+              const isSyntheticEval = ctx.source === 'synthetic_eval';
+              const syntheticQuestion = isSyntheticEval && typeof ctx.question === 'string' ? ctx.question : null;
+              const syntheticHistory = isSyntheticEval && Array.isArray(ctx.history) ? (ctx.history as Array<{ sender?: string; text?: string }>) : null;
+              if (isSyntheticEval) {
+                return (
+                  <div className="mt-3 space-y-3">
+                    {syntheticHistory && syntheticHistory.length > 0 && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Histórico simulado antes desta pergunta</p>
+                        <div className="rounded-panel border border-slate-800 bg-slate-950/50 p-3 space-y-1.5">
+                          {syntheticHistory.map((turn, index) => (
+                            <p key={index} className="text-xs text-slate-400"><span className="font-semibold text-slate-300">{turn.sender === 'agent' ? 'Atendente: ' : 'Cliente: '}</span>{turn.text}</p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {syntheticQuestion && <ValueBlock label="Pergunta simulada (cliente sintético)" value={syntheticQuestion} tone="rose" />}
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <ValueBlock label="Resposta real que a IA deu" value={selectedReview.original_value || '—'} tone="rose" />
+                      <ValueBlock label="Como deveria ter respondido" value={selectedReview.corrected_value || 'Não há sugestão específica pra este caso.'} tone="emerald" />
+                    </div>
+                  </div>
+                );
+              }
+              return (selectedReview.original_value || selectedReview.corrected_value) ? <div className="grid sm:grid-cols-2 gap-3 mt-3"><ValueBlock label="Sugestão original" value={selectedReview.original_value || '—'} tone="rose" /><ValueBlock label="Resultado corrigido" value={selectedReview.corrected_value || '—'} tone="emerald" /></div> : null;
+            })()}
+            {Object.keys(selectedReview.context || {}).length > 0 && (
+              <details className="mt-3">
+                <summary className="text-[10px] uppercase tracking-wider text-slate-500 cursor-pointer select-none">Ver dados técnicos registrados</summary>
+                <pre className="mt-1.5 text-[10px] text-slate-400 whitespace-pre-wrap break-words bg-slate-950 border border-slate-800 rounded-control p-3">{JSON.stringify(selectedReview.context, null, 2)}</pre>
+              </details>
+            )}
             <div className="mt-5"><label className="text-[10px] uppercase tracking-wider text-slate-500">Nota da revisão</label><textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} rows={3} placeholder="Explique a decisão para a próxima pessoa que consultar este item..." className="mt-1.5 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 resize-none focus:outline-none focus:border-sky-400/50" /></div>
-            <div className="mt-5 pt-4 border-t border-slate-800"><p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Decisão administrativa</p><div className="grid grid-cols-2 gap-2"><button onClick={() => updateReview(selectedReview.id, 'approved')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 text-xs font-bold hover:bg-emerald-500/25"><Check className="w-3.5 h-3.5" /> Aprovar</button><button onClick={() => updateReview(selectedReview.id, 'testing')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-bold hover:bg-sky-500/25"><Wrench className="w-3.5 h-3.5" /> Enviar para teste</button><button onClick={() => updateReview(selectedReview.id, selectedReview.kind === 'bug' ? 'resolved' : 'rejected')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-rose-500/10 border border-rose-400/30 text-rose-200 text-xs font-bold hover:bg-rose-500/20"><ThumbsDown className="w-3.5 h-3.5" /> {selectedReview.kind === 'bug' ? 'Marcar resolvido' : 'Rejeitar'}</button><button onClick={() => updateReview(selectedReview.id, 'reopened')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-orange-500/10 border border-orange-400/30 text-orange-200 text-xs font-bold hover:bg-orange-500/20"><RotateCcw className="w-3.5 h-3.5" /> Reabrir</button></div></div>
+            {(() => {
+              const hasSuggestedFix = Boolean(selectedReview.corrected_value) && selectedReview.kind !== 'knowledge';
+              const linkedDraft = reviews.find((review) => review.kind === 'knowledge' && review.context?.sourceReviewId === selectedReview.id);
+              return (
+                <div className="mt-5 pt-4 border-t border-slate-800">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500">Decisão administrativa</p>
+                    {linkedDraft && <span className="inline-flex items-center gap-1 rounded-pill border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold text-sky-200"><ArrowRight className="h-3 w-3" /> Rascunho de conhecimento criado</span>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => updateReview(selectedReview.id, 'approved')}
+                      disabled={!hasSuggestedFix}
+                      title={hasSuggestedFix ? 'Aprova a resposta sugerida e abre um rascunho de conhecimento para revisão' : 'Este achado não tem uma resposta sugerida para aprovar'}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 text-xs font-bold hover:bg-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500/15"
+                    ><Check className="w-3.5 h-3.5" /> Aprovar</button>
+                    <button onClick={() => updateReview(selectedReview.id, 'testing')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-bold hover:bg-sky-500/25"><Wrench className="w-3.5 h-3.5" /> Enviar para teste</button>
+                    <button onClick={() => updateReview(selectedReview.id, selectedReview.kind === 'bug' ? 'resolved' : 'rejected')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-rose-500/10 border border-rose-400/30 text-rose-200 text-xs font-bold hover:bg-rose-500/20"><ThumbsDown className="w-3.5 h-3.5" /> {selectedReview.kind === 'bug' ? 'Marcar resolvido' : 'Rejeitar'}</button>
+                    <button onClick={() => updateReview(selectedReview.id, 'reopened')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-orange-500/10 border border-orange-400/30 text-orange-200 text-xs font-bold hover:bg-orange-500/20"><RotateCcw className="w-3.5 h-3.5" /> Reabrir</button>
+                  </div>
+                </div>
+              );
+            })()}
+          </aside>
+        </div>
+      )}
+
+      {viewingRunId && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-end" onClick={() => setViewingRunId(null)}>
+          <aside onClick={(event) => event.stopPropagation()} className="h-full w-full max-w-2xl bg-slate-900 border-l border-slate-700 shadow-2xl overflow-y-auto p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">{isSpanish ? 'Evaluación automática' : 'Avaliação automática'}</p>
+                <h3 className="text-lg font-bold text-white mt-1">{isSpanish ? 'Preguntas y respuestas de esta ronda' : 'Perguntas e respostas desta rodada'}</h3>
+              </div>
+              <button onClick={() => setViewingRunId(null)} className="p-1.5 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            {loadingRunCases ? (
+              <LoadingState />
+            ) : runCasesError ? (
+              <p className="text-xs text-rose-400 mt-4">{runCasesError}</p>
+            ) : runCases.length === 0 ? (
+              <p className="text-xs text-slate-500 mt-4">{isSpanish ? 'Ningún caso registrado para esta ronda.' : 'Nenhum caso registrado para esta rodada.'}</p>
+            ) : (
+              <div className="mt-5 space-y-3">
+                {runCases.map((c) => (
+                  <div key={c.id} className={`rounded-panel border p-3.5 ${c.passed ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-rose-500/20 bg-rose-500/5'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      {c.passed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />}
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${c.passed ? 'text-emerald-300' : 'text-rose-300'}`}>{c.passed ? (isSpanish ? 'Aprobado' : 'Aprovado') : (isSpanish ? 'Reprobado' : 'Reprovado')}</span>
+                      <span className="text-[10px] text-slate-500">· {c.category}{c.agent ? ` · ${c.agent}` : ''}</span>
+                    </div>
+                    <p className="text-xs text-slate-300 mb-2"><span className="font-semibold text-slate-400">{isSpanish ? 'Pregunta simulada: ' : 'Pergunta simulada: '}</span>{c.question}</p>
+                    {c.bubbles && c.bubbles.length > 0 && (
+                      <div className="rounded-control border border-slate-800 bg-slate-950/50 p-2.5 space-y-1">
+                        {c.bubbles.map((bubble, index) => (
+                          <p key={index} className="text-xs text-slate-300 whitespace-pre-wrap">{bubble}</p>
+                        ))}
+                      </div>
+                    )}
+                    {!c.passed && (c.safetyReason || (c.qualityIssues && c.qualityIssues.length > 0) || c.error) && (
+                      <div className="mt-2 text-[11px] text-rose-300/90 space-y-0.5">
+                        {c.safetyReason && <p><span className="font-semibold">{isSpanish ? 'Revisor de seguridad: ' : 'Revisor de segurança: '}</span>{c.safetyReason}</p>}
+                        {c.qualityIssues && c.qualityIssues.length > 0 && <p><span className="font-semibold">{isSpanish ? 'Calidad: ' : 'Qualidade: '}</span>{c.qualityIssues.join('; ')}</p>}
+                        {c.error && <p><span className="font-semibold">{isSpanish ? 'Error: ' : 'Erro: '}</span>{c.error}</p>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </aside>
         </div>
       )}

@@ -1,4 +1,5 @@
 import type { AgentProduct } from '../types';
+import { apiFetch } from './apiClient';
 
 export interface CatalogPdfContact {
   whatsappPhone?: string;
@@ -56,13 +57,41 @@ const IMAGE_TARGET_WIDTH = 640;
 const IMAGE_TARGET_HEIGHT = 800;
 
 /**
- * `AgentProduct.exampleImageBase64` é a foto original guardada inline sem
- * limite de tamanho (já chegou a ~3MB numa foto real da Monique) — usada
- * hoje só pra o agente mandar por WhatsApp. Comprime no navegador (canvas,
- * recorte 4:5 + reencode JPEG) antes de entrar no PDF, senão o arquivo final
- * ficaria pesado demais pra compartilhar. Roda client-side (não no backend,
- * como a miniatura do catálogo público) porque o painel autenticado já tem a
- * foto original carregada em memória — não precisa de mais uma chamada.
+ * TASK-0218: a foto original passou a ficar no Storage do backend
+ * (server/services/knowledgeBaseImageStore.ts), referenciada por
+ * `exampleImageId` — busca via rota autenticada quando presente. Fallback
+ * pro `exampleImageBase64` legado (inline, sem limite de tamanho — já
+ * chegou a ~3MB numa foto real da Monique) enquanto nem todo produto foi
+ * migrado.
+ */
+async function resolveProductImageSrc(product: AgentProduct): Promise<string | undefined> {
+  if (product.exampleImageId) {
+    try {
+      const res = await apiFetch(`/api/knowledge-base/images/${encodeURIComponent(product.exampleImageId)}`);
+      if (!res.ok) return undefined;
+      const blob = await res.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return undefined;
+    }
+  }
+  if (!product.exampleImageBase64) return undefined;
+  return product.exampleImageBase64.startsWith('data:')
+    ? product.exampleImageBase64
+    : `data:${product.exampleImageMimeType || 'image/jpeg'};base64,${product.exampleImageBase64}`;
+}
+
+/**
+ * Comprime no navegador (canvas, recorte 4:5 + reencode JPEG) antes de
+ * entrar no PDF, senão o arquivo final ficaria pesado demais pra
+ * compartilhar. Roda client-side (não no backend, como a miniatura do
+ * catálogo público) porque o painel autenticado já resolve a foto original
+ * (Storage ou fallback legado) — não precisa de um serviço à parte.
  *
  * 4:5 (não 4:3) de propósito: as fotos reais são tiradas na vertical, tipo
  * celular (ex: 900x1600, ~9:16) — um recorte 4:3 (paisagem) exigia cortar
@@ -71,10 +100,8 @@ const IMAGE_TARGET_HEIGHT = 800;
  * 4:5 é o mesmo padrão de retrato do Instagram — exige um corte bem menor.
  */
 async function compressProductImageDataUri(product: AgentProduct): Promise<string | undefined> {
-  if (!product.exampleImageBase64) return undefined;
-  const src = product.exampleImageBase64.startsWith('data:')
-    ? product.exampleImageBase64
-    : `data:${product.exampleImageMimeType || 'image/jpeg'};base64,${product.exampleImageBase64}`;
+  const src = await resolveProductImageSrc(product);
+  if (!src) return undefined;
 
   return new Promise((resolve) => {
     const img = new Image();

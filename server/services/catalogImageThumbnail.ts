@@ -6,13 +6,17 @@ const THUMBNAIL_JPEG_QUALITY = 72;
 
 /**
  * Gera uma miniatura leve (JPEG, recortada em 4:5) a partir da foto de
- * exemplo de um produto (`AgentProduct.exampleImageBase64`) — essa foto
- * original é guardada inline no jsonb sem limite de tamanho (já chegou a
- * ~3MB em base64 num produto real) porque hoje só é usada pra o agente
- * mandar por WhatsApp; nunca foi pensada pra ir num payload público servido
- * a qualquer visitante. Comprimida, cada miniatura fica na casa de
- * poucas dezenas de KB — prática de mostrar no catálogo público e no PDF
- * sem inflar o carregamento da página nem o arquivo baixado.
+ * exemplo de um produto — a foto original (hoje no Storage via
+ * `knowledgeBaseImageStore.ts`, antes inline em `exampleImageBase64`) só é
+ * usada pra o agente mandar por WhatsApp; nunca foi pensada pra ir num
+ * payload público servido a qualquer visitante. Comprimida, cada miniatura
+ * fica na casa de poucas dezenas de KB — prática de mostrar no catálogo
+ * público e no PDF sem inflar o carregamento da página nem o arquivo baixado.
+ *
+ * TASK-0218: recebe o binário já resolvido (Buffer), não mais um Base64 —
+ * quem chama é responsável por buscar a foto (Storage ou fallback legado, via
+ * `resolveKnowledgeBaseImageBinary`) antes de comprimir, evitando um
+ * round-trip buffer→base64→buffer desnecessário.
  *
  * 4:5 (não 4:3) de propósito: as fotos reais são tiradas na vertical, tipo
  * celular (ex: 900x1600, ~9:16) — um recorte 4:3 (paisagem) exigia cortar
@@ -21,12 +25,10 @@ const THUMBNAIL_JPEG_QUALITY = 72;
  * 4:5 é o mesmo padrão de retrato do Instagram — exige um corte bem menor,
  * reduzindo bastante o risco de cortar o que interessa na foto.
  */
-export async function buildCatalogThumbnail(exampleImageBase64: string | undefined): Promise<string | undefined> {
-  if (!exampleImageBase64) return undefined;
+export async function buildCatalogThumbnail(imageBuffer: Buffer | undefined): Promise<string | undefined> {
+  if (!imageBuffer || imageBuffer.length === 0) return undefined;
   try {
-    const rawBase64 = exampleImageBase64.replace(/^data:[^;]+;base64,/, '');
-    const buffer = Buffer.from(rawBase64, 'base64');
-    const resized = await sharp(buffer)
+    const resized = await sharp(imageBuffer)
       .resize(THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT, { fit: 'cover', position: 'attention' })
       .jpeg({ quality: THUMBNAIL_JPEG_QUALITY })
       .toBuffer();

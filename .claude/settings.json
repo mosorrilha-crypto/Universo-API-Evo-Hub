@@ -11,5 +11,17 @@
       "mcp__Claude_Code_Remote__list_repos",
       "mcp__Google_Drive__read_file_content"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
   }
 }

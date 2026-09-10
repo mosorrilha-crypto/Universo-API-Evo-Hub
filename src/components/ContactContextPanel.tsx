@@ -9,6 +9,8 @@ export interface OperatorMemoryEditPayload {
   serviceInterest: string | null;
   objections: string[];
   nextBestAction: string | null;
+  /** Mesmo campo mostrado como "Observações" na Ficha do Contato (`ConversationContextSidebar`) — TASK-0375. */
+  conversationSummary: string | null;
 }
 
 type ContactContextPanelProps = {
@@ -20,6 +22,11 @@ type ContactContextPanelProps = {
   onOpenDetails?: () => void;
   /** Salva somente a allowlist de memória segura, nunca estados vivos. */
   onSaveMemory?: (patch: Partial<OperatorMemoryEditPayload>) => Promise<void>;
+  /** TASK-0187 (pedido direto, 01/09/2026): "x pra fechar o contexto da
+      conversa quando ele aparece" — só no `variant="compact"`; o painel
+      detalhado (`variant="detail"`, dentro da Ficha IA) já é opcional por
+      natureza (só abre quando o operador pede), não precisa de fechar. */
+  onDismiss?: () => void;
 };
 
 const paymentStatusLabel: Record<string, string> = {
@@ -50,6 +57,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
   onRetry,
   onOpenDetails,
   onSaveMemory,
+  onDismiss,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -62,6 +70,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
     serviceInterest: null,
     objections: [],
     nextBestAction: null,
+    conversationSummary: null,
   });
 
   const normalizeText = (value: string) => value.replace(/\s+/g, ' ').trim() || null;
@@ -74,6 +83,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
       serviceInterest: source?.serviceInterest || null,
       objections: source?.objections || [],
       nextBestAction: source?.nextBestAction || null,
+      conversationSummary: source?.conversationSummary || null,
     };
     setEditBaseline(next);
     setEditForm(next);
@@ -93,6 +103,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
       serviceInterest: normalizeText(editForm.serviceInterest || ''),
       objections: editForm.objections.map((item) => normalizeText(item) || '').filter(Boolean),
       nextBestAction: normalizeText(editForm.nextBestAction || ''),
+      conversationSummary: normalizeText(editForm.conversationSummary || ''),
     };
     const patch: Partial<OperatorMemoryEditPayload> = {};
     if (next.preferredLanguage !== editBaseline.preferredLanguage) patch.preferredLanguage = next.preferredLanguage;
@@ -101,6 +112,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
     if (next.serviceInterest !== editBaseline.serviceInterest) patch.serviceInterest = next.serviceInterest;
     if (JSON.stringify(next.objections) !== JSON.stringify(editBaseline.objections)) patch.objections = next.objections;
     if (next.nextBestAction !== editBaseline.nextBestAction) patch.nextBestAction = next.nextBestAction;
+    if (next.conversationSummary !== editBaseline.conversationSummary) patch.conversationSummary = next.conversationSummary;
     if (!Object.keys(patch).length) return cancelEditing();
 
     setIsSaving(true);
@@ -162,12 +174,20 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
   const hasEscalation = decision?.selectedFacts?.hasOpenEscalation === true;
 
   if (variant === 'compact') {
+    // Achado real de UI (pedido direto, 29/08/2026: "não sei se é necessário
+    // aparecer tão grande assim") — toda conversa nova (sem memória nem
+    // decisão registrada ainda) mostrava essa faixa mesmo assim, só pra dizer
+    // "ainda não há nada aqui". Isso é ruído puro: some enquanto não houver
+    // dado real; volta a aparecer sozinha assim que a IA gerar a primeira
+    // memória/decisão pra esse contato. O estado de erro/indisponível acima
+    // (isUnavailable) nunca é escondido — só o "vazio de verdade" é.
+    if (!hasData) return null;
     return (
       <div className="atendimento-context-strip border-sky-500/20 bg-sky-950/15">
         <div className="atendimento-context-strip__copy min-w-0">
           <span className="atendimento-context-strip__label text-sky-300">{isSpanish ? 'CONTEXTO SUPERVISADO' : 'CONTEXTO SUPERVISIONADO'}</span>
-          <p className="truncate text-slate-100">
-            {primaryAction || (isSpanish ? 'Aún no hay memoria ni decisión registrada para este contacto.' : 'Ainda não há memória nem decisão registrada para este contato.')}
+          <p className="line-clamp-2 text-slate-100">
+            {primaryAction || (isSpanish ? 'Sin acción sugerida por ahora.' : 'Sem ação sugerida no momento.')}
           </p>
           {(needsHuman || memory?.openLoops?.length) && (
             <span className={`mt-1 inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-bold ${needsHuman ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>
@@ -176,17 +196,37 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
             </span>
           )}
         </div>
-        {onOpenDetails && (
-          <button type="button" onClick={onOpenDetails} className="atendimento-context-strip__action shrink-0 text-sky-200 hover:text-white">
-            {isSpanish ? 'Ver contexto' : 'Ver contexto'}
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {onOpenDetails && (
+            <button type="button" onClick={onOpenDetails} className="atendimento-context-strip__action text-sky-200 hover:text-white">
+              {isSpanish ? 'Ver contexto' : 'Ver contexto'}
+            </button>
+          )}
+          {onDismiss && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="rounded p-1 text-sky-300/70 hover:bg-white/10 hover:text-white cursor-pointer"
+              title={isSpanish ? 'Cerrar' : 'Fechar'}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
     );
   }
 
   return (
-    <section className="overflow-hidden rounded-xl border border-sky-500/25 bg-slate-950/65">
+    // TASK-0247 (pedido direto, 03/09/2026, print do mobile no tema claro):
+    // `bg-slate-950/65` cai na auditoria geral de -950 (index.css), que
+    // mapeia pra `var(--surface-sunken)` — certo pra um "poço" recuado
+    // dentro de um card (ex: input, bloco de código), mas errado aqui: este
+    // é o painel PRINCIPAL da Ficha, deveria ficar branco igual aos cards
+    // vizinhos (`--surface-panel`), não cinza-amarelado. `contact-context-detail`
+    // dá a especificidade extra (2 classes) pra vencer a regra geral sem
+    // precisar mexer nela (ela está certa pros outros usos de -950).
+    <section className="contact-context-detail overflow-hidden rounded-xl border border-sky-500/25 bg-slate-950/65">
       <div className="flex items-start justify-between gap-3 border-b border-sky-500/15 p-3">
         <div className="min-w-0">
           <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-300"><Bot className="h-3.5 w-3.5" /> {isSpanish ? 'Contexto supervisado' : 'Contexto supervisionado'}</span>
@@ -345,6 +385,9 @@ function OperatorMemoryEditor({
       </label>
       <label className="block text-[10px] font-bold text-slate-400">{isSpanish ? 'Próximo paso sugerido' : 'Próximo passo sugerido'}
         <textarea value={form.nextBestAction || ''} onChange={(event) => onChange((current) => ({ ...current, nextBestAction: event.target.value || null }))} className={`${inputClass} min-h-16 resize-y`} maxLength={240} />
+      </label>
+      <label className="block text-[10px] font-bold text-slate-400">{isSpanish ? 'Observaciones' : 'Observações'}
+        <textarea value={form.conversationSummary || ''} onChange={(event) => onChange((current) => ({ ...current, conversationSummary: event.target.value || null }))} className={`${inputClass} min-h-20 resize-y`} maxLength={900} />
       </label>
 
       <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/20 bg-amber-950/20 p-2 text-[10px] leading-relaxed text-amber-100/85">

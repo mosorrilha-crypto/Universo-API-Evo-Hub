@@ -10,27 +10,43 @@ import {
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold, type TrackedAppointment } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
-import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, formatKnowledgeBaseForPrompt, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import * as knowledgeBaseStore from './knowledgeBaseStore';
 import { createPreReservation, updatePreReservationStatus } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
 import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
+import { resolveKnowledgeBaseImageBinary } from './knowledgeBaseImageStore';
 import { getGlobalPromptLayerOverride, DEFAULT_GLOBAL_LAYER } from './globalPromptStore';
 import { resolveEffectiveGlobalLayer } from './tenantPromptLayerStore';
-import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
+import { recordOutgoingMessage, getConversationCtwaClid, getConversation } from './conversationStore';
 import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
-import { callGroqJsonCompletion } from './groqClient';
+import { callGroqJsonCompletion, GROQ_SPECIALIST_MODEL, GROQ_SPECIALIST_TIMEOUT_MS } from './groqClient';
 import { logStructured, withStructuredLog } from './structuredLog';
 import { buildAgentContextPack, deriveContactMemoryPatch, loadAgentContextPack, type AgentContextPack } from './agentContextPack';
 import { upsertContactAgentMemory } from './contactAgentMemoryStore';
 import { recordAgentTurnTrace } from './agentTurnTraceStore';
 import { listRecentApprovedReplyExamples, formatApprovedReplyExamplesForPrompt } from './approvedReplyExampleStore';
+import { isPlausiblePersonalName } from './contactNameGuard';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
+
+// TASK-0362 — teto de caracteres do prompt combinado (systemInstruction +
+// contexto dinâmico) enviado ao Groq no path do especialista, pra ficar com
+// folga segura sob o limite real de 8.000 TPM (tokens por minuto) da conta
+// Groq pro modelo `openai/gpt-oss-120b` (achado real em produção: requests
+// de 10.081-11.840 tokens sendo rejeitados com 413 "Request too large" em
+// TODA mensagem de um tenant com Base de Conhecimento maior — o Groq não tem
+// nenhum mecanismo de cache, ao contrário do Gemini, então a única correção
+// possível é não mandar um request fadado a estourar o limite). Heurística
+// conservadora de ~3,3 caracteres por token (textos em português/espanhol
+// com acentuação tokenizam pior que inglês puro) aplicada a um alvo de
+// ~6.500 tokens — abaixo dos 8.000 reais, com margem pro contexto dinâmico
+// (histórico, mensagem atual) que só é conhecido depois de montar o prompt.
+const GROQ_SPECIALIST_MAX_PROMPT_CHARS = 21_500;
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
@@ -40,20 +56,7 @@ const BUSINESS_TIMEZONE = 'America/Asuncion';
  * log informa apenas fonte e motivo de fallback, nunca conteúdo de negócio.
  */
 async function getRuntimeKnowledgeBaseForReply(tenantId: string): Promise<AgentKnowledgeBase | null> {
-  // Alguns testes unitários antigos simulam somente o carregador legado. A
-  // aplicação real sempre exporta getRuntimeKnowledgeBase; este fallback é
-  // exclusivo para mocks isolados e evita reescrever suítes não relacionadas.
-  let runtimeLoader: typeof knowledgeBaseStore.getRuntimeKnowledgeBase | undefined;
-  try {
-    runtimeLoader = knowledgeBaseStore.getRuntimeKnowledgeBase;
-  } catch {
-    // O proxy de alguns mocks do Vitest lança quando se consulta um export
-    // ausente, em vez de devolver undefined como um namespace ESM comum.
-    runtimeLoader = undefined;
-  }
-  const result = runtimeLoader
-    ? await runtimeLoader(tenantId)
-    : { knowledgeBase: await knowledgeBaseStore.getKnowledgeBase(tenantId), source: 'legacy_blob' as const, fallbackReason: 'published_documents_unavailable' as const };
+  const result = await knowledgeBaseStore.getRuntimeKnowledgeBase(tenantId);
   logStructured({
     tenantId,
     area: 'knowledgeBase',
@@ -117,6 +120,33 @@ export interface DeferredCalendarAction {
   summary: string;
 }
 
+/**
+ * Foto/vídeo de exemplo que o modelo decidiu mandar, mas ainda NÃO foi
+ * enviada de verdade — mesmo princípio do DeferredCalendarAction acima,
+ * aplicado à mídia. Achado real de produção (03/09/2026, teste do dono do
+ * produto no fluxo de agendamento): antes desta correção, `runMidiaTool`
+ * enviava a foto/vídeo IMEDIATAMENTE durante a geração do rascunho, sem
+ * nenhuma dependência do revisor pré-envio (`reviewAutoReplyBeforeSend`,
+ * webhooks.ts) — se o revisor bloqueasse o TEXTO que explicava/acompanhava
+ * a mídia (por qualquer motivo, mesmo sem relação com a mídia em si), a
+ * mídia já tinha saído, irreversível, e o cliente ficava com uma foto/vídeo
+ * sozinho no WhatsApp, sem nenhuma mensagem de texto explicando o que era
+ * ou respondendo a pergunta real dele (confirmado com uma conversa real:
+ * cliente perguntou "Tem horário amanhã?", só uma foto de exemplo chegou,
+ * a pergunta nunca foi respondida). O buffer já resolvido (Storage ou
+ * Base64 legado) fica guardado aqui só em memória, dentro do mesmo ciclo de
+ * requisição — nunca é persistido nem serializado.
+ */
+export interface DeferredMediaAction {
+  kind: 'foto' | 'video';
+  mediaName: string;
+  /** Texto usado tanto como legenda salva na mensagem quanto como marcador de dedupe (wasMediaRecentlySent). */
+  marker: string;
+  buffer: Buffer;
+  mimeType: string;
+  filename: string;
+}
+
 export interface AutoReplyResult {
   phase: ConversationPhase;
   bubbles: string[];
@@ -138,6 +168,8 @@ export interface AutoReplyResult {
   routerElapsedMs: number;
   /** Ações de agenda pendentes de aprovação do revisor; nunca foram executadas na geração do rascunho. */
   deferredCalendarActions?: DeferredCalendarAction[];
+  /** Foto/vídeo de exemplo pendente de aprovação do revisor — só é enviada de verdade (executeApprovedMediaAction) depois que o texto que a acompanha for aprovado. */
+  deferredMediaAction?: DeferredMediaAction;
   /**
    * Nome que a cliente disse na conversa (não veio do perfil do WhatsApp) —
    * quem chama deve persistir isso na conversa (mesmo campo que já guarda o
@@ -162,6 +194,18 @@ export interface AutoReplyResult {
    * cliente não responder em ~2h30 (ver pendingFollowUpJob.ts).
    */
   awaitingCustomerChoice?: string;
+  /**
+   * TASK-0185 — backup em Google Sheets (coluna "Interesse"): nome EXATO do
+   * serviço/produto do catálogo que a cliente demonstrou interesse nesta
+   * mensagem ou no histórico recente, só quando ela mencionou algo
+   * específico (não uma categoria genérica tipo "cejas" sem detalhar).
+   * undefined quando ainda não ficou claro — quem chama (webhooks.ts)
+   * persiste isso em `conversations.interest` (sempre sobrescreve com o
+   * valor mais recente, diferente de capturedClientName que só preenche uma
+   * vez) e usa como fonte real pra planilha de backup, nunca um palpite
+   * inventado fora do que a cliente disse.
+   */
+  interestedService?: string;
   /**
    * Pedido real (20/08/2026): a lista de horários em texto livre (mesmo
    * corrigida/encurtada) ainda depende do cliente digitar um horário de
@@ -213,7 +257,7 @@ async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<ty
  * depois de semanas) continuar causando isso, o próximo passo é replicar o
  * padrão de capturedClientName pro serviço identificado.
  */
-const HISTORY_WINDOW_SIZE = 24;
+export const HISTORY_WINDOW_SIZE = 24;
 
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
   return (history || [])
@@ -403,6 +447,88 @@ DESISTÊNCIA/CANCELAMENTO: se o cliente sinalizar que quer desistir ou cancelar,
  * histórico, mensagem atual, resultado de ferramentas) nunca é cacheado,
  * como sempre.
  */
+/**
+ * TASK-0359 (pedido direto, "diminuir o prompt" — auditoria confirmou: o bloco
+ * "REGRAS DE ESTILO" sozinho tinha ~21.700 caracteres (~5.400 tokens), maior que
+ * a Camada Global e do que a Base de Conhecimento inteira da Monique somadas —
+ * e ia IDÊNTICO pra qualquer tipo de agente (triagem/faq/agendamento/reclamacao),
+ * mesmo regras claramente específicas de um contexto só. Cada regra agora carrega
+ * os tipos de agente pra quem ela realmente se aplica (`agents`);
+ * `buildStyleRulesSection` filtra e renumera em tempo real, sem duplicar texto.
+ * Só 3 das 26 regras saíram do escopo universal (comentário em cada uma).
+ *
+ * TASK-0361 (Fase 2, mesmo pedido) — várias regras grandes misturavam a
+ * instrução operante com um "achado real de auditoria" narrado por extenso
+ * (data, resposta errada citada, explicação do porquê) — o modelo só precisa
+ * da instrução, não da novela. Pra cada regra comprimida, o achado original
+ * (data + contexto, sem o texto completo) fica registrado num comentário logo
+ * acima da entrada correspondente — o texto integral de cada achado continua
+ * disponível no histórico do git (commit da TASK-0359), nunca foi perdido.
+ *
+ * Como a numeração agora é dinâmica por agente (renumerada em ordem, sem os
+ * "buracos" das regras que não se aplicam), toda referência cruzada que antes
+ * citava outra regra por NÚMERO (ex: "regra 22") foi reescrita pra citar pelo
+ * CONTEÚDO da regra (ex: "regra de nunca fechar com a mesma pergunta de escolha
+ * forçada") — um número fixo deixaria de bater assim que a lista de regras
+ * aplicável a um agente específico for diferente da lista completa.
+ */
+const ALL_AGENTS: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
+
+interface StyleRule {
+  agents: AgentType[];
+  text: string;
+}
+
+const STYLE_RULES: StyleRule[] = [
+  { agents: ALL_AGENTS, text: `Use de 1 a 2 "bolhas" curtas e sequenciais, como mensagens reais de WhatsApp. Cada resposta deve concluir UMA intenção do cliente. Nunca envie em bolhas separadas uma resposta factual, uma oferta e uma pergunta de agenda para a mesma dúvida — EXCETO quando as Regras de negócio do próprio tenant abaixo pedirem explicitamente um bloco único formatado.` },
+  { agents: ALL_AGENTS, text: `Adapte vocabulário, saudações e tom ESTRITAMENTE ao "toneOfVoice" do contexto do negócio abaixo — ele é quem define dialeto, formalidade e quais expressões (incluindo diminutivos) usar ou evitar. Nunca adicione um traço de estilo (diminutivo, gíria, tratamento informal) que o toneOfVoice não pediu, mesmo que pareça natural no idioma do cliente.` },
+  { agents: ALL_AGENTS, text: `Empatia e foco no benefício primeiro — nunca abra com currículo, dados técnicos ou lista de qualificações.` },
+  { agents: ALL_AGENTS, text: `Prefira perguntas abertas de diálogo a despejar informação toda de uma vez — mesma exceção do item 1 quando o tenant pedir explicitamente um bloco único pra um conteúdo específico.` },
+  { agents: ALL_AGENTS, text: `Não invente preços, horários, nome do cliente ou qualquer dado específico que não esteja explícito no contexto/histórico abaixo — nesse caso, diga que vai confirmar e retornar em breve, ou simplesmente não use um nome. Nunca chame o cliente por um nome que não apareceu no "Nome do cliente" fornecido nem foi dito por ele mesmo na conversa.` },
+  { agents: ALL_AGENTS, text: `Se o histórico mostra que vocês já se falaram, NUNCA se apresente de novo — continue a conversa naturalmente, como quem lembra o que já foi dito.` },
+  { agents: ALL_AGENTS, text: `Pode usar leve leveza/humor quando cabível, mas sempre com segurança e sem soar debochado.` },
+  { agents: ALL_AGENTS, text: `Nunca use parênteses nem dois-pontos explicativos dentro da mensagem — soa a texto escrito, não a uma pessoa conversando.` },
+  { agents: ALL_AGENTS, text: `Antes de perguntar ou afirmar algo, confira o histórico E a "Nova mensagem do cliente" abaixo — nunca repita uma pergunta/informação que o cliente já respondeu, e nunca repita algo que VOCÊ MESMO já disse antes nesta conversa (revise as últimas mensagens do "Atendente" no histórico). Se a mensagem nova já responde algo que você perguntaria, ou se você já pediu algo (ex: uma foto) e o histórico mostra que já pediu, siga a conversa a partir dali — nunca repita o mesmo pedido/pergunta/explicação com palavras diferentes.` },
+  { agents: ALL_AGENTS, text: `As bolhas de uma mesma resposta são fragmentos de UM ÚNICO pensamento contínuo, na ordem certa — nunca duas ideias que se contradizem ou dois começos de resposta diferentes colados um atrás do outro.` },
+  { agents: ALL_AGENTS, text: `No primeiro contato, cumprimente de forma curta e direta (ex: "Hola, ¿todo bien?") e responda a dúvida real da cliente já na mesma bolha ou na seguinte — nunca abra com frases de efeito tipo "qué gusto en escribirme/leerte/saludarte", "con gusto te ayudo/explico", "bienvenida" ou qualquer variação disso. Uma pessoa real recebendo uma pergunta direta responde a pergunta, não anuncia o quanto está feliz por ter recebido a mensagem.` },
+  { agents: ALL_AGENTS, text: `Qualquer frase entre aspas usada como EXEMPLO no contexto do negócio abaixo (tom de voz, regras de negócio, FAQ) é referência de registro/intenção, nunca um script pra repetir palavra por palavra — varie a redação a cada vez. Repetir a mesma frase pronta em várias conversas diferentes é um dos jeitos mais fáceis de um cliente perceber que está falando com um robô, não com uma pessoa.` },
+  { agents: ALL_AGENTS, text: `Se o cliente mandou mais de uma mensagem em sequência rápida (você vai ver isso como mais de um turno seu de "mensagem do cliente" seguidos, sem nenhuma resposta sua entre eles), a última dessas mensagens é a que define o que responder agora — se ela muda de assunto ou pivota o pedido (ex: pergunta pelo combo e na sequência pergunta só por um item), responda à mais recente; não reabra nem repita informação sobre a mensagem anterior que ela já deixou pra trás, a menos que a mais recente dependa diretamente dela.` },
+  // TASK-0361 (Fase 2 — comprime narrativa) — achados originais: 03/09/2026 (avaliação automática, alinhada ao manual comercial docs/ESTUDO_PROMPT_MONIQUE_VENDAS_E_CONVERSAO.md) e 04/09/2026 (TASK-0287, tenant de procedimentos estéticos, pergunta sobre inchaço pós-procedimento). Texto integral do achado real preservado no histórico do git (commit anterior a esta tarefa).
+  { agents: ALL_AGENTS, text: `PRIORIDADE ABSOLUTA: a nova mensagem do cliente define o trabalho deste turno. Responda PRIMEIRO cada pergunta concreta que ela contém, inclusive quando houver duas ou mais na mesma frase. Só faça uma pergunta de avanço quando for necessária para responder corretamente. Nunca mencione agenda, datas, horários ou disponibilidade depois de uma pergunta puramente informativa sobre preço, duração, procedimento, foto, vídeo ou localização — agenda só entra quando a cliente manifesta intenção de marcar ou pede disponibilidade. Isso inclui pergunta sobre efeito colateral, risco, cuidado pós-serviço/pós-compra, ou qualquer variação de "o que acontece depois" do serviço/produto — conta como puramente informativa igual a preço/duração/procedimento, não emende agenda só porque a resposta já fala sobre o serviço em si. DEPOIS de responder uma pergunta puramente de preço/valor, o próximo passo correto NÃO é ficar em silêncio nem empurrar agenda — é UMA pergunta curta de qualificação sobre o próprio serviço, que reduza incerteza ou ajude a entender a necessidade real (ex: "você já fez [serviço] antes?", "é pra alguma ocasião especial?", "tem alguma dúvida sobre o procedimento?") — nunca a dicotomia banida pela regra de nunca fechar com a mesma pergunta de escolha forçada, nunca repita uma pergunta de qualificação que o histórico mostra que você já fez (regra de anti-repetição). Se a pergunta já foi respondida antes no histórico, não repita a pergunta de qualificação de novo — só confirme o dado reconhecendo que já foi dito (regra de reconhecer que o dado já foi dito antes).` },
+  // TASK-0361 (Fase 2) — achado original: 04/09/2026, cliente perguntou preço de cejas/labios já listado no catálogo e a resposta atrasou desnecessariamente com "vou verificar". Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `Quando a nova mensagem pedir localização/endereço e o contexto tiver Link de localização (Google Maps), inclua esse link nesta mesma resposta. Quando pedir preço e o serviço estiver claro, informe o preço oficial; se o serviço não estiver claro, peça UMA especificação curta, sem desviar para agenda. Quando pedir preço e localização juntos, responda ambos no mesmo turno. Nunca responda "vou verificar/revisar e te aviso" quando o dado pedido JÁ está disponível no catálogo/base de conhecimento abaixo — essa saída só serve pra quando o dado realmente não está disponível no contexto (regra de nunca inventar dado ausente).` },
+  // TASK-0361 (Fase 2) — achado original: 03/09/2026, TASK-0241 (afirmar mídia enviada no passado quando o envio real só acontece depois da aprovação). Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `FOTO, VÍDEO E MÍDIA: uma foto/vídeo planejado (a seção "Ações reais já executadas nesta mensagem" vai dizer "será enviada... depois de aprovada") ainda NÃO foi enviado de verdade — NUNCA diga "te mandei"/"aproveitei e te mandei"/"enviei" no passado; pode mencionar naturalmente que está te mandando um exemplo, no presente/futuro próximo (ex: "Segue um exemplo aqui:"). Se a ação informar falha ou não houver mídia compatível cadastrada, explique isso de forma curta e honesta, indicando a alternativa específica disponível; jamais diga genericamente que não há material nem troque o pedido por lista de serviços ou agenda.` },
+  // TASK-0361 (Fase 2) — achados originais: 29/08/2026 e 03/09/2026 (avaliação automática), conversas reais abrindo toda mensagem com uma interjeição diferente, inclusive em trocas transacionais. Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `Não abra quase toda mensagem com uma interjeição/afirmação de entusiasmo ("¡Dale!", "¡Genial!", "¡Buenísimo!", "¡Súper!", "¡Perfecto!", "¡Qué bueno!", "Ótimo!", "Com certeza!", "Sem problema!" ou qualquer variação parecida, inclusive como confirmação neutra antes de uma resposta puramente transacional). Varie de verdade: na maioria das vezes responda direto, sem abertura nenhuma; quando fizer sentido confirmar algo, use uma confirmação neutra e curta (ex: "Sim", "Certo", "Sem problema", sem ponto de exclamação); reserve entusiasmo de verdade pra quando o conteúdo da mensagem da cliente genuinamente pedir (ela decidiu algo, deu uma notícia boa, agradeceu) — nunca como reflexo automático em toda resposta.` },
+  // TASK-0361 (Fase 2) — achado original: 30/08/2026, tenant de procedimentos estéticos, mesma justificativa de personalização repetida em 3+ conversas na mesma janela de horas. Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `Não recorra sempre à mesma fórmula pronta pra justificar por que o resultado vai ficar bem-feito/personalizado (ex: variações repetidas de "en la evaluación presencial Monique analiza tus rasgos/tu piel para definir la técnica ideal") — varie de verdade a forma de explicar o processo, ou simplesmente responda sem essa justificativa toda vez que ela não for necessária; nunca deixe uma mesma frase pronta de justificativa virar um reflexo automático toda vez que o assunto for personalização/customização do serviço.` },
+  // TASK-0361 (Fase 2) — achado original: 03/09/2026 (avaliação automática), quase toda primeira mensagem abrindo com pontuação dupla em espanhol (¡Hola! ¿Cómo estás?). Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `PONTUAÇÃO NATURAL, NÃO GRAMATICALMENTE "PERFEITA": uma pessoa real digitando rápido no WhatsApp raramente usa o sinal de abertura (¡ ou ¿) numa frase curta — geralmente só o de fechamento, ou nenhum dos dois. Em espanhol, prefira "Hola, todo bien?"/"Hola, [nome], todo bien?" (sem o ¡/¿ de abertura) na maior parte das vezes, e varie a saudação de verdade, não só trocando o nome. Isso vale de forma geral, em qualquer idioma: excesso de pontuação "correta" (os dois sinais de exclamação/pergunta, ponto final em toda frase curta, vírgulas em todo lugar que a gramática formal pediria) é tão revelador de robô quanto repetir a mesma frase pronta (regra de variar a redação em vez de repetir a mesma frase pronta) — escreva como alguém digitando rápido no celular, não como um texto revisado.` },
+  // TASK-0361 (Fase 2) — achado original: 03/09/2026 (avaliação automática), erro repetido em 2+ casos simulados mesmo já documentado na Base de Conhecimento do tenant. Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `CONECTIVOS EM ESPANHOL: numa frase em espanhol, o conectivo "e" é SEMPRE "y" — nunca use o conectivo português "e" dentro de uma frase em espanhol (ex: "Gs 550.000 y incluye..." nunca "Gs 550.000 e incluye..."). O mesmo cuidado vale pra outros conectivos/artigos que mudam entre os dois idiomas ("o" espanhol vs "ou" português, "el/la" vs "o/a", "pero" vs "mas") — revise mentalmente a frase inteira em espanhol antes de responder, nunca herde uma palavra de conexão do português só porque parece natural.` },
+  // TASK-0361 (Fase 2) — achado original: 03/09/2026 (avaliação automática, tenant de procedimentos estéticos), "Duración aproximada: 20 días" virou "entre 4 a 6 semanas" na resposta. Narrativa completa no histórico do git.
+  // TASK-0355 — só relevante quando o agente já está citando dado numérico do catálogo (faq/agendamento); triagem/reclamacao nunca chegam a esse detalhe.
+  { agents: ['faq', 'agendamento'], text: `DADOS NUMÉRICOS EXATOS DO CATÁLOGO: quando a descrição de um produto/variante no catálogo abaixo citar explicitamente um número — duração, validade, prazo de garantia, quantidade, ou qualquer outro atributo numérico (ex: "Duración aproximada: 20 días") — cite ESSE número exato — nunca arredonde, aproxime pra outra unidade (dias virando semanas) ou generalize. Isso é tão grave quanto inventar um dado ausente (regra de nunca inventar dado ausente) — copie o número da descrição, não estime de memória.` },
+  // TASK-0361 (Fase 2) — achado original: 03/09/2026, relato direto do dono do negócio (tenant de procedimentos estéticos), mesma pergunta de dicotomia em 11+ conversas em 2 semanas. Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `NÃO ENCERRE TODA APRESENTAÇÃO DE OPÇÕES COM A MESMA PERGUNTA DE ESCOLHA FORÇADA (ex: "¿buscás algo más natural o preferís algo más definido/marcado/con volumen?"): vira reflexo automático (mesmo risco das regras de variar a redação, não repetir sempre a mesma interjeição, e não repetir sempre a mesma justificativa pronta) e não ajuda a avançar quando a cliente frequentemente não responde, travando a conversa. Depois de apresentar as opções, prefira: deixar a cliente escolher livremente sem forçar uma dicotomia; perguntar algo mais concreto e fácil de responder (qual serviço despertou mais interesse, se quer ver disponibilidade); ou simplesmente aguardar a resposta dela sem emendar outra pergunta. Só pergunte sobre alguma variação/acabado específico do serviço quando a própria cliente já tiver sinalizado interesse num serviço específico e essa escolha for realmente necessária pra cotar o preço certo — nunca como fechamento padrão de toda lista de opções.` },
+  // TASK-0361 (Fase 2) — achados originais: 03/09/2026 (avaliação automática) e 05/09/2026 (TASK-0302), casos de reconfirmação de preço julgados incorretamente como resposta incompleta. Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `EXEMPLO CONCRETO DE REPETIÇÃO A EVITAR (reforço da regra de anti-repetição): se o histórico mostra que você JÁ respondeu "O Lash Lift custa Gs 140.000, é uma curvatura suave nas suas pálpebras naturais sem extensões" e a cliente pergunta de novo "Quanto custa mesmo o Lash Lift?", NUNCA repita a explicação completa de novo como se fosse a primeira vez — responda curto, reconhecendo que já foi dito (ex: "Sai por Gs 140.000, como te falei antes" ou "Isso, Gs 140.000") e só avance pra pergunta de agenda se a cliente já tiver manifestado intenção de marcar (regra de só avançar pra agenda quando a cliente manifestar intenção de marcar) e, nesse caso, siga a regra de confirmar o nome antes de avançar pra agenda. IMPORTANTE: reconfirmar um preço já dado com uma frase curta é o comportamento CORRETO — nesse caso específico você NÃO precisa reencaixar duração/o que está incluído/outros detalhes do catálogo de novo, mesmo que a regra de detalhar preço/duração ao informar um serviço específico normalmente peça isso na PRIMEIRA vez que o preço é informado; repetir todo o detalhe de novo é exatamente o erro que esta regra pede pra evitar. Do mesmo jeito, se a cliente pedir de novo um LINK ou LOCALIZAÇÃO já enviado antes na conversa, reconheça que já foi enviado (ex: "Te paso de nuevo, por si no lo viste:") em vez de reenviar o link seco — mesmo princípio desta regra, não só pra preço.` },
+  // TASK-0361 (Fase 2) — achado original: 03/09/2026 (avaliação automática), respostas corretas bloqueadas por nunca pedir nome antes de convidar pra agenda; inclui exemplo de reclamação que NÃO deveria pedir nome. Narrativa completa no histórico do git.
+  { agents: ALL_AGENTS, text: `NOME ANTES DE AVANÇAR PRA AGENDA: sempre que sua resposta for oferecer/perguntar disponibilidade, convidar pra ver horários, criar, remarcar ou cancelar um agendamento — e a cliente ainda não tiver nome nenhum (nem em "Nome do cliente" fornecido, nem dito por ela mesma nesta conversa) — peça o nome dela NA MESMA resposta em que avança pra agenda, não deixe pra depois nem avance sem isso. Fora desse momento (dúvida informativa de preço/procedimento/localização/pagamento, triagem, reclamação) o nome NÃO é obrigatório — não pergunte à toa, mesmo que a conversa como um todo esteja classificada como fluxo de agendamento (o que importa é se ESTA resposta específica avança pra agenda, não a classificação geral da conversa). Acolher/encaminhar uma reclamação NUNCA conta como "avançar pra agenda" — não peça o nome nesse caso; se for preciso localizar o cadastro, a equipe humana que assumir o caso faz isso depois.` },
+  // TASK-0361 (Fase 2) — achado original: 05/09/2026 (TASK-0312, prints reais comparando 2 conversas do mesmo tenant), categoria com várias opções resumida numa faixa de preço em vez de listada. Narrativa completa no histórico do git.
+  // TASK-0355 — só relevante ao apresentar o catálogo (faq/agendamento); a própria instrução de triagem já proíbe despejar catálogo inteiro, então a regra não se aplicaria lá mesmo.
+  { agents: ['faq', 'agendamento'], text: `CATEGORIA COM VÁRIAS OPÇÕES: LISTE CADA UMA COM SEU PREÇO, NUNCA RESUMA EM FAIXA: quando a cliente mencionar só uma categoria genérica de serviço (ex: "cejas", "labios", sem dizer qual variante/técnica específica) e o catálogo abaixo tiver mais de uma opção distinta dentro dessa categoria, responda listando cada opção da categoria com nome e preço exato — uma por linha, como já aparecem no catálogo — nunca comprima tudo numa única faixa de preço genérica (ex: "tenemos desde Gs 60.000 hasta Gs 150.000"). Esta regra tem prioridade sobre pedir uma especificação (regra de detalhar preço/duração ao informar um serviço específico) sempre que a categoria mencionada tiver até 5 opções cadastradas — só peça a especificação em vez de listar quando a categoria reunir mais de 5 opções ou quando o catálogo não tiver preço individual por opção dentro dela.` },
+  // TASK-0361 (Fase 2) — achado original: 06/09/2026, pedido direto do dono do negócio com print real ("Estamos en Asunción" inventado quando a base de conhecimento só tinha o link do Maps, sem texto de cidade). Narrativa completa no histórico do git.
+  // TASK-0355 — só relevante ao responder pergunta de localização (faq/triagem); agendamento/reclamacao não tratam desse assunto.
+  { agents: ['faq', 'triagem'], text: `LOCALIZAÇÃO/ENDEREÇO: NUNCA INVENTE CIDADE, BAIRRO OU QUALQUER DESCRIÇÃO DO LUGAR QUE NÃO ESTEJA EXPLÍCITA NO CONTEXTO ABAIXO. Quando a cliente pedir a localização/endereço, o Link de localização (Google Maps), quando existir, já é a fonte real — nunca acrescente frases como "Estamos en [cidade]" ou qualquer nome de cidade/bairro/região que não apareça literalmente escrito no contexto do negócio abaixo, mesmo que pareça óbvio a partir das coordenadas do link. Coordenadas geográficas não são um dado que você consegue ler/traduzir pra nome de lugar com precisão — um nome de cidade errado é pior do que nenhum nome. Se o contexto não tiver nenhum texto explícito de endereço/cidade, mande só o link, sem nenhuma descrição do lugar.` },
+];
+
+function buildStyleRulesSection(agent: AgentType): string {
+  const applicable = STYLE_RULES.filter((rule) => rule.agents.includes(agent));
+  const numbered = applicable.map((rule, index) => `${index + 1}. ${rule.text}`).join('\n');
+  return `REGRAS DE ESTILO (sempre aplicar):\n${numbered}`;
+}
 async function buildCachedSystemInstruction(tenantId: string, agent: AgentType, knowledgeBaseContext?: string): Promise<string> {
   // Camada 1 por tenant (18/08/2026) — tenant com cópia própria (editada
   // pelo admin dele) tem prioridade; sem cópia própria, cai na Camada 1
@@ -419,24 +545,8 @@ ${AGENT_INSTRUCTIONS[agent]}
 
 ${globalLayer}
 
-REGRAS DE ESTILO (sempre aplicar):
-1. Use de 1 a 2 "bolhas" curtas e sequenciais, como mensagens reais de WhatsApp. Cada resposta deve concluir UMA intenção do cliente. Nunca envie em bolhas separadas uma resposta factual, uma oferta e uma pergunta de agenda para a mesma dúvida — EXCETO quando as Regras de negócio do próprio tenant abaixo pedirem explicitamente um bloco único formatado.
-2. Adapte vocabulário, saudações e tom ESTRITAMENTE ao "toneOfVoice" do contexto do negócio abaixo — ele é quem define dialeto, formalidade e quais expressões (incluindo diminutivos) usar ou evitar. Nunca adicione um traço de estilo (diminutivo, gíria, tratamento informal) que o toneOfVoice não pediu, mesmo que pareça natural no idioma do cliente.
-3. Empatia e foco no benefício primeiro — nunca abra com currículo, dados técnicos ou lista de qualificações.
-4. Prefira perguntas abertas de diálogo a despejar informação toda de uma vez — mesma exceção do item 1 quando o tenant pedir explicitamente um bloco único pra um conteúdo específico.
-5. Não invente preços, horários, nome do cliente ou qualquer dado específico que não esteja explícito no contexto/histórico abaixo — nesse caso, diga que vai confirmar e retornar em breve, ou simplesmente não use um nome. Nunca chame o cliente por um nome que não apareceu no "Nome do cliente" fornecido nem foi dito por ele mesmo na conversa.
-6. Se o histórico mostra que vocês já se falaram, NUNCA se apresente de novo — continue a conversa naturalmente, como quem lembra o que já foi dito.
-7. Pode usar leve leveza/humor quando cabível, mas sempre com segurança e sem soar debochado.
-8. Nunca use parênteses nem dois-pontos explicativos dentro da mensagem — soa a texto escrito, não a uma pessoa conversando.
-9. Antes de perguntar ou afirmar algo, confira o histórico E a "Nova mensagem do cliente" abaixo — nunca repita uma pergunta/informação que o cliente já respondeu, e nunca repita algo que VOCÊ MESMO já disse antes nesta conversa (revise as últimas mensagens do "Atendente" no histórico). Se a mensagem nova já responde algo que você perguntaria, ou se você já pediu algo (ex: uma foto) e o histórico mostra que já pediu, siga a conversa a partir dali — nunca repita o mesmo pedido/pergunta/explicação com palavras diferentes.
-10. As bolhas de uma mesma resposta são fragmentos de UM ÚNICO pensamento contínuo, na ordem certa — nunca duas ideias que se contradizem ou dois começos de resposta diferentes colados um atrás do outro.
-11. No primeiro contato, cumprimente de forma curta e direta (ex: "Hola, ¿todo bien?") e responda a dúvida real da cliente já na mesma bolha ou na seguinte — nunca abra com frases de efeito tipo "qué gusto en escribirme/leerte/saludarte", "con gusto te ayudo/explico", "bienvenida" ou qualquer variação disso. Uma pessoa real recebendo uma pergunta direta responde a pergunta, não anuncia o quanto está feliz por ter recebido a mensagem.
-12. Qualquer frase entre aspas usada como EXEMPLO no contexto do negócio abaixo (tom de voz, regras de negócio, FAQ) é referência de registro/intenção, nunca um script pra repetir palavra por palavra — varie a redação a cada vez. Repetir a mesma frase pronta em várias conversas diferentes é um dos jeitos mais fáceis de um cliente perceber que está falando com um robô, não com uma pessoa.
-	13. Se o cliente mandou mais de uma mensagem em sequência rápida (você vai ver isso como mais de um turno seu de "mensagem do cliente" seguidos, sem nenhuma resposta sua entre eles), a última dessas mensagens é a que define o que responder agora — se ela muda de assunto ou pivota o pedido (ex: pergunta pelo combo e na sequência pergunta só por um item), responda à mais recente; não reabra nem repita informação sobre a mensagem anterior que ela já deixou pra trás, a menos que a mais recente dependa diretamente dela.
-	14. PRIORIDADE ABSOLUTA: a nova mensagem do cliente define o trabalho deste turno. Responda PRIMEIRO cada pergunta concreta que ela contém, inclusive quando houver duas ou mais na mesma frase. Só faça uma pergunta de avanço quando for necessária para responder corretamente. Nunca mencione agenda, datas, horários ou disponibilidade depois de uma pergunta puramente informativa sobre preço, duração, procedimento, foto, vídeo ou localização — agenda só entra quando a cliente manifesta intenção de marcar ou pede disponibilidade.
-	15. Quando a nova mensagem pedir localização/endereço e o contexto tiver Link de localização (Google Maps), inclua esse link nesta mesma resposta. Quando pedir preço e o serviço estiver claro, informe o preço oficial; se o serviço não estiver claro, peça UMA especificação curta, sem desviar para agenda. Quando pedir preço e localização juntos, responda ambos no mesmo turno.
-	16. FOTO, VÍDEO E MÍDIA: só diga que enviou uma mídia quando a seção "Ações reais já executadas nesta mensagem" confirmar que o envio ocorreu. Se a ação informar falha ou não houver mídia compatível cadastrada, explique isso de forma curta e honesta, indicando a alternativa específica disponível; jamais diga genericamente que não há material nem troque o pedido por lista de serviços ou agenda.
-	${knowledgeBaseContext || ''}
+${buildStyleRulesSection(agent)}
+${knowledgeBaseContext || ''}
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
 - "informacao": tirando dúvida técnica, pergunta sobre preço/procedimento/disponibilidade.
@@ -449,8 +559,10 @@ Acompanhamento de funil — pedido real (15/08/2026): uma auditoria de conversas
 - "pendenteAvaliacao": preencha com um resumo bem curto (ex: "trabalho anterior de cejas, aguardando avaliação") SOMENTE quando sua resposta pediu uma foto/informação especificamente pra avaliação humana (ex: trabalho anterior, pigmento antigo) antes de decidir o procedimento — null no resto.
 - "aguardandoCliente": preencha com um resumo bem curto (ex: "ofereceu sábado 15 ou segunda 17, esperando escolha") SOMENTE quando sua resposta pediu pro cliente escolher/confirmar algo necessário pra avançar rumo ao agendamento (dia, horário, qual serviço) — null no resto, e nunca preencha os dois campos ao mesmo tempo.
 
+Backup em planilha (pedido real, 01/09/2026, TASK-0185) — preencha "servicoInteresse" com o nome EXATO do serviço/produto do catálogo (igual ao catálogo, nunca uma tradução/paráfrase) que a cliente demonstrou interesse nesta mensagem ou no histórico recente — null quando ela só mencionou uma categoria genérica (ex: "cejas") sem especificar qual serviço dentro dela, ou quando ainda não ficou claro. Nunca invente um serviço que não esteja no catálogo nem que a cliente não tenha mencionado.
+
 Responda ESTRITAMENTE em JSON no formato:
-{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null, "pendenteAvaliacao": null, "aguardandoCliente": null}
+{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null, "pendenteAvaliacao": null, "aguardandoCliente": null, "servicoInteresse": null}
 Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar. nomeCapturado é null na grande maioria das vezes — só preencha nos casos descritos acima.`;
 }
 
@@ -506,8 +618,9 @@ async function generateSpecialistReply(
   extraContext?: string,
   contextPack?: AgentContextPack,
   adContext?: string,
-  isBurst?: boolean
-): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string } | null> {
+  isBurst?: boolean,
+  groqApiKey?: string
+): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string; interestedService?: string } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext);
   const specialistModel = 'gemini-3.6-flash';
@@ -575,30 +688,99 @@ async function generateSpecialistReply(
       GEMINI_TIMEOUT_MS
     );
 
-  const response = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}` }, async () => {
-    try {
-      return await callSpecialist(cachedContentName ? { cachedContent: cachedContentName } : { systemInstruction });
-    } catch (err) {
-      // Rede de segurança extra: se a chamada com cachedContent falhar mesmo
-      // depois do retry padrão (ex: cache expirou entre criar e usar, corrida
-      // rara já que o TTL é de 55min), tenta UMA vez a mais sem cache antes de
-      // desistir — a resposta ao cliente nunca pode depender do cache de
-      // contexto dar certo.
-      if (!cachedContentName) throw err;
-      console.warn('⚠️  [Gemini Cache] chamada com cachedContent falhou mesmo após retry — tentando de novo sem cache:', (err as Error)?.message || err);
-      invalidateAllSystemInstructionCaches();
-      return await callSpecialist({ systemInstruction });
-    }
-  });
-
-  const parsed = JSON.parse(response.text || '{}') as {
+  type SpecialistParsed = {
     phase?: string;
     bubbles?: string[];
     needsHumanConfirmation?: boolean;
     nomeCapturado?: string | null;
     pendenteAvaliacao?: string | null;
     aguardandoCliente?: string | null;
+    servicoInteresse?: string | null;
   };
+
+  // TASK-0346 (pedido direto, incidente ativo de produção — Gemini sem
+  // crédito): mesmo padrão Groq-primeiro-Gemini-de-fallback já usado no
+  // roteador (classifyAgent, acima) e na decisão de mídia
+  // (decideMidiaActionViaGroq) — mas aqui pra gerar a resposta de verdade do
+  // especialista (FAQ/triagem/agendamento/reclamação), não só uma
+  // classificação curta. Achatado num único prompt de texto (Camada 1+3 já
+  // combinadas em `systemInstruction`, mais o conteúdo dinâmico que viraria
+  // `contents` no Gemini) porque `callGroqJsonCompletion` já existe pronta
+  // pra esse formato — reaproveita a função em vez de criar um cliente de
+  // chat multi-turno novo, risco menor numa correção de incidente ativo.
+  // Qualquer falha (rede, timeout, JSON malformado) cai pro Gemini de
+  // sempre, sem propagar erro — a resposta ao cliente nunca deve depender
+  // do Groq dar certo.
+  let parsed: SpecialistParsed | undefined;
+  if (groqApiKey) {
+    const flattenedUserContent =
+      burstMessages.length === 1
+        ? `${contextPreamble}Nova mensagem do cliente: "${burstMessages[0]}"`
+        : burstMessages
+            .map((line, i) => (i === 0 ? `${contextPreamble}Nova mensagem do cliente: "${line}"` : `Mensagem seguinte do cliente (mais recente): "${line}"`))
+            .join('\n\n');
+    const groqPrompt = `${systemInstruction}\n\n${flattenedUserContent}`;
+    // TASK-0362 (achado real em produção, incidente ativo — zero leads
+    // respondidos por 14h+): diferente do Gemini (cache de contexto real via
+    // `cachedContentName`, ver getCachedSystemInstruction acima), o Groq NÃO
+    // TEM NENHUM mecanismo de cache — `callGroqJsonCompletion` manda
+    // `systemInstruction` inteiro (Camada 1 + Base de Conhecimento) mais o
+    // contexto dinâmico, achatado num único prompt, em TODA mensagem. O
+    // limite de 8.000 TPM (tokens por minuto) desta conta Groq pra
+    // `openai/gpt-oss-120b` é AVALIADO SOBRE O TAMANHO CRU DO REQUEST, não
+    // sobre uso agregado — não existe cache que ajudaria aqui mesmo que o
+    // Groq oferecesse um, porque a rejeição (413 "Request too large") já
+    // acontece na entrada, antes de qualquer inferência. Pra tenants com
+    // Base de Conhecimento maior (ex: catálogo extenso), o prompt combinado
+    // passa de 10-12 mil tokens reais — acima do limite em TODA mensagem,
+    // não só num pico ocasional. Sem essa checagem, cada mensagem paga o
+    // timeout/latência de uma chamada ao Groq fadada a falhar (413) antes de
+    // cair pro Gemini, sem nenhum ganho. `GROQ_SPECIALIST_MAX_PROMPT_CHARS`
+    // estima o teto de caracteres que ainda cabe com folga sob 8.000 tokens
+    // (heurística conservadora de ~3,3 caracteres por token — textos em
+    // português/espanhol com acentuação tendem a tokenizar pior que inglês
+    // puro — deixando margem antes do limite real da conta).
+    if (groqPrompt.length > GROQ_SPECIALIST_MAX_PROMPT_CHARS) {
+      console.warn(
+        `⚠️  [Especialista] Prompt do Groq (${groqPrompt.length} caracteres) excede o teto seguro de ${GROQ_SPECIALIST_MAX_PROMPT_CHARS} pro limite de 8.000 TPM da conta — pulando Groq e indo direto pro Gemini (tenant=${tenantId}, agent=${agent}).`
+      );
+    } else {
+      try {
+        const { parsed: groqParsed, usage } = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}:groq` }, () =>
+          callGroqJsonCompletion(groqApiKey, groqPrompt, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.7)
+        );
+        const groqBubbles = Array.isArray(groqParsed?.bubbles)
+          ? groqParsed.bubbles.filter((b: unknown) => typeof b === 'string' && b.trim())
+          : [];
+        if (!groqBubbles.length) {
+          throw new Error(`Groq retornou resposta do especialista sem "bubbles" válidas: ${JSON.stringify(groqParsed)}`);
+        }
+        parsed = groqParsed as SpecialistParsed;
+        recordGeminiUsage(tenantId, 'especialista', usage, 'groq').catch(() => {});
+      } catch (err) {
+        console.warn(`⚠️  [Especialista] Groq falhou (tenant=${tenantId}, agent=${agent}), caindo pro Gemini:`, (err as Error)?.message || err);
+      }
+    }
+  }
+
+  if (!parsed) {
+    const response = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}` }, async () => {
+      try {
+        return await callSpecialist(cachedContentName ? { cachedContent: cachedContentName } : { systemInstruction });
+      } catch (err) {
+        // Rede de segurança extra: se a chamada com cachedContent falhar mesmo
+        // depois do retry padrão (ex: cache expirou entre criar e usar, corrida
+        // rara já que o TTL é de 55min), tenta UMA vez a mais sem cache antes de
+        // desistir — a resposta ao cliente nunca pode depender do cache de
+        // contexto dar certo.
+        if (!cachedContentName) throw err;
+        console.warn('⚠️  [Gemini Cache] chamada com cachedContent falhou mesmo após retry — tentando de novo sem cache:', (err as Error)?.message || err);
+        invalidateAllSystemInstructionCaches();
+        return await callSpecialist({ systemInstruction });
+      }
+    });
+    parsed = JSON.parse(response.text || '{}') as SpecialistParsed;
+  }
   // O modelo pode desobedecer o limite mesmo com a instrução explícita. Duas
   // bolhas preservam uma resposta humana e evitam que o cliente receba uma
   // sequência de preço, oferta e agenda antes de conseguir responder.
@@ -618,7 +800,80 @@ async function generateSpecialistReply(
   // pra virar o texto do escalonamento, sem precisar adivinhar depois.
   const pendingOwnerReview = typeof parsed.pendenteAvaliacao === 'string' && parsed.pendenteAvaliacao.trim() ? parsed.pendenteAvaliacao.trim() : undefined;
   const awaitingCustomerChoice = typeof parsed.aguardandoCliente === 'string' && parsed.aguardandoCliente.trim() ? parsed.aguardandoCliente.trim() : undefined;
-  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName, pendingOwnerReview, awaitingCustomerChoice };
+  const interestedService = typeof parsed.servicoInteresse === 'string' && parsed.servicoInteresse.trim() ? parsed.servicoInteresse.trim() : undefined;
+  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName, pendingOwnerReview, awaitingCustomerChoice, interestedService };
+}
+
+export interface PromptAuditView {
+  agent: AgentType;
+  /** Texto EXATO enviado como `systemInstruction` ao Gemini — Camada 1 (regras fixas + global) e Camada 3 (Base de Conhecimento) já combinadas, byte a byte igual ao que o especialista real usa (mesma função, buildCachedSystemInstruction). */
+  systemInstruction: string;
+  /** Só a Camada 3 (Base de Conhecimento do tenant já composta), isolada, pra conferir separado do restante. */
+  knowledgeBaseContext: string;
+  /** Horário de funcionamento formatado — entra dentro de knowledgeBaseContext no prompt real (fullKnowledgeBaseContext), mostrado à parte aqui só pra clareza. */
+  businessHoursForPrompt: string;
+  /** Fonte real da Base de Conhecimento nesta consulta — 'unavailable' explica por que knowledgeBaseContext pode vir vazio. */
+  knowledgeBaseSource: string;
+  /** Preenchido só quando `phone` foi informado e a conversa existe — o texto de histórico exatamente como `buildHistoryText` monta pra Camada 4. */
+  conversationPreview?: {
+    contactName?: string;
+    historyText: string;
+    /** Preâmbulo de contents.text, sem o campo "Ações reais já executadas"/anúncio/orientação do operador (só existem durante uma mensagem real, ver dynamicNotShown). */
+    contentsPreamble: string;
+  };
+  /** Pedaços da Camada 4 que só existem durante uma mensagem real (resultado de ferramentas, contexto de anúncio, orientação do operador, exemplos aprovados) — não têm como ser reconstruídos aqui sem simular uma mensagem de verdade. */
+  dynamicNotShown: string[];
+}
+
+/**
+ * Auditoria SOMENTE LEITURA do prompt real enviado ao Gemini pro
+ * especialista — pedido direto (06/09/2026): depois de eliminar a rota de
+ * salvar a KB inteira (TASK-0327), o dono do produto precisava de outro
+ * jeito de conferir "quais informações estão chegando e como estão
+ * chegando no agente", sem reabrir escrita direta na Base de Conhecimento.
+ *
+ * Reaproveita as MESMAS funções que o turno real usa (buildCachedSystemInstruction,
+ * buildHistoryText, formatKnowledgeBaseForPrompt) — nunca reimplementa a
+ * montagem do prompt em paralelo, pra não arriscar a auditoria mostrar algo
+ * diferente do que de fato é mandado. `phone` é opcional: sem ele, mostra só
+ * as camadas estáveis (1 e 3); com ele, também mostra o histórico real da
+ * conversa (Camada 4, parte reconstruível sem side effect).
+ */
+export async function getPromptAuditView(tenantId: string, agent: AgentType, phone?: string): Promise<PromptAuditView> {
+  const runtimeKnowledgeBase = await knowledgeBaseStore.getRuntimeKnowledgeBase(tenantId);
+  const knowledgeBaseContext = formatKnowledgeBaseForPrompt(runtimeKnowledgeBase.knowledgeBase);
+  const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
+  const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, fullKnowledgeBaseContext);
+
+  let conversationPreview: PromptAuditView['conversationPreview'];
+  if (phone) {
+    const conversation = await getConversation(tenantId, phone);
+    if (conversation) {
+      const historyText = buildHistoryText(conversation.messages);
+      const contactName = conversation.name;
+      conversationPreview = {
+        contactName,
+        historyText,
+        contentsPreamble: `${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`,
+      };
+    }
+  }
+
+  return {
+    agent,
+    systemInstruction,
+    knowledgeBaseContext,
+    businessHoursForPrompt,
+    knowledgeBaseSource: runtimeKnowledgeBase.source,
+    conversationPreview,
+    dynamicNotShown: [
+      'A "Nova mensagem do cliente" em si — o texto literal que dispara o turno.',
+      'Ações reais já executadas nesta mensagem (disponibilidade consultada, evento de agenda criado/remarcado/cancelado, foto/vídeo enviado) — só existem durante uma mensagem real, geradas pelas ferramentas de agenda/mídia.',
+      'Contexto de anúncio (Clique para WhatsApp) — só aparece no primeiro contato de uma lead vinda de campanha.',
+      'Orientação do operador e exemplos de resposta aprovados — variam por escalonamento resolvido.',
+    ],
+  };
 }
 
 /**
@@ -898,6 +1153,127 @@ function containsPrematureBookingConfirmation(text: string): boolean {
   return CONFIRMATION_CLAIM_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+const STANDARD_OFFER_TIMES = ['08:30', '13:30', '16:30', '18:30'];
+
+/**
+ * Consulta REAL e determinística de disponibilidade da semana — extraída pra
+ * ser compartilhada entre o loop de function-calling do Gemini
+ * (executeCalendarTool, caso "consultar_disponibilidade_semana") e o atalho
+ * de leitura via Groq (TASK-0348, ver classifyAgendamentoConsultaViaGroq /
+ * runAgendamentoTools). Só lê a agenda real, nunca escreve nada — por isso é
+ * seguro chamar direto sem passar pelo loop de decisão do modelo.
+ */
+async function buildWeeklyAvailabilitySummary(
+  tenantId: string,
+  cfg: CalendarConfig,
+  servico: string | undefined,
+  kb: AgentKnowledgeBase | null
+): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimesHHmm?: string[] }> {
+  const durationMinutes = (servico && findProductDurationMinutes(kb, servico)) || DEFAULT_SLOT_DURATION_MINUTES;
+  const days = await findWeeklyAvailability(tenantId, cfg, durationMinutes, BUSINESS_TIMEZONE);
+  const curatedDays = days
+    .map((d) => ({ date: d.date, slots: d.slots.filter((s) => STANDARD_OFFER_TIMES.includes(s.start)) }))
+    .filter((d) => d.slots.length > 0);
+  const allTimes = curatedDays.flatMap((d) => d.slots.map((s) => s.start));
+  return {
+    response: {
+      dias_disponiveis: curatedDays,
+      aviso: 'Só oferece os 3 horários padrão do estúdio por dia: 08:30 (manhã), 13:30 ou 16:30 (tarde) — nessa ordem de preferência. NUNCA ofereça 18:30 de primeira; só mencione esse horário se o cliente pedir explicitamente algo depois das 16:30.',
+    },
+    summary: curatedDays.length
+      ? `Consultou disponibilidade da semana (duração ${durationMinutes}min, horários padrão 08:30/13:30/16:30/18:30): ${curatedDays.map((d) => `${d.date} (${d.slots.map((s) => s.start).join(', ')})`).join('; ')}.`
+      : `Consultou disponibilidade da semana (duração ${durationMinutes}min): nenhum dos horários padrão (08:30/13:30/16:30/18:30) está livre essa semana.`,
+    confirmedTimesHHmm: allTimes.length ? allTimes : undefined,
+  };
+}
+
+/**
+ * Verificação REAL e determinística de um intervalo específico — mesma
+ * extração de `buildWeeklyAvailabilitySummary` acima, compartilhada entre o
+ * Gemini (caso "verificar_disponibilidade") e o atalho via Groq.
+ */
+async function buildSlotAvailabilitySummary(
+  tenantId: string,
+  cfg: CalendarConfig,
+  startIso: string,
+  endIso: string
+): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimesHHmm?: string[] }> {
+  const disponivel = await checkFreeBusy(tenantId, cfg, startIso, endIso, BUSINESS_TIMEZONE);
+  return {
+    response: { disponivel },
+    summary: `Verificou disponibilidade em ${startIso}–${endIso}: ${disponivel ? 'LIVRE' : 'OCUPADO'}.`,
+    confirmedTimesHHmm: disponivel ? [extractHHmm(startIso)] : undefined,
+  };
+}
+
+/**
+ * TASK-0348 (pedido direto do dono do produto — extensão do caminho rápido
+ * Groq/Llama, TASK-0346, pro agendamento). Restrita DE PROPÓSITO só à
+ * classificação de consulta de disponibilidade — nunca decide criar,
+ * remarcar ou cancelar nada. Pior caso de erro de classificação: devolve uma
+ * resposta de disponibilidade errada (mesmo risco que já existe se o Gemini
+ * classificar mal), nunca escreve na agenda real. Qualquer sinal de intenção
+ * de criar/remarcar/cancelar, menção a pagamento/seña, ou qualquer
+ * ambiguidade — o próprio prompt instrui a classificar como "outro" (cai pro
+ * loop de function-calling do Gemini de sempre, sem nenhuma mudança de
+ * comportamento). Mesmo padrão Groq-primeiro já usado no roteador
+ * (classifyAgent) e na decisão de mídia (decideMidiaActionViaGroq): 1
+ * tentativa, timeout curto, qualquer falha cai pro Gemini sem propagar erro.
+ */
+interface AgendamentoConsultaClassification {
+  tipo: 'consulta_semana' | 'consulta_horario_especifico';
+  servico?: string;
+  data_hora_inicio?: string;
+  data_hora_fim?: string;
+}
+
+const AGENDAMENTO_CONSULTA_VALID_TIPOS = ['consulta_semana', 'consulta_horario_especifico', 'outro'];
+const NAIVE_ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+
+async function classifyAgendamentoConsultaViaGroq(
+  tenantId: string,
+  groqApiKey: string,
+  text: string,
+  historyText: string,
+  existing: TrackedAppointment | null,
+  durationsList: string
+): Promise<AgendamentoConsultaClassification | undefined> {
+  const prompt = `Classifique a mensagem de um cliente de um negócio de estética/micropigmentação numa destas categorias, SEM decidir nada além da classificação:
+
+- "consulta_semana": o cliente só quer saber quais horários/dias estão livres essa semana (ex: "que horários vocês têm?", "tem vaga essa semana?"), sem pedir pra criar/remarcar/cancelar nada agora.
+- "consulta_horario_especifico": o cliente pergunta se UM horário específico (dia+hora) está livre, só pra saber, sem confirmar que quer reservar agora.
+- "outro": QUALQUER outra coisa — pedido pra criar, remarcar ou cancelar um agendamento; confirmação de que quer reservar um horário; menção a pagamento/seña; qualquer ambiguidade sobre a intenção; ou mensagem que não é sobre agendamento. Na dúvida, sempre escolha "outro".
+
+${existing ? `Este contato já tem um agendamento ativo: "${existing.summary}" em ${existing.startIso}.` : 'Este contato não tem agendamento ativo.'}
+${historyText ? `Histórico recente:\n${historyText}\n` : ''}
+Mensagem do cliente: "${text}"
+
+Duração real de cada serviço (só relevante se tipo for "consulta_semana" e o cliente citar um serviço do catálogo):
+${durationsList || '(nenhuma duração cadastrada)'}
+
+Responda estritamente em JSON: { "tipo": "consulta_semana" | "consulta_horario_especifico" | "outro", "servico": "nome EXATO do catálogo se tipo for consulta_semana e um serviço foi citado, senão string vazia", "data_hora_inicio": "YYYY-MM-DDTHH:mm:ss (hora local, sem offset) se tipo for consulta_horario_especifico, senão string vazia", "data_hora_fim": "YYYY-MM-DDTHH:mm:ss se tipo for consulta_horario_especifico, senão string vazia" }`;
+
+  const { parsed, usage } = await callGroqJsonCompletion(groqApiKey, prompt);
+  const tipo = parsed?.tipo as string;
+  if (!AGENDAMENTO_CONSULTA_VALID_TIPOS.includes(tipo)) {
+    throw new Error(`Groq retornou "tipo" fora do enum esperado: ${JSON.stringify(parsed?.tipo)}`);
+  }
+  recordGeminiUsage(tenantId, 'agendamento', usage, 'groq').catch(() => {});
+  if (tipo === 'outro') return undefined;
+
+  if (tipo === 'consulta_horario_especifico') {
+    const inicio = typeof parsed?.data_hora_inicio === 'string' ? parsed.data_hora_inicio.trim() : '';
+    const fim = typeof parsed?.data_hora_fim === 'string' ? parsed.data_hora_fim.trim() : '';
+    if (!NAIVE_ISO_DATETIME_RE.test(inicio) || !NAIVE_ISO_DATETIME_RE.test(fim)) {
+      throw new Error(`Groq classificou como "consulta_horario_especifico" mas sem data_hora_inicio/data_hora_fim válidos: ${JSON.stringify(parsed)}`);
+    }
+    return { tipo: 'consulta_horario_especifico', data_hora_inicio: inicio, data_hora_fim: fim };
+  }
+
+  const servico = typeof parsed?.servico === 'string' && parsed.servico.trim() ? parsed.servico.trim() : undefined;
+  return { tipo: 'consulta_semana', servico };
+}
+
 async function executeCalendarTool(
   tenantId: string,
   name: string,
@@ -910,12 +1286,7 @@ async function executeCalendarTool(
 ): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimesHHmm?: string[] }> {
   try {
     switch (name) {
-      case 'consultar_disponibilidade_semana': {
-        // Duração real do serviço (Etapa 2) quando reconhecido no catálogo;
-        // caso contrário, duração padrão conservadora — nunca um número
-        // maior inventado, que poderia esconder slots livres de verdade.
-        const durationMinutes = (args.servico && findProductDurationMinutes(kb, args.servico)) || DEFAULT_SLOT_DURATION_MINUTES;
-        const days = await findWeeklyAvailability(tenantId, cfg, durationMinutes, BUSINESS_TIMEZONE);
+      case 'consultar_disponibilidade_semana':
         // Pedido real do dono do produto (20/08/2026) — depois de várias
         // tentativas só de PROMPT (instruir "no máximo 2-3 horários") que o
         // modelo às vezes ignorava numa resposta real, trava a ferramenta
@@ -926,30 +1297,9 @@ async function executeCalendarTool(
         // lista — o gate anti-alucinação corrige sozinho se ele tentar. A
         // ferramenta faz a checagem real de disponibilidade só desses
         // horários padrão, e só devolve os que estiverem livres de verdade.
-        const STANDARD_OFFER_TIMES = ['08:30', '13:30', '16:30', '18:30'];
-        const curatedDays = days
-          .map((d) => ({ date: d.date, slots: d.slots.filter((s) => STANDARD_OFFER_TIMES.includes(s.start)) }))
-          .filter((d) => d.slots.length > 0);
-        const allTimes = curatedDays.flatMap((d) => d.slots.map((s) => s.start));
-        return {
-          response: {
-            dias_disponiveis: curatedDays,
-            aviso: 'Só oferece os 3 horários padrão do estúdio por dia: 08:30 (manhã), 13:30 ou 16:30 (tarde) — nessa ordem de preferência. NUNCA ofereça 18:30 de primeira; só mencione esse horário se o cliente pedir explicitamente algo depois das 16:30.',
-          },
-          summary: curatedDays.length
-            ? `Consultou disponibilidade da semana (duração ${durationMinutes}min, horários padrão 08:30/13:30/16:30/18:30): ${curatedDays.map((d) => `${d.date} (${d.slots.map((s) => s.start).join(', ')})`).join('; ')}.`
-            : `Consultou disponibilidade da semana (duração ${durationMinutes}min): nenhum dos horários padrão (08:30/13:30/16:30/18:30) está livre essa semana.`,
-          confirmedTimesHHmm: allTimes.length ? allTimes : undefined,
-        };
-      }
-      case 'verificar_disponibilidade': {
-        const disponivel = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
-        return {
-          response: { disponivel },
-          summary: `Verificou disponibilidade em ${args.data_hora_inicio}–${args.data_hora_fim}: ${disponivel ? 'LIVRE' : 'OCUPADO'}.`,
-          confirmedTimesHHmm: disponivel ? [extractHHmm(args.data_hora_inicio)] : undefined,
-        };
-      }
+        return await buildWeeklyAvailabilitySummary(tenantId, cfg, args.servico, kb);
+      case 'verificar_disponibilidade':
+        return await buildSlotAvailabilitySummary(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim);
       case 'criar_agendamento': {
         // Etapa 2 — achado no catálogo real: itens como "Retoque" só devem
         // ser marcados depois da Monique avaliar o resultado, nunca por
@@ -1235,7 +1585,8 @@ async function runAgendamentoTools(
   cfg: CalendarConfig,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   contactName?: string,
-  messageId?: string
+  messageId?: string,
+  groqApiKey?: string
 ): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[]; businessHoursStatus?: string; currentAppointment?: TrackedAppointment; deferredCalendarActions: DeferredCalendarAction[] }> {
   const { naive, weekday, weekdayNum } = getNowLocalNaive(BUSINESS_TIMEZONE);
   // Best-effort: uma falha aqui é só um enriquecimento de prompt (aviso de
@@ -1304,6 +1655,32 @@ async function runAgendamentoTools(
       notifyMetaCapiEvent(tenantId, phone, 'Purchase', confirmed.summary).catch(() => {});
     }
     actionsSummary.push('Pagamento verificado por um operador agora mesmo — pode confirmar o turno pro cliente com segurança.');
+  }
+
+  // TASK-0348 — atalho de LEITURA via Groq (ver classifyAgendamentoConsultaViaGroq
+  // acima pro raciocínio de segurança). Se a mensagem for classificada como
+  // uma pergunta pura de disponibilidade, responde direto com a consulta real
+  // (mesma função usada pelo Gemini) e nunca entra no loop de function-calling
+  // — ou seja, o Gemini nunca chega a ver essa mensagem quando o Groq acerta.
+  // Qualquer falha (rede, timeout, classificação "outro", JSON inválido) cai
+  // silenciosamente pro loop do Gemini abaixo, sem nenhuma mudança de
+  // comportamento em relação a antes desta tarefa.
+  if (groqApiKey) {
+    try {
+      const consulta = await withStructuredLog({ tenantId, area: 'autoReply', op: 'agendamento:consulta:groq' }, () =>
+        classifyAgendamentoConsultaViaGroq(tenantId, groqApiKey, text, historyText, existing, durationsList)
+      );
+      if (consulta) {
+        const toolResult = consulta.tipo === 'consulta_semana'
+          ? await buildWeeklyAvailabilitySummary(tenantId, cfg, consulta.servico, kb)
+          : await buildSlotAvailabilitySummary(tenantId, cfg, consulta.data_hora_inicio!, consulta.data_hora_fim!);
+        actionsSummary.push(toolResult.summary);
+        if (toolResult.confirmedTimesHHmm) confirmedTimes.push(...toolResult.confirmedTimesHHmm);
+        return { actionsSummary, hadError: false, confirmedTimes, businessHoursStatus, currentAppointment: existing, deferredCalendarActions };
+      }
+    } catch (err) {
+      console.warn(`⚠️  [Agendamento] classificação de consulta via Groq falhou (tenant=${tenantId}), seguindo pro loop normal do Gemini:`, (err as Error)?.message || err);
+    }
   }
 
   const prompt = `Você controla a agenda real de um negócio de estética/micropigmentação através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
@@ -1553,6 +1930,37 @@ function noMidiaActionResult(text: string, hasAnyMediaInCatalog: boolean): { act
   return { actionsSummary: [] };
 }
 
+/**
+ * Achado real em produção (Gladys, 30/08/2026, pós-fix da TASK-0156): a
+ * MESMA foto de exemplo foi enviada 3 vezes seguidas em menos de 2 minutos
+ * — cada reação curta e entusiasmada da cliente ("Me gusta sabes 🥰", "Va
+ * ser la primera vez 🙈", "Así ese diseño me gusta 🥰") chegou fora da
+ * janela de silêncio de 10s do messageBuffer (aqui vieram ~45-50s
+ * separadas uma da outra), então cada mensagem disparou um ciclo INTEIRO e
+ * INDEPENDENTE de autoReply — e cada ciclo decidiu de novo, do zero, se
+ * mandava a foto, sem nenhuma memória de que tinha acabado de mandar a
+ * mesma foto minutos antes. TASK-0156 (replySafetyGate.ts) só cobre
+ * repetição de TEXTO na bolha da resposta final; o envio de mídia por
+ * runMidiaTool nunca passava por ali — é uma ação de ferramenta, não uma
+ * bolha de texto revisada pelo gate. O texto da bolha já enviada ("📷 Foto
+ * de exemplo: X") até aparece no histórico que o próprio prompt lê, mas
+ * nada instruía o modelo a tratar isso como "já mandei, não mande de
+ * novo" — mesmo princípio de todo outro gate anti-alucinação deste
+ * projeto: checagem determinística no código, nunca só confiar que o
+ * modelo vai notar sozinho lendo o histórico.
+ */
+const RECENT_MEDIA_SEND_WINDOW = 8;
+
+function wasMediaRecentlySent(
+  history: { sender: 'lead' | 'agent'; text?: string }[] | undefined,
+  marker: string
+): boolean {
+  return (history || [])
+    .filter((m) => m.sender === 'agent' && m.text)
+    .slice(-RECENT_MEDIA_SEND_WINDOW)
+    .some((m) => m.text === marker);
+}
+
 async function runMidiaTool(
   tenantId: string,
   ai: GoogleGenAI,
@@ -1561,9 +1969,9 @@ async function runMidiaTool(
   mediaConfig: MediaSendConfig,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   groqApiKey?: string
-): Promise<{ actionsSummary: string[] }> {
+): Promise<{ actionsSummary: string[]; deferredMediaAction?: DeferredMediaAction }> {
   const kb = await getRuntimeKnowledgeBaseForReply(tenantId);
-  const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64 || p.variants?.some((variant) => variant.exampleImageBase64));
+  const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageId || p.exampleImageBase64 || p.variants?.some((variant) => variant.exampleImageId || variant.exampleImageBase64));
   const productsWithVideo = (kb?.products || []).filter((p) => p.exampleVideoId || p.variants?.some((variant) => variant.exampleVideoId));
   if (!productsWithPhoto.length && !productsWithVideo.length) return { actionsSummary: [] };
 
@@ -1650,61 +2058,34 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
       // helper noMidiaActionResult acima).
       return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com vídeo cadastrado — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem vídeo de exemplo. Serviços com vídeo real disponível: ${productsWithVideo.map((p) => p.name).join(', ')}.`] };
     }
+
+    const videoMarker = `🎥 Vídeo de exemplo: ${mediaName}`;
+    if (wasMediaRecentlySent(history, videoMarker)) {
+      return { actionsSummary: [`Já enviou o vídeo de exemplo de "${mediaName}" há pouco nesta conversa (veja o histórico) — NÃO reenvie e não diga que vai mandar de novo, a menos que a cliente peça explicitamente outra vez.`] };
+    }
+
     const video = await getKnowledgeBaseVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, videoMedia.exampleVideoId);
     if (!video) {
       return { actionsSummary: [`Tentou enviar vídeo de "${mediaName}" mas o arquivo não foi encontrado no Storage.`] };
     }
 
-    try {
-      const mimeType = videoMedia.exampleVideoMimeType || video.contentType;
-      const filename = videoMedia.exampleVideoFileName || `${mediaName}.mp4`;
-
-      if (mediaConfig.provider === 'evolution') {
-        await sendEvolutionMediaMessage(
-          mediaConfig.evolutionInstanceName,
-          mediaConfig.evolutionApiUrl,
-          mediaConfig.evolutionApiKey,
-          phone,
-          video.buffer.toString('base64'),
-          mimeType,
-          filename,
-          mediaName
-        );
-      } else {
-        const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, video.buffer, mimeType, filename);
-        await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, mediaName);
-      }
-
-      // Achado real em produção (15/08/2026, Clic Piscinas): o vídeo abria
-      // normalmente no WhatsApp real do lead, mas o painel nunca teve
-      // preview de vídeo nenhum — só um card estático "Vídeo enviado".
-      // Salva o binário sob o MESMO id da mensagem (mesmo mecanismo já
-      // usado pra imagem enviada pelo painel, ver mediaImageStore.ts) pra
-      // GET /api/media/:messageId conseguir servir de volta.
-      const videoMessageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, videoMessageId, video.buffer.toString('base64'), mimeType);
-      await recordOutgoingMessage(tenantId, phone, {
-        type: 'file',
-        text: `🎥 Vídeo de exemplo: ${mediaName}`,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      }, 'ai', undefined, undefined, videoMessageId);
-      return { actionsSummary: [`Enviou o vídeo de exemplo real de "${mediaName}" pro cliente agora.`] };
-    } catch (err: any) {
-      // Achado real em produção (20/08/2026): esse catch nunca logava nada —
-      // uma falha real de envio (upload rejeitado pela Meta, timeout, mídia
-      // corrompida) ficava 100% invisível nos logs do servidor, só virava um
-      // texto genérico pro modelo escrever pro cliente. Zero "Enviou a foto"
-      // e zero "não bateu com nenhum produto" nos logs de 7 dias, mesmo com
-      // clientes reais pedindo foto de serviços que TINHAM foto cadastrada,
-      // só fazia sentido por uma falha exatamente aqui, nunca logada.
-      console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: falha ao enviar vídeo de "${mediaName}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
-      return { actionsSummary: [`Tentou enviar o vídeo de "${mediaName}" mas falhou (${err.message}) — não prometa que o vídeo foi enviado.`] };
-    }
+    // TASK-0241: o envio de verdade (upload + sendMediaMessage +
+    // recordOutgoingMessage) foi movido pra executeApprovedMediaAction,
+    // chamado só DEPOIS que o revisor pré-envio aprovar o texto que
+    // acompanha este vídeo — nunca mais aqui, durante a geração do
+    // rascunho. Só resolve o binário aqui (etapa que já pode falhar sozinha,
+    // daí o try/catch continuar existindo) e devolve pronto pra enviar.
+    const mimeType = videoMedia.exampleVideoMimeType || video.contentType;
+    const filename = videoMedia.exampleVideoFileName || `${mediaName}.mp4`;
+    return {
+      actionsSummary: [`Um vídeo de exemplo de "${mediaName}" será enviado ao cliente junto com esta resposta, depois de aprovada — NUNCA diga que já enviou o vídeo (ainda não foi), mas pode mencionar naturalmente que está te mandando um vídeo de exemplo.`],
+      deferredMediaAction: { kind: 'video', mediaName, marker: videoMarker, buffer: video.buffer, mimeType, filename },
+    };
   }
 
-  const photoMedia = matched?.variant?.exampleImageBase64 ? matched.variant : matched?.product?.exampleImageBase64 ? matched.product : undefined;
-  const photoName = matched?.variant?.exampleImageBase64 ? matched.variant.code : matched?.product?.name;
-  if (!photoMedia?.exampleImageBase64 || !photoName) {
+  const photoMedia = matched?.variant?.exampleImageId || matched?.variant?.exampleImageBase64 ? matched.variant : matched?.product?.exampleImageId || matched?.product?.exampleImageBase64 ? matched.product : undefined;
+  const photoName = matched?.variant?.exampleImageId || matched?.variant?.exampleImageBase64 ? matched.variant.code : matched?.product?.name;
+  if ((!photoMedia?.exampleImageId && !photoMedia?.exampleImageBase64) || !photoName) {
     console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: "${nomeProduto}" não bateu com nenhum produto com foto cadastrada (tenant=${tenantId}). Catálogo com foto: [${productsWithPhoto.map((p) => p.name).join(', ')}]`);
     // Mesmo achado do bloco de vídeo acima — nome_produto pode ser uma
     // categoria genérica ("Pestañas") em vez do nome exato de um produto do
@@ -1713,40 +2094,85 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com foto cadastrada — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem foto de exemplo. Serviços com foto real disponível: ${productsWithPhoto.map((p) => p.name).join(', ')}.`] };
   }
 
-  try {
-    const mimeType = photoMedia.exampleImageMimeType || 'image/jpeg';
-    const filename = `${photoName}.jpg`;
+  const photoMarker = `📷 Foto de exemplo: ${photoName}`;
+  if (wasMediaRecentlySent(history, photoMarker)) {
+    return { actionsSummary: [`Já enviou a foto de exemplo de "${photoName}" há pouco nesta conversa (veja o histórico) — NÃO reenvie e não diga que vai mandar de novo, a menos que a cliente peça explicitamente outra vez.`] };
+  }
 
+  // TASK-0218: resolve o binário via Storage (exampleImageId) com fallback
+  // pro Base64 legado inline — ver resolveKnowledgeBaseImageStore.ts pro
+  // contrato de compatibilidade completo.
+  const resolvedPhoto = await resolveKnowledgeBaseImageBinary(
+    mediaConfig.supabaseUrl,
+    mediaConfig.supabaseKey,
+    tenantId,
+    photoMedia.exampleImageId,
+    photoMedia.exampleImageMimeType,
+    photoMedia.exampleImageBase64,
+    'runMidiaTool:enviar_foto_exemplo'
+  );
+  if (!resolvedPhoto) {
+    return { actionsSummary: [`Tentou enviar foto de "${photoName}" mas o arquivo não foi encontrado no Storage.`] };
+  }
+
+  // TASK-0241: mesma correção do vídeo acima — o envio de verdade só
+  // acontece depois da aprovação do revisor pré-envio (executeApprovedMediaAction),
+  // nunca aqui durante a geração do rascunho.
+  const mimeType = resolvedPhoto.mimeType;
+  const filename = `${photoName}.jpg`;
+  return {
+    actionsSummary: [`Uma foto de exemplo de "${photoName}" será enviada ao cliente junto com esta resposta, depois de aprovada — NUNCA diga que já enviou a foto (ainda não foi), mas pode mencionar naturalmente que está te mandando um exemplo.`],
+    deferredMediaAction: { kind: 'foto', mediaName: photoName, marker: photoMarker, buffer: resolvedPhoto.buffer, mimeType, filename },
+  };
+}
+
+export interface ApprovedMediaExecution {
+  sent: boolean;
+  error?: string;
+}
+
+/**
+ * Executa de verdade o envio de foto/vídeo já decidido por runMidiaTool, mas
+ * só depois do texto que acompanha essa mídia ter sido aprovado pelo revisor
+ * pré-envio (webhooks.ts) — mesmo princípio de executeApprovedCalendarActions
+ * acima, aplicado à mídia (TASK-0241). Se o revisor bloquear o texto, o
+ * chamador simplesmente nunca chama esta função e a mídia nunca sai.
+ */
+export async function executeApprovedMediaAction(
+  tenantId: string,
+  phone: string,
+  mediaConfig: MediaSendConfig | undefined,
+  action: DeferredMediaAction | undefined,
+): Promise<ApprovedMediaExecution> {
+  if (!action || !mediaConfig) return { sent: false };
+  try {
     if (mediaConfig.provider === 'evolution') {
       await sendEvolutionMediaMessage(
         mediaConfig.evolutionInstanceName,
         mediaConfig.evolutionApiUrl,
         mediaConfig.evolutionApiKey,
         phone,
-        photoMedia.exampleImageBase64,
-        mimeType,
-        filename,
-        photoName
+        action.buffer.toString('base64'),
+        action.mimeType,
+        action.filename,
+        action.mediaName
       );
     } else {
-      const mediaBuffer = Buffer.from(photoMedia.exampleImageBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
-      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, mediaBuffer, mimeType, filename);
-      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, photoName);
+      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, action.buffer, action.mimeType, action.filename);
+      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, action.mimeType, action.mediaName);
     }
 
+    const mediaMessageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, mediaMessageId, action.buffer.toString('base64'), action.mimeType);
     await recordOutgoingMessage(tenantId, phone, {
-      type: 'image',
-      text: `📷 Foto de exemplo: ${photoName}`,
+      type: action.kind === 'video' ? 'file' : 'image',
+      text: action.marker,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-    }, 'ai');
-    return { actionsSummary: [`Enviou a foto de exemplo real de "${photoName}" pro cliente agora.`] };
+    }, 'ai', undefined, undefined, mediaMessageId);
+    return { sent: true };
   } catch (err: any) {
-    // Mesmo achado do catch de vídeo acima — nunca logava nada, então uma
-    // falha real de upload/envio (a foto real da Monique pode passar de
-    // 3MB em base64 — perto do limite de mídia da própria Meta) ficava
-    // invisível pra sempre, só virava um texto genérico pro cliente.
-    console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: falha ao enviar foto de "${photoName}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
-    return { actionsSummary: [`Tentou enviar a foto de "${photoName}" mas falhou (${err.message}) — não prometa que a foto foi enviada.`] };
+    console.warn(`⚠️  [executeApprovedMediaAction] falha ao enviar ${action.kind} de "${action.mediaName}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+    return { sent: false, error: err?.message };
   }
 }
 
@@ -1799,6 +2225,11 @@ export async function generateAutoReplyForText(
   isCampaignEntry: boolean = false
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
+  // TASK-0278 — não confia cegamente no "nome" que o WhatsApp devolve: pode
+  // ser um status ("Ocupado"), o nome do negócio da cliente, ou só emoji —
+  // nesses casos, segue sem nome nenhum em vez de chamar a cliente por algo
+  // que não é o nome dela de verdade.
+  contactName = isPlausiblePersonalName(contactName) ? contactName : undefined;
   const isBurst = messageCount !== undefined ? messageCount > 1 : undefined;
   const isFirstCampaignContact = isCampaignEntry && (!history || history.length === 0);
 
@@ -1836,6 +2267,7 @@ export async function generateAutoReplyForText(
     let confirmedTimes: string[] = [];
     let quickReplyOptions: AutoReplyResult['quickReplyOptions'];
     let deferredCalendarActions: DeferredCalendarAction[] = [];
+    let deferredMediaAction: DeferredMediaAction | undefined;
     // Epic 4.5.7 — precisa ser "as ferramentas rodaram de verdade nesta
     // mensagem", não "confirmaram algum horário livre". Achado numa
     // auditoria pós-lançamento: gatear só por confirmedTimes.length deixava
@@ -1856,7 +2288,7 @@ export async function generateAutoReplyForText(
     const contextParts: string[] = [];
 
     if (!isFirstCampaignContact && agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
-      const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history, contactName, messageId);
+      const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history, contactName, messageId, groqApiKey);
       if (result.actionsSummary.length) {
         contextParts.push(result.actionsSummary.map((s) => `- ${s}`).join('\n'));
       }
@@ -1913,10 +2345,11 @@ export async function generateAutoReplyForText(
     }
 
     if (phone && hasMediaSendConfig(mediaConfig)) {
-      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history, groqApiKey);
+      const { actionsSummary, deferredMediaAction: plannedMedia } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history, groqApiKey);
       if (actionsSummary.length) {
         contextParts.push(actionsSummary.map((s) => `- ${s}`).join('\n'));
       }
+      deferredMediaAction = plannedMedia;
     }
 
     if (contextParts.length) {
@@ -1956,7 +2389,7 @@ export async function generateAutoReplyForText(
     // divergir do valor real sem aviso nenhum.
     const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
     const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
-    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, contextPack, adContext, isBurst);
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, contextPack, adContext, isBurst, groqApiKey);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
@@ -2127,6 +2560,13 @@ export async function generateAutoReplyForText(
         escalation: contextPack.liveState.escalation,
         escalationAvailable: contextPack.liveState.escalationAvailable,
       });
+      // TASK-0246: catálogo real do tenant, pra deriveContactMemoryPatch
+      // casar o texto do lead contra produtos/categorias de verdade em vez
+      // da lista fixa de estética que existia antes (ver inferServiceInterest
+      // em agentContextPack.ts). Mesmo padrão já usado em outros pontos
+      // deste arquivo (getRuntimeKnowledgeBaseForReply busca de novo onde
+      // precisa, sem propagar o objeto por todos os parâmetros da função).
+      const kbForMemory = await getRuntimeKnowledgeBaseForReply(tenantId).catch(() => null);
       const memoryPatch = deriveContactMemoryPatch({
         existingMemory: contextPack.memory,
         agent,
@@ -2136,6 +2576,9 @@ export async function generateAutoReplyForText(
         awaitingCustomerChoice: specialist.awaitingCustomerChoice,
         needsHumanConfirmation,
         liveState: finalContextPack.liveState,
+        knowledgeBase: kbForMemory,
+        interestedService: specialist.interestedService,
+        phase: specialist.phase,
       });
       const traceOutcome = stopAutoReply
         ? 'auto_reply_blocked'
@@ -2167,7 +2610,7 @@ export async function generateAutoReplyForText(
       ]);
     }
 
-    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs, quickReplyOptions, deferredCalendarActions };
+    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs, quickReplyOptions, deferredCalendarActions, deferredMediaAction };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;

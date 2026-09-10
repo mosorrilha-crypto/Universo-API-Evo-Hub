@@ -27,6 +27,7 @@ import { runWithTenantDbContext } from './tenantDbContext';
 import { sendWhatsAppTemplateMessage } from './metaSend';
 import { resolveMetaCredentialsForTenant } from './tenantResolver';
 import { sendPushToTenant } from './webPush';
+import { decryptSecret } from './tokenCrypto';
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_DISCONNECTED_THRESHOLD_MS = 5 * 60 * 1000;
@@ -77,7 +78,7 @@ async function checkOneTenant(row: EvolutionCredentialRow, deps: EvolutionConnec
   const thresholdMs = deps.disconnectedThresholdMs ?? DEFAULT_DISCONNECTED_THRESHOLD_MS;
   let state: string;
   try {
-    state = await fetchConnectionState(row.api_url, row.api_key, row.instance_name);
+    state = await fetchConnectionState(row.api_url, decryptSecret(row.api_key), row.instance_name);
   } catch (err) {
     console.warn(`⚠️  [Alerta conexão WhatsApp] tenant=${row.tenant_id} falha ao consultar estado da instância "${row.instance_name}":`, (err as Error).message);
     return; // falha transitória de rede pra consultar o status — não conta como "desconectado", tenta de novo no próximo tick

@@ -3,9 +3,9 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
-import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
+import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, executeApprovedMediaAction, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
 import { markPendingFollowUp, clearPendingFollowUp } from '../services/pendingFollowUpStore';
 import { sendBubbles } from '../services/sendBubbles';
@@ -14,11 +14,12 @@ import { showEvolutionTyping } from '../services/evolutionSend';
 import { showInstagramTyping } from '../services/instagramSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { transcribeAudio, isRealTranscriptionSource } from '../services/geminiTranscription';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
-import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey } from '../services/escalationStore';
+import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, bookingConfirmationEscalationSourceKey } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { consumePendingEcho } from '../services/outboundEchoTracker';
@@ -27,6 +28,8 @@ import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnaly
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolveTenantByInstagramAccountId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
+import { isPlausiblePersonalName } from '../services/contactNameGuard';
+import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { createQualityReview, recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { runWithTenantDbContext } from '../services/tenantDbContext';
 import { logStructured } from '../services/structuredLog';
@@ -80,7 +83,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // resolvedTenant vem do Bloco 2.B (server/services/tenantResolver.ts) — já
   // é o tenant/credencial certos pra esse número, resolvidos por
   // phone_number_id antes de chegar aqui.
-  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant) => {
+  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant, firstMessageId?: string) => {
     const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
     const isEvolution = resolvedTenant.provider === 'evolution';
     const isInstagram = resolvedTenant.provider === 'instagram';
@@ -121,6 +124,44 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // qualquer outro. Bloqueio é só desse número, não do tenant inteiro
       // (isAgentPaused acima continua valendo pra todos).
       if (conversation?.aiBlockedAt) return;
+      // Achado real (pedido do dono do produto, 30/08/2026): quando o
+      // operador está respondendo manualmente AO VIVO (contato pessoal que
+      // às vezes também é cliente, mesma pessoa numa conversa mista de
+      // negócio+papo pessoal), a IA continuava disparando resposta
+      // automática pra cada mensagem nova do contato — cruzando com a
+      // resposta do operador na mesma janela de segundos. O cliente via as
+      // duas "vozes" ao mesmo tempo (uma resposta de "canal oficial de
+      // atendimento" logo ao lado de "kkkk vamos sin" do operador),
+      // quebrando a ilusão de atendimento humano contínuo — reproduzido
+      // tanto num teste quanto observado numa conversa real. Se o operador
+      // mandou uma mensagem manual pra este número nos últimos minutos, a
+      // IA cede a vez nesta rodada — nenhuma resposta automática enquanto o
+      // operador estiver visivelmente engajado. Reaproveita o histórico já
+      // carregado, sem tabela nova: sentBy='operator' só existe pra
+      // mensagens digitadas de verdade no painel (nunca resposta da IA nem
+      // disparo de campanha, ver StoredMessage.sentBy).
+      // TASK-0181 (parte 2) — achado real do dono do produto (01/09/2026):
+      // numa troca rápida em que o operador responde manualmente várias
+      // vezes seguidas, cada resposta dele RENOVA os 5min acima — a IA nunca
+      // recupera a vez sozinha, e não havia nenhum jeito de liberar isso na
+      // hora (só esperar o contato ficar quieto por 5min inteiros). Se o
+      // operador pediu explicitamente "devolver a IA agora" (menu ⋮ da
+      // conversa) DEPOIS da própria última mensagem manual dele, a pausa é
+      // ignorada nesta rodada — uma nova mensagem manual dele depois disso
+      // volta a pausar normalmente (o release não desativa o gate pra sempre).
+      const OPERATOR_ACTIVE_PAUSE_MS = 5 * 60 * 1000;
+      const lastOperatorMessage = [...(conversation?.messages || [])]
+        .reverse()
+        .find((m) => m.sender === 'agent' && m.sentBy === 'operator');
+      const releasedAfterLastOperatorMessage = conversation?.operatorAiReleaseAt
+        && (!lastOperatorMessage || new Date(conversation.operatorAiReleaseAt).getTime() >= new Date(lastOperatorMessage.timestamp).getTime());
+      if (
+        lastOperatorMessage
+        && Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS
+        && !releasedAfterLastOperatorMessage
+      ) {
+        return;
+      }
       // Modo "somente anúncios" (pedido real, 14/08/2026): quando o
       // proprietário conecta um número pessoal além do número dedicado do
       // agente (pra não perder mensagem enquanto valida confiança no
@@ -150,7 +191,24 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       });
       const kbContext = formatKnowledgeBaseForPrompt(kb);
       const segment = await getTenantSegment(tenantId);
-      const history = conversation?.messages.slice(0, -historyExclude);
+      // Achado real em produção (Gladys, tenant Monique, 30/08/2026): cortar
+      // por CONTAGEM (`slice(0, -historyExclude)`) supõe que nada mais foi
+      // gravado desde que este lote de mensagens picotadas foi bufferizado.
+      // runExclusive (perPhoneQueue.ts) serializa os ciclos por telefone,
+      // mas um ciclo pode ficar PRESO na fila enquanto o cliente manda MAIS
+      // mensagens — já gravadas na hora (recordIncomingMessage roda ANTES
+      // de qualquer buffer/fila, ver linha ~488), independente da fila.
+      // Quando isso acontece, o corte por contagem pega o lote errado:
+      // inclui a própria mensagem deste ciclo (duplicada com `text`, que já
+      // recebe o mesmo conteúdo) e perde mensagens novas reais. Corta por
+      // IDENTIDADE (tudo antes do ID da primeira mensagem deste lote) — que
+      // permanece correto mesmo com mensagens novas chegando enquanto o
+      // ciclo espera a vez. Cai pro corte antigo por contagem só quando
+      // firstMessageId não foi informado ou não é encontrado no histórico
+      // (ex.: recuperação de um buffer persistido de antes desta correção).
+      const allMessages = conversation?.messages;
+      const cutoffIndex = firstMessageId && allMessages ? allMessages.findIndex((m) => m.id === firstMessageId) : -1;
+      const history = !allMessages ? undefined : cutoffIndex !== -1 ? allMessages.slice(0, cutoffIndex) : allMessages.slice(0, -historyExclude);
       // Sinaliza pro painel (SSE) que a IA começou a processar a última
       // mensagem — ver emitAiReplyStatus em conversationEvents.ts. Emitido só
       // depois de todos os gates de silêncio acima (agente pausado, lead
@@ -253,6 +311,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           isBookingFlow: result.agent === 'agendamento',
           needsHumanConfirmation: result.needsHumanConfirmation,
           plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
+          contactName: isPlausiblePersonalName(contactName) ? contactName : undefined,
         }, { ai: getAi!(), groqApiKey });
         if (!safety.approved) {
           const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
@@ -271,6 +330,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
+        // TASK-0297: quando o revisor corrige em vez de só aprovar/bloquear
+        // (hoje só remove uma bolha isolada de empurrão de agenda depois de
+        // pergunta informativa), envia a versão corrigida — nunca o
+        // rascunho original nesse caso.
+        const bubblesToSend = safety.correctedBubbles ?? result.bubbles;
         const calendarExecution = await executeApprovedCalendarActions(
           tenantId,
           phone,
@@ -281,18 +345,32 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         );
         if (calendarExecution.hadError) {
           const reason = calendarExecution.summaries.join(' ');
-          await logEscalation(tenantId, phone, contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, text);
+          await logEscalation(tenantId, phone, contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, text, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(phone) });
           console.warn(`⚠️ [Agenda pós-revisão] tenant=${tenantId} nenhuma resposta foi enviada porque a ação aprovada falhou: ${reason}`);
           emitAiReplyStatus(tenantId, phone, 'delivery_failed');
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
         if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
-          await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
+          await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(phone) });
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
         }
+        // TASK-0241: a foto/vídeo (quando runMidiaTool decidiu mandar uma)
+        // só é enviada de verdade agora, DEPOIS do revisor pré-envio já ter
+        // aprovado o texto — nunca antes. Achado real de produção: antes
+        // desta correção, a mídia saía imediatamente durante a geração do
+        // rascunho, então um bloqueio do revisor (por qualquer motivo,
+        // mesmo sem relação com a mídia) deixava o cliente com uma foto/
+        // vídeo solto, sem nenhum texto explicando ou respondendo o que ele
+        // realmente perguntou.
+        if (result.deferredMediaAction) {
+          const mediaExecution = await executeApprovedMediaAction(tenantId, phone, mediaConfig, result.deferredMediaAction);
+          if (!mediaExecution.sent) {
+            console.warn(`⚠️ [Mídia pós-revisão] tenant=${tenantId} falha ao enviar ${result.deferredMediaAction.kind} de "${result.deferredMediaAction.mediaName}" pra ${phone}: ${mediaExecution.error || 'motivo desconhecido'}`);
+          }
+        }
         try {
-          await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
+          await sendBubbles(channel, phone, bubblesToSend, async (bubbleText) => {
             await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
             console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
           }, messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
@@ -334,6 +412,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         if (result.capturedClientName) {
           await setConversationNameIfMissing(tenantId, phone, result.capturedClientName);
         }
+        // TASK-0185 (parte 2) — serviço de interesse real, classificado pelo
+        // especialista a partir do que a cliente disse (nunca inventado);
+        // sempre sobrescreve com o mais recente, ver updateConversationInterest.
+        if (result.interestedService) {
+          await updateConversationInterest(tenantId, phone, result.interestedService);
+        }
         // Acompanhamento de funil (pedido real, 15/08/2026 — auditoria de
         // conversas reais mostrou lead esfriando sem ninguém perceber, ver
         // server/services/pendingFollowUpJob.ts). "owner_review" vence no
@@ -347,6 +431,21 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         if (result.awaitingCustomerChoice) {
           await markPendingFollowUp(tenantId, phone, contactName, 'customer_reply', result.awaitingCustomerChoice, new Date(Date.now() + CUSTOMER_REPLY_FOLLOWUP_MS).toISOString());
         }
+        // TASK-0185 — backup em Google Sheets (fire-and-forget, nunca atrasa
+        // nem derruba o envio real acima). "Agendou?" consulta o agendamento
+        // ativo de verdade (appointmentStore), nunca assume a partir da
+        // resposta da IA; "Interesse" prioriza o serviço real captado nesta
+        // rodada (result.interestedService), cai pro último já sabido
+        // (conversation.interest) e só por último pro anúncio que originou o
+        // lead (adHeadline) — nunca um dado inventado.
+        const appointmentForSheet = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
+        queueLeadSheetSync(tenantId, calendarConfig, {
+          phone,
+          name: contactName,
+          firstContactIso: conversation?.messages?.[0]?.timestamp || new Date().toISOString(),
+          interest: result.interestedService || conversation?.interest || conversation?.adHeadline,
+          scheduled: !!appointmentForSheet,
+        });
         emitAiReplyStatus(tenantId, phone, 'sent');
       } catch (err: any) {
         emitAiReplyStatus(tenantId, phone, 'delivery_failed');
@@ -365,10 +464,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // de disparar a resposta — espera ~6s de silêncio, evitando responder cada
   // fragmento separadamente (denunciaria automação na hora).
   const handleIncomingText = (phone: string, contactName: string | undefined, text: string, messageId: string, resolvedTenant: ResolvedTenant) => {
-    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) =>
+    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant, firstMessageId) =>
       runWithTenantDbContext(
         { tenantId: bufferedTenant.tenantId, source: 'webhook' },
-        () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant)
+        () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant, firstMessageId)
       )
     );
   };
@@ -377,10 +476,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // janela de 6s de silêncio — sem isso, a mensagem ficava perdida pra
   // sempre (achado real, 15/08/2026). Uma vez só no boot do router, o
   // próprio sweeper se reagenda periodicamente por dentro.
-  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) =>
+  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant, firstMessageId) =>
     runWithTenantDbContext(
       { tenantId: bufferedTenant.tenantId, source: 'job' },
-      () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant)
+      () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant, firstMessageId)
     )
   );
 
@@ -448,13 +547,36 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
               } else if (msg.type === 'audio' || msg.type === 'image') {
                 const placeholderText = msg.type === 'audio' ? '🎤 Áudio enviado' : '📷 Imagem enviada';
                 await recordOutgoingMessage(tenantId, msg.from, { type: msg.type, text: placeholderText, timestamp: nowLabel }, 'operator', undefined, undefined, msg.messageId);
+                const isAudio = msg.type === 'audio';
                 downloadEvolutionMedia(
                   { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
                   resolvedTenant.evolutionInstanceName,
                   resolvedTenant.evolutionApiUrl,
                   resolvedTenant.evolutionApiKey
                 )
-                  .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
+                  .then(async (downloaded) => {
+                    await saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType);
+                    // Achado real de produção (03/09/2026): áudio mandado
+                    // DIRETO do celular (fora do painel) nunca era
+                    // transcrito — só o placeholder fixo "🎤 Áudio enviado"
+                    // ficava salvo pra sempre, diferente do áudio enviado
+                    // pelo painel (/send-media em conversations.ts, que já
+                    // transcreve) e do áudio recebido do cliente
+                    // (transcriptionQueue.ts). Mesmo mecanismo dos outros
+                    // dois casos, aplicado aqui.
+                    if (!isAudio) return;
+                    try {
+                      const outcome = await transcribeAudio(getAi ? getAi() : null, downloaded.base64, downloaded.mimeType, {
+                        leadName: msg.contactName,
+                        customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
+                        groqApiKey,
+                      });
+                      const hasNoDetectedSpeech = isRealTranscriptionSource(outcome.source) && !outcome.result.transcription?.trim();
+                      await updateMessageText(tenantId, msg.from, msg.messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
+                    } catch (transcriptionError: any) {
+                      console.warn(`⚠️  [Eco de envio] Falha ao transcrever áudio mandado direto do celular (${msg.from}):`, transcriptionError?.message || transcriptionError);
+                    }
+                  })
                   .catch((err) => console.warn(`❌ [Eco de envio] Falha ao baixar mídia mandada direto do celular (${msg.from}):`, err.message));
               }
               console.log(`📱 [Eco de envio] tenant=${tenantId} mensagem mandada direto do celular (fora do painel) pra ${msg.from} — gravada como operador.`);
@@ -463,9 +585,15 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           return;
         }
 
-        if (msg.referral?.ctwaClid) {
+        // TASK-0364: Evolution API não tem `ctwa_clid` (campo específico da
+        // Meta Cloud API) — a atribuição de anúncio que ela carrega vem de
+        // `contextInfo.externalAdReply` (ver extractEvolutionAdReferral em
+        // webhookParsers.ts), quase sempre com título/sourceId mas sem
+        // ctwaClid. Exigir só ctwaClid deixaria TODA atribuição de anúncio
+        // via Evolution sem ser gravada — checa qualquer um dos três campos.
+        if (msg.referral?.ctwaClid || msg.referral?.sourceId || msg.referral?.headline) {
           attachAdReferralIfMissing(tenantId, msg.from, { ctwaClid: msg.referral.ctwaClid, adSourceId: msg.referral.sourceId, adHeadline: msg.referral.headline }).catch((err) =>
-            console.warn(`⚠️  [Webhook ${msg.provider}] Falha ao gravar ctwa_clid de ${msg.from}:`, err.message)
+            console.warn(`⚠️  [Webhook ${msg.provider}] Falha ao gravar atribuição de anúncio de ${msg.from}:`, err.message)
           );
         }
 
@@ -480,12 +608,17 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           console.warn(`⚠️  [Acompanhamento de funil] Falha ao cancelar pendência de ${msg.from}:`, err.message)
         );
 
+        // TASK-0171 — só relevante se a conversa ainda nem existir (alguém
+        // mandando mensagem direto pra um número de disparo antes de
+        // qualquer campanha) — ver getOrCreateConversationRow.
+        const inboundMetaPhoneNumberId = resolvedTenant.provider === 'meta' ? resolvedTenant.metaPhoneNumberId : undefined;
+
         if (msg.type === 'audio') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
           enqueueTranscriptionJob(msg, resolvedTenant);
           enqueued += 1;
         } else if (msg.type === 'text') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
           if (msg.text && isPaymentRelated(msg.text)) {
             await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
           }
@@ -494,7 +627,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           }
           if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
         } else if (msg.type === 'image') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
+          // Achado real (28/08/2026): quando o cliente manda a foto já com uma
+          // legenda digitada, o texto era descartado — a conversa mostrava só
+          // "📷 Imagem recebida", sem a legenda de verdade. msg.caption (ver
+          // webhookParsers.ts) preserva o que o cliente escreveu; a UI
+          // (WhatsAppLeadsSim.tsx) já mostra esse texto como legenda abaixo da
+          // foto, então só precisa chegar até aqui.
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
 
           // Uma única promise de download, reaproveitada abaixo (await duas
           // vezes na mesma promise não baixa a imagem de novo) — mantém o
@@ -593,7 +732,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // vídeo/gif, localização, reação, contato etc.) — grava com um
           // rótulo que descreve o que realmente chegou, em vez do
           // "[sticker]"/"[video]" cru de antes (achado real em produção).
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel });
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
         }
           }
         );
@@ -685,7 +824,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       const parsedMessages = parseEvolutionWebhookPayload(body);
       const enqueued = await enqueueAudioMessages(parsedMessages);
 
-      console.log(`📱 [Evolution Webhook ${instance}] Evento: ${eventName}`, data?.key ? `(Key: ${data.key.id})` : '', enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+      console.log('📱 [Evolution Webhook] Evento recebido', { instance, eventName, keyId: data?.key?.id, audiosEnfileirados: enqueued });
 
       return res.status(200).json({
         success: true,
@@ -706,7 +845,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
 
       const firstMessaging = body.entry?.[0]?.messaging?.[0];
       if (firstMessaging) {
-        console.log(`📸 [Webhook Instagram] Nova mensagem de ${firstMessaging.sender?.id}:`, firstMessaging.message?.text ? redactMessageForLog(firstMessaging.message.text) : '[Anexo]', enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+        console.log('📸 [Webhook Instagram] Nova mensagem', {
+          senderId: firstMessaging.sender?.id,
+          content: firstMessaging.message?.text ? redactMessageForLog(firstMessaging.message.text) : '[Anexo]',
+          audiosEnfileirados: enqueued,
+        });
       }
 
       return res.status(200).json({
@@ -731,7 +874,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         // tenant ainda não resolvido neste ponto (resolução acontece por
         // mensagem dentro de enqueueAudioMessages) — log de diagnóstico do
         // payload bruto, conteúdo sempre redigido.
-        console.log(`📱 [Webhook Meta WhatsApp] Nova mensagem de ${msg.from}:`, msg.text?.body ? redactMessageForLog(msg.text.body) : `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+        console.log('📱 [Webhook Meta WhatsApp] Nova mensagem', {
+          from: msg.from,
+          content: msg.text?.body ? redactMessageForLog(msg.text.body) : `[Tipo: ${msg.type}]`,
+          audiosEnfileirados: enqueued,
+        });
       }
 
       // Achado ao investigar "o áudio sai mas não chega" ao vivo: o webhook
@@ -746,12 +893,14 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         for (const status of statuses) {
           const errors = Array.isArray(status?.errors) ? status.errors : [];
           if (status?.status === 'failed' || errors.length > 0) {
-            console.warn(
-              `❌ [Webhook Meta WhatsApp] Status "${status?.status}" pra mensagem ${status?.id} (recipient=${status?.recipient_id}):`,
-              JSON.stringify(errors).slice(0, 500)
-            );
+            console.warn('❌ [Webhook Meta WhatsApp] Falha reportada pra mensagem', {
+              status: status?.status,
+              messageId: status?.id,
+              recipientId: status?.recipient_id,
+              errors: JSON.stringify(errors).slice(0, 500),
+            });
           } else {
-            console.log(`📬 [Webhook Meta WhatsApp] Status "${status?.status}" pra mensagem ${status?.id} (recipient=${status?.recipient_id})`);
+            console.log('📬 [Webhook Meta WhatsApp] Status de mensagem', { status: status?.status, messageId: status?.id, recipientId: status?.recipient_id });
           }
         }
       }

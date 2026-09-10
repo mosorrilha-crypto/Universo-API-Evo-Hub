@@ -108,9 +108,8 @@ minuto e gerar branches/PRs conflitantes pro mesmo problema. Protocolo:
 7. **Sempre em português**: commits, título/corpo de PR, comentários.
 8. **Pedido direto fora de uma issue**: responda objetivo em 1-2 frases o
    que entendeu, depois execute sem pedir "posso começar?".
-9. **Nunca rode script que grave em produção** (ex: `npm run seed:monique-kb`,
-   `npm run migrate:legacy-data`) sem pedido explícito naquele momento
-   específico.
+9. **Nunca rode script que grave em produção** (ex: `npm run migrate:legacy-data`)
+   sem pedido explícito naquele momento específico.
 10. **"Como está o andamento"** já deveria estar visível na issue (label +
     comentário) — não repita tudo no chat, só confirme e aponte pro link.
 

@@ -15,7 +15,7 @@ describe('systemIncidentStore', () => {
   });
 
   it('deduplica uma recorrência aberta por tenant e mantém trilha de auditoria', async () => {
-    const input = { tenantId: TENANT_A, sourceKey: 'system:knowledgeBase:loadRuntimeSource:legacy-fallback', category: 'knowledge_base' as const, severity: 'high' as const, title: 'Fallback técnico', detail: 'source=legacy_blob', suggestedAction: 'Revisar documentos publicados.' };
+    const input = { tenantId: TENANT_A, sourceKey: 'system:knowledgeBase:loadRuntimeSource:unavailable', category: 'knowledge_base' as const, severity: 'critical' as const, title: 'Runtime da Base de Conhecimento indisponível', detail: 'source=unavailable', suggestedAction: 'Revisar documentos publicados.' };
     await reportSystemIncident(input);
     const repeated = await reportSystemIncident(input);
 

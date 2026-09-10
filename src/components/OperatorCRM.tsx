@@ -513,7 +513,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                 className="bg-slate-900/70 border border-slate-800/80 rounded-xl flex flex-col min-w-[240px] max-h-[750px] overflow-hidden"
               >
                 {/* Column Header */}
-                <div className={`p-3 border-b flex items-center justify-between ${stage.color}`}>
+                <div className={`crm-workspace__stage-header p-3 border-b flex items-center justify-between ${stage.color}`}>
                   <div>
                     <h3 className="text-xs font-bold">{stage.label}</h3>
                     <p className="text-[10px] opacity-80 mt-0.5">
@@ -540,9 +540,9 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                         <div
                           key={lead.id}
                           onClick={() => setSelectedLead(lead)}
-                          className={`p-3 rounded-xl border transition-all cursor-pointer group ${
+                          className={`crm-workspace__lead-card p-3 rounded-xl border transition-all cursor-pointer group ${
                             isSelected
-                              ? 'bg-emerald-950/40 border-emerald-500 ring-1 ring-emerald-500/50'
+                              ? 'crm-workspace__lead-card--selected bg-emerald-950/40 border-emerald-500 ring-1 ring-emerald-500/50'
                               : 'bg-slate-800/50 border-slate-700/60 hover:bg-slate-800 hover:border-slate-600'
                           }`}
                         >

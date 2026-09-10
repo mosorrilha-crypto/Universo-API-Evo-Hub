@@ -6,7 +6,7 @@
  * estilos e dados aqui são autocontidos e não leem nem escrevem em `knowledge_base`/tenant —
  * uma alteração aqui nunca pode afetar o catálogo antigo, e vice-versa.
  */
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, ChevronDown, Clock3, Menu, MessageCircle, ShieldCheck, Sparkles, X } from 'lucide-react';
 
 /** lucide-react 1.x removida os ícones de marca (Instagram incluso) — glifo inline equivalente. */
@@ -111,32 +111,146 @@ function formatDuration(minutes?: number): string | null {
   return `${hours} h ${rest} min`;
 }
 
-/** Aponta pro backend (`/api/public/catalog/:slug/whatsapp-click`), igual ao catálogo existente: clique é contado de verdade e a mensagem sai com um código de rastreio embutido. */
-function whatsappClickUrl(message: string, productName?: string): string {
-  const params = new URLSearchParams({ msg: message, source: 'novo' });
+/**
+ * Aponta pro backend (`/api/public/catalog/:slug/whatsapp-click`), igual ao
+ * catálogo existente: clique é contado de verdade e a mensagem sai com um
+ * código de rastreio embutido. `source` default 'novo' (fluxo de triagem
+ * completo) — o botão direto da primeira dobra passa 'direct' explicitamente
+ * (TASK-0125), pra não ficar misturado com quem completou a evaluación.
+ */
+function whatsappClickUrl(message: string, productName?: string, source: 'novo' | 'direct' = 'novo', utmSource?: string): string {
+  const params = new URLSearchParams({ msg: message, source });
   if (productName) params.set('product', productName);
+  if (utmSource) params.set('utm_source', utmSource);
   return `/api/public/catalog/${encodeURIComponent(CATALOG_SLUG)}/whatsapp-click?${params.toString()}`;
 }
 
-const objectives = [
-  { id: 'natural', title: 'Quiero verme arreglada sin maquillarme', text: 'Un resultado suave para sentirte linda sin verte producida.', recommendation: 'Lash Lift o Diseño con Hilo' },
-  { id: 'practical', title: 'Quiero sentirme lista cada mañana', text: 'Menos tiempo frente al espejo y más tiempo para vos.', recommendation: 'Lash Lift, Browlamination o Combo' },
-  { id: 'brows', title: 'Quiero volver a reconocer mi mirada', text: 'Una mirada más equilibrada, sin perder tu expresión.', recommendation: 'Diseño, Henna o Microshading' },
-  { id: 'lips', title: 'Quiero recuperar color y definición', text: 'Labios más definidos, con evaluación previa y expectativas reales.', recommendation: 'Microlips o Neutralización' },
+/** Mensagem padrão do botão "Hablar directamente por WhatsApp" — pedido real (TASK-0125): pula a triagem pra quem já sabe que quer falar direto. */
+const DIRECT_WHATSAPP_MESSAGE = 'Hola Monique, vi tu catálogo y me gustaría consultar por tus servicios. ¿Podés orientarme?';
+
+/**
+ * Achado da revisão de redundância (28/08/2026): o preenchimento do template
+ * de mensagem ("{produto}" → nome real) estava duplicado entre o card de
+ * produto e o card de variante, com a mesma lógica de fallback repetida.
+ */
+function fillWhatsappTemplate(template: string | undefined, name: string, fallbackName: string): string {
+  return template ? template.split('{produto}').join(name) : `Hola Monique, me interesa ${fallbackName}. Quiero saber si es para mí.`;
+}
+
+/**
+ * Achado da revisão de UX (28/08/2026): o "objetivo" original misturava
+ * serviços de categorias diferentes numa mesma recomendação (ex.: "Lash
+ * Lift, Browlamination o Combo" mistura Pestañas + Cejas + Combos), sem
+ * preço nenhum — quem respondia não sabia quanto ia custar até falar com a
+ * Monique. A Etapa 1 agora pergunta o serviço pai — as mesmas categorias
+ * reais dos produtos da Base de Conhecimento (campo `category` do catálogo
+ * público) — pra Etapa 2 mostrar só as opções daquela categoria, já com
+ * preço real (`optionsForCategory`). "Retoque" fica de fora de propósito:
+ * não é um primeiro serviço (`bookable: false` na Base de Conhecimento —
+ * só indicado depois de avaliação da Monique sobre um procedimento que ela
+ * mesma já fez, nunca automático).
+ */
+const serviceCategories = [
+  { id: 'Cejas', title: 'Cejas', text: 'Diseño, laminado, henna o microshading — desde definir la forma hasta un efecto más duradero.' },
+  { id: 'Pestañas', title: 'Pestañas', text: 'Lash lift o extensiones con distintos efectos, para una mirada más abierta todos los días.' },
+  { id: 'Labios', title: 'Labios', text: 'Microlips o neutralización, con evaluación previa y expectativas reales.' },
+  { id: 'Combos', title: 'Combos', text: 'Combiná cejas, labios y pestañas en una sola sesión, con un ahorro sobre el precio individual.' },
 ];
 
 /**
- * Achado da revisão de conversão (27/08/2026): a lista completa de serviços
- * competia demais com a oferta do Combo Full Face, sem nenhum atalho pra
- * quem já sabe o que quer. Estes 3 caminhos ficam entre o "Resultados" e o
- * catálogo completo — reduzem a paralisia de escolha oferecendo um contato
- * direto no WhatsApp pra quem não precisa da evaluación completa.
+ * Pedido do dono do produto (28/08/2026): a micropigmentación é o
+ * procedimento de maior valor do Studio (Gs 550.000 — Cejas Microshading/
+ * Microblading e Microlips Labios) e deve aparecer em destaque antes dos
+ * demais procedimentos da mesma categoria. Todo produto/variante de
+ * micropigmentación já tem "Micro" no próprio nome na Base de Conhecimento
+ * (confirmado via Supabase: "Cejas Microshading o Microblading",
+ * "Microlips Labios", e os 4 combos "Combo ... Micro ..."), então detectar
+ * por essa palavra evita cadastrar uma lista de nomes exatos à parte.
  */
-const startingPoints = [
-  { title: 'Resultado natural', text: 'Quiero verme arreglada sin que se note que hice algo.', message: 'Hola Monique, quiero un resultado natural, sin que se note que hice algo. ¿Qué me recomendás?' },
-  { title: 'Rutina más práctica', text: 'Quiero ahorrar tiempo frente al espejo todos los días.', message: 'Hola Monique, quiero simplificar mi rutina diaria. ¿Qué me recomendás para ahorrar tiempo?' },
-  { title: 'Transformación completa', text: 'Quiero renovar cejas, labios y pestañas en una sola sesión.', message: 'Hola Monique, me interesa el Combo Full Face para renovar cejas, labios y pestañas. ¿Me contás más?' },
-];
+function isMicropigmentacion(label: string): boolean {
+  return /micro/i.test(label);
+}
+
+interface CategoryOption {
+  key: string;
+  label: string;
+  description?: string;
+  price: string;
+  durationMinutes?: number;
+  productName: string;
+  variantCode?: string;
+  isMicro: boolean;
+}
+
+/**
+ * Achata os produtos da categoria escolhida em opções individuais: cada
+ * variante vira uma opção própria com seu preço (Cejas e Pestañas têm
+ * variantes), e um produto sem variantes (Labios, Combos, ou o segundo
+ * produto de Cejas que também não tem) vira uma opção única. As opções de
+ * micropigmentación vêm primeiro (ordenação estável — dentro de cada grupo
+ * a ordem original da Base de Conhecimento é preservada).
+ */
+function optionsForCategory(catalog: PublicCatalogResponse | null, category: string): CategoryOption[] {
+  if (!catalog || !category) return [];
+  const options: CategoryOption[] = [];
+  for (const product of catalog.products) {
+    if (product.category !== category) continue;
+    if (product.variants?.length) {
+      for (const variant of product.variants) {
+        options.push({
+          key: `${product.name}__${variant.code}`,
+          label: variant.code,
+          description: variant.description,
+          price: variant.price,
+          durationMinutes: variant.durationMinutes,
+          productName: product.name,
+          variantCode: variant.code,
+          isMicro: isMicropigmentacion(variant.code),
+        });
+      }
+    } else {
+      options.push({
+        key: product.name,
+        label: product.name,
+        description: product.description,
+        price: product.price,
+        durationMinutes: product.durationMinutes,
+        productName: product.name,
+        isMicro: isMicropigmentacion(product.name),
+      });
+    }
+  }
+  return options.sort((a, b) => Number(b.isMicro) - Number(a.isMicro));
+}
+
+interface CatalogCategoryGroup {
+  category: string;
+  products: CatalogProduct[];
+}
+
+/**
+ * Achado real (30/08/2026): "Catálogo claro" listava os ~19 serviços de
+ * todas as categorias, sempre expandidos — a mesma categoria que a pessoa
+ * já viu com preço na Etapa 2 da avaliação aparecia de novo aqui, dobrando a
+ * rolagem sem nenhuma informação nova. Agrupar por categoria (mesma ordem de
+ * `serviceCategories`, "Outros" por último) e deixar cada grupo fechado por
+ * padrão preserva todo o conteúdo — nada é removido — mas só expande quem
+ * realmente quer conferir/comparar de novo.
+ */
+function groupProductsByCategory(products: CatalogProduct[]): CatalogCategoryGroup[] {
+  const byCategory = new Map<string, CatalogProduct[]>();
+  for (const product of products) {
+    const key = product.category || 'Otros';
+    if (!byCategory.has(key)) byCategory.set(key, []);
+    byCategory.get(key)!.push(product);
+  }
+  const knownOrder = serviceCategories.map((item) => item.id);
+  const orderedKeys = [...knownOrder.filter((key) => byCategory.has(key)), ...[...byCategory.keys()].filter((key) => !knownOrder.includes(key))];
+  return orderedKeys.map((category) => ({
+    category,
+    products: [...byCategory.get(category)!].sort((a, b) => Number(isMicropigmentacion(b.name)) - Number(isMicropigmentacion(a.name))),
+  }));
+}
 
 const resultImages = [
   { src: '/monique-novo/full-face.jpg', alt: 'Resultado real de cejas, pestañas y labios', label: 'Cejas + pestañas' },
@@ -146,7 +260,8 @@ const resultImages = [
 
 export function PublicCatalogMoniqueConcierge() {
   const [step, setStep] = useState(1);
-  const [objective, setObjective] = useState('');
+  const [category, setCategory] = useState('');
+  const [selectedItem, setSelectedItem] = useState<CategoryOption | null>(null);
   const [previousWork, setPreviousWork] = useState('No');
   const [sensitive, setSensitive] = useState('No');
   const [name, setName] = useState('');
@@ -156,15 +271,24 @@ export function PublicCatalogMoniqueConcierge() {
   const [sent, setSent] = useState(false);
   const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(null);
   const [productsError, setProductsError] = useState(false);
-  const selectedObjective = useMemo(() => objectives.find((item) => item.id === objective), [objective]);
+  // Captura uma vez, no primeiro carregamento — o link do anúncio pode
+  // incluir "?utm_source=meta_ads" (TASK-0149): sem isso não dava pra saber
+  // se um clique pro WhatsApp veio de anúncio pago ou de tráfego
+  // orgânico/direto, só o total.
+  const [utmSource] = useState<string | undefined>(() => {
+    if (typeof window === 'undefined') return undefined;
+    return new URLSearchParams(window.location.search).get('utm_source') || undefined;
+  });
+  const categoryOptions = useMemo(() => optionsForCategory(catalog, category), [catalog, category]);
+  const catalogGroups = useMemo(() => (catalog ? groupProductsByCategory(catalog.products) : []), [catalog]);
   const instagramUrl = catalog?.contact.instagramUrl || FALLBACK_INSTAGRAM;
 
   /**
    * Achado real (26/08/2026): um clique em "Encontrar mi servicio" rola a página
    * suavemente até a triagem (`scroll-behavior: smooth`); se a pessoa toca de novo
    * antes da rolagem terminar, o toque cai em qualquer card que estiver embaixo do
-   * dedo naquele instante — normalmente o primeiro da Etapa 1 — selecionando um
-   * objetivo sem intenção. Trava os cards por um instante depois de qualquer link
+   * dedo naquele instante — normalmente o primeiro da Etapa 1 — selecionando uma
+   * categoria sem intenção. Trava os cards por um instante depois de qualquer link
    * pra `#triagem`, liberando assim que o `scrollend` disparar (ou por timeout, pra
    * navegadores sem suporte a `scrollend`).
    */
@@ -175,6 +299,23 @@ export function PublicCatalogMoniqueConcierge() {
     const timeoutId = window.setTimeout(clear, 900);
     window.addEventListener('scrollend', () => { window.clearTimeout(timeoutId); clear(); }, { once: true });
   };
+
+  /**
+   * Achado real (28/08/2026): cada etapa da triagem tem uma altura bem
+   * diferente (Etapa 1 com 4 categorias, Etapa 2 podendo ter até 7 opções de
+   * uma categoria, Etapa 3 mais curta). Ao trocar de etapa a página encolhe
+   * ou cresce, e o navegador mantém a posição de rolagem em pixels — se ela
+   * passar a exceder a nova altura da página, fica "presa" mais embaixo,
+   * revelando por engano a seção seguinte ("Resultados reales"). Rola o
+   * topo do card de volta pra dentro da tela a cada troca de etapa (nunca no
+   * carregamento inicial, antes da pessoa pedir pra ver a triagem).
+   */
+  const triageCardRef = useRef<HTMLDivElement>(null);
+  const isFirstStepRender = useRef(true);
+  useEffect(() => {
+    if (isFirstStepRender.current) { isFirstStepRender.current = false; return; }
+    triageCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [step]);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -210,9 +351,11 @@ export function PublicCatalogMoniqueConcierge() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const summary = selectedObjective?.recommendation || 'orientación sobre servicios';
-    const text = `Hola Monique, soy ${name}. Mi objetivo es: ${selectedObjective?.title || 'todavía no estoy segura'}. Me interesa: ${summary}. ¿Tengo una micropigmentación previa? ${previousWork}. Sensibilidad o alergias: ${sensitive}. Día preferido: ${preferredDay || 'a coordinar'}. ${message}`;
-    window.open(whatsappClickUrl(text), '_blank', 'noopener,noreferrer');
+    const summary = selectedItem
+      ? `${selectedItem.productName}${selectedItem.variantCode ? ` (${selectedItem.variantCode})` : ''} — ${selectedItem.price}`
+      : 'orientación sobre servicios';
+    const text = `Hola Monique, soy ${name}. Me interesa: ${summary}. ¿Tengo una micropigmentación previa? ${previousWork}. Sensibilidad o alergias: ${sensitive}. Día preferido: ${preferredDay || 'a coordinar'}. ${message}`;
+    window.open(whatsappClickUrl(text, selectedItem?.productName, 'novo', utmSource), '_blank', 'noopener,noreferrer');
     trackWhatsAppContact();
     setSent(true);
   }
@@ -229,9 +372,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .brand-mark { display: grid; width: 2.15rem; height: 2.15rem; place-items: center; border: 1px solid #3157d5; border-radius: 50%; color: #3157d5; font-family: 'Cormorant Garamond', Georgia, serif; font-size: .95rem; font-style: italic; }
         .concierge-scope .site-header nav a, .concierge-scope .mobile-menu a { transition: color 160ms var(--ease-out); }
         .concierge-scope .site-header nav a:hover, .concierge-scope .mobile-menu a:hover { color: #3157d5; }
-        .concierge-scope .header-cta, .concierge-scope .primary-cta, .concierge-scope .next-cta, .concierge-scope .light-cta { align-items: center; justify-content: center; gap: .6rem; border-radius: .45rem; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out); }
-        .concierge-scope .header-cta { padding: .75rem 1rem; background: #3157d5; color: #fff; }
-        .concierge-scope .header-cta:hover, .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: #2444b6; transform: translateY(-2px); }
+        .concierge-scope .primary-cta, .concierge-scope .next-cta, .concierge-scope .light-cta { align-items: center; justify-content: center; gap: .6rem; border-radius: .45rem; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out); }
+        .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: #2444b6; transform: translateY(-2px); }
         .concierge-scope .mobile-menu { display: flex; flex-direction: column; gap: 1rem; padding: 1rem 0 1.25rem; color: #596575; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
         .concierge-scope .hero { overflow: hidden; background: #f7f8fa; padding: 4rem 0 5rem; }
         .concierge-scope .hero-copy h1, .concierge-scope .section-intro h2, .concierge-scope .section-heading h2, .concierge-scope .contact-section h2 { margin-top: 1.2rem; font-family: 'Cormorant Garamond', Georgia, serif; font-size: clamp(3.4rem, 7vw, 6.8rem); font-weight: 600; letter-spacing: -.055em; line-height: .86; }
@@ -239,6 +381,10 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .kicker { display: inline-flex; align-items: center; gap: .45rem; color: #3157d5; font-size: .67rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
         .concierge-scope .hero-copy > p { max-width: 30rem; margin-top: 1.65rem; color: #596575; font-size: 1rem; line-height: 1.7; }
         .concierge-scope .primary-cta { display: inline-flex; margin-top: 2rem; padding: .95rem 1.15rem; background: #3157d5; color: #fff; }
+        .concierge-scope .hero-cta-row { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 2rem; }
+        .concierge-scope .hero-cta-row .primary-cta, .concierge-scope .hero-cta-row .secondary-cta { margin-top: 0; }
+        .concierge-scope .secondary-cta { display: inline-flex; align-items: center; justify-content: center; gap: .6rem; padding: .95rem 1.15rem; border: 1px solid #3157d5; border-radius: .45rem; color: #3157d5; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out); }
+        .concierge-scope .secondary-cta:hover { background: rgba(49,87,213,.08); transform: translateY(-2px); }
         .concierge-scope .trust-row { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1.4rem; color: #7b8796; font-size: .66rem; font-weight: 700; }
         .concierge-scope .trust-row span { display: inline-flex; align-items: center; gap: .4rem; }
         .concierge-scope .trust-row svg { color: #e88972; }
@@ -253,9 +399,6 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .section-number.light { color: #9fb5ff; }
         .concierge-scope .section-intro h2, .concierge-scope .section-heading h2, .concierge-scope .contact-section h2 { font-size: clamp(2.8rem, 5vw, 5rem); }
         .concierge-scope .section-intro > p, .concierge-scope .section-heading > p { max-width: 23rem; margin-top: 1.25rem; color: #697586; font-size: .95rem; line-height: 1.7; }
-        .concierge-scope .step-rail { display: grid; gap: .65rem; margin-top: 2.2rem; color: #9aa5b5; font-size: .66rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-        .concierge-scope .step-rail span { border-left: 2px solid #e1e6ee; padding: .35rem 0 .35rem .8rem; }
-        .concierge-scope .step-rail .active { border-color: #3157d5; color: #3157d5; }
         .concierge-scope .triage-card { overflow: hidden; border: 1px solid #dde3ec; border-radius: 1rem; background: #f7f8fa; box-shadow: 0 .8rem 2.3rem rgba(39,55,80,.08); }
         .concierge-scope .triage-top { display: flex; align-items: center; gap: 1rem; padding: 1.1rem 1.35rem; border-bottom: 1px solid #e2e7ef; color: #596575; font-size: .68rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
         .concierge-scope .progress { height: .35rem; flex: 1; overflow: hidden; border-radius: 99px; background: #dce3ed; }
@@ -272,6 +415,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .option b, .concierge-scope .option small { display: block; }
         .concierge-scope .option b { color: #263345; font-size: .86rem; }
         .concierge-scope .option small { margin-top: .3rem; color: #7a8797; font-size: .73rem; line-height: 1.35; }
+        .concierge-scope .option-service { display: block; margin-top: .45rem; color: #3157d5; font-size: .66rem; font-weight: 800; font-style: normal; }
+        .concierge-scope .option-badge { display: inline-block; margin-bottom: .4rem; padding: .2rem .55rem; border-radius: 999px; background: rgba(49,87,213,.1); color: #3157d5; font-size: .58rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
         .concierge-scope .next-cta { display: inline-flex; margin-top: 1.35rem; padding: .9rem 1rem; border: 0; background: #3157d5; color: #fff; }
         .concierge-scope .next-cta:disabled { cursor: not-allowed; opacity: .45; transform: none; }
         .concierge-scope .triage-actions { display: flex; gap: .7rem; margin-top: 1.4rem; }
@@ -291,13 +436,17 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .result-card:hover img { transform: scale(1.04); }
         .concierge-scope .result-card span { position: absolute; bottom: .7rem; left: .7rem; border-radius: .35rem; background: rgba(23,32,43,.82); padding: .4rem .55rem; color: #fff; font-size: .58rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
         .concierge-scope .catalog-section { background: #fff; }
-        .concierge-scope .starting-points { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 2.2rem; }
-        .concierge-scope .starting-point { display: flex; flex-direction: column; gap: .3rem; border: 1px solid #dce3ec; border-radius: .75rem; background: #f7f8fa; padding: 1.1rem; transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
-        .concierge-scope .starting-point:hover { border-color: #9eb0df; transform: translateY(-2px); box-shadow: 0 .5rem 1rem rgba(49,87,213,.08); }
-        .concierge-scope .starting-point b { color: #263345; font-size: .82rem; }
-        .concierge-scope .starting-point span { color: #718093; font-size: .72rem; line-height: 1.4; }
-        .concierge-scope .starting-point small { display: inline-flex; align-items: center; gap: .25rem; margin-top: .25rem; color: #3157d5; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
         .concierge-scope .catalog-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 2rem; }
+        .concierge-scope .catalog-accordion { display: flex; flex-direction: column; gap: .7rem; margin-top: 2rem; }
+        .concierge-scope .catalog-category { overflow: hidden; border: 1px solid #e0e5ed; border-radius: .75rem; background: #f9fafc; }
+        .concierge-scope .catalog-category summary { display: flex; cursor: pointer; list-style: none; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.25rem; }
+        .concierge-scope .catalog-category summary::-webkit-details-marker { display: none; }
+        .concierge-scope .catalog-category summary > span:first-child { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.5rem; color: #263345; }
+        .concierge-scope .catalog-category-count { display: inline-flex; flex-shrink: 0; align-items: center; gap: .4rem; color: #8b97a7; font-size: .64rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+        .concierge-scope .catalog-category-count svg { transition: transform 160ms var(--ease-out); }
+        .concierge-scope .catalog-category[open] .catalog-category-count svg { transform: rotate(180deg); }
+        .concierge-scope .catalog-category .catalog-grid { margin-top: 0; padding: 0 1.25rem 1.25rem; }
+        .concierge-scope .catalog-category:not([open]) > .catalog-grid { display: none; }
         .concierge-scope .service-card { display: flex; min-height: 13rem; flex-direction: column; justify-content: space-between; border: 1px solid #e0e5ed; border-radius: .75rem; background: #f9fafc; padding: 1.15rem; transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
         .concierge-scope .service-card:hover { border-color: #9eb0df; transform: translateY(-3px); box-shadow: 0 .7rem 1.3rem rgba(39,55,80,.08); }
         .concierge-scope .service-meta, .concierge-scope .service-bottom { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
@@ -317,6 +466,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .service-bottom { margin-top: 1.1rem; border-top: 1px solid #e0e5ed; padding-top: .75rem; }
         .concierge-scope .service-bottom b { color: #3157d5; font-size: .78rem; }
         .concierge-scope .service-bottom a { display: inline-flex; align-items: center; gap: .25rem; color: #596575; font-size: .6rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+        .concierge-scope .service-price-range { margin-top: .55rem; color: #3157d5; font-size: .78rem; font-weight: 800; }
         .concierge-scope .service-variants { display: flex; flex-direction: column; gap: .55rem; margin-top: 1.1rem; border-top: 1px solid #e0e5ed; padding-top: .75rem; }
         .concierge-scope .service-variants li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem .6rem; }
         .concierge-scope .service-variant-info { display: flex; flex-direction: column; min-width: 0; }
@@ -340,9 +490,9 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .footer { background: #17202b; padding: 1.4rem 0; color: #c7d0dd; font-size: .6rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
         .concierge-scope .footer a:hover { color: #fff; }
         @media (min-width: 640px) { .concierge-scope .option-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-        @media (max-width: 767px) { .concierge-scope .section-heading { align-items: start; flex-direction: column; } .concierge-scope .results-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .concierge-scope .result-card.featured { grid-column: span 2; grid-row: auto; min-height: 22rem; } .concierge-scope .catalog-grid { grid-template-columns: 1fr; } .concierge-scope .starting-points { grid-template-columns: 1fr; } .concierge-scope .hero { padding-top: 2.5rem; } .concierge-scope .hero-note { left: .65rem; }
+        @media (max-width: 767px) { .concierge-scope .section-heading { align-items: start; flex-direction: column; } .concierge-scope .results-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .concierge-scope .result-card.featured { grid-column: span 2; grid-row: auto; min-height: 22rem; } .concierge-scope .catalog-grid { grid-template-columns: 1fr; } .concierge-scope .hero { padding-top: 2.5rem; } .concierge-scope .hero-note { left: .65rem; }
           /* Item P2 da revisão de conversão (27/08/2026): textos auxiliares pequenos demais no celular real. */
-          .concierge-scope .helper, .concierge-scope .option small, .concierge-scope .service-card p, .concierge-scope .service-variant-info small, .concierge-scope .starting-point span, .concierge-scope .field span { font-size: .82rem; line-height: 1.5; }
+          .concierge-scope .helper, .concierge-scope .option small, .concierge-scope .service-card p, .concierge-scope .service-variant-info small, .concierge-scope .field span { font-size: .82rem; line-height: 1.5; }
           .concierge-scope .service-meta, .concierge-scope .trust-row { font-size: .7rem; }
         }
 
@@ -353,8 +503,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .brand, .concierge-scope .brand strong { color: #f7efe2; }
         .concierge-scope .brand small { color: #bda982; }
         .concierge-scope .brand-mark { border-color: #d8a64b; color: #e8b95e; }
-        .concierge-scope .header-cta, .concierge-scope .primary-cta, .concierge-scope .next-cta { background: linear-gradient(135deg,#e5b454,#b97922); color: #130f0b; box-shadow: 0 .45rem 1rem rgba(216,166,75,.2); }
-        .concierge-scope .header-cta:hover, .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: linear-gradient(135deg,#f1c86c,#c88a2d); }
+        .concierge-scope .primary-cta, .concierge-scope .next-cta { background: linear-gradient(135deg,#e5b454,#b97922); color: #130f0b; box-shadow: 0 .45rem 1rem rgba(216,166,75,.2); }
+        .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: linear-gradient(135deg,#f1c86c,#c88a2d); }
         .concierge-scope .mobile-menu { background: #0a0908; border-top-color: rgba(214,166,75,.2); }
         .concierge-scope .hero { background: #0a0908; color: #f7efe2; }
         .concierge-scope .hero-copy h1 { color: #f7efe2; }
@@ -363,15 +513,15 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .kicker { color: #e7b35b; }
         .concierge-scope .trust-row { color: #bda982; }
         .concierge-scope .trust-row svg { color: #e7b35b; }
+        .concierge-scope .secondary-cta { border-color: #e0ae52; color: #e8b95e; }
+        .concierge-scope .secondary-cta:hover { background: rgba(224,174,82,.1); }
         .concierge-scope .hero-image-wrap { box-shadow: 1rem 1rem 0 #3b2814; border: 1px solid rgba(231,179,91,.4); }
         .concierge-scope .hero-note { background: #f7efe2; border-color: #c69947; color: #392816; }
         .concierge-scope .hero-note b { color: #b77a24; }
         .concierge-scope .triage-section { background: #f3eadc; }
         .concierge-scope .section-number { color: #a46d1d; }
+        .concierge-scope .section-number.light { color: #e8b95e; }
         .concierge-scope .section-intro > p, .concierge-scope .section-heading > p { color: #665846; }
-        .concierge-scope .step-rail { color: #a38e70; }
-        .concierge-scope .step-rail span { border-color: #d6c4a7; }
-        .concierge-scope .step-rail .active { border-color: #b77a24; color: #8f5e19; }
         .concierge-scope .triage-card { background: #16120e; border-color: #5e421f; box-shadow: 0 .8rem 2.3rem rgba(47,29,9,.2); color: #f7efe2; }
         .concierge-scope .triage-top { border-bottom-color: rgba(224,174,82,.25); color: #dbc69e; }
         .concierge-scope .progress { background: #3d2b18; }
@@ -385,6 +535,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .option.selected .option-icon { background: #d39a38; color: #17100a; }
         .concierge-scope .option b { color: #fff7e9; }
         .concierge-scope .option small { color: #cdbfae; }
+        .concierge-scope .option-service { color: #e8b95e; }
+        .concierge-scope .option-badge { background: rgba(224,174,82,.16); color: #e8b95e; }
         .concierge-scope .back-cta { border-color: #6b4c27; color: #d4bd98; }
         .concierge-scope .field span { color: #d7c29d; }
         .concierge-scope .field input, .concierge-scope .field select, .concierge-scope .field textarea { border-color: #6b4c27; background: #211a13; color: #fff7e9; }
@@ -398,11 +550,9 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .result-card span { background: rgba(10,9,8,.88); color: #f7efe2; }
         .concierge-scope .catalog-section { background: #f3eadc; }
         .concierge-scope .catalog-section .section-heading > p { color: #665846; }
-        .concierge-scope .starting-point { border-color: #d8c6aa; background: #fbf6ed; }
-        .concierge-scope .starting-point:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
-        .concierge-scope .starting-point b { color: #24190f; }
-        .concierge-scope .starting-point span { color: #75624c; }
-        .concierge-scope .starting-point small { color: #9b6417; }
+        .concierge-scope .catalog-category { border-color: #d8c6aa; background: #fbf6ed; }
+        .concierge-scope .catalog-category summary > span:first-child { color: #24190f; }
+        .concierge-scope .catalog-category-count { color: #846d4d; }
         .concierge-scope .service-card { border-color: #d8c6aa; background: #fbf6ed; overflow: hidden; }
         .concierge-scope .service-card:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
         .concierge-scope .service-card-image { display: block; width: calc(100% + 2.3rem); aspect-ratio: 4 / 3; margin: -1.15rem -1.15rem 1rem; object-fit: cover; }
@@ -413,6 +563,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .skeleton-line { background: linear-gradient(90deg,#e7dbc2 25%,#f3ead8 37%,#e7dbc2 63%); background-size: 400% 100%; }
         .concierge-scope .service-bottom b { color: #9b6417; }
         .concierge-scope .service-bottom a { color: #684916; }
+        .concierge-scope .service-price-range { color: #9b6417; }
         .concierge-scope .service-variants { border-top-color: #dfcfb6; }
         .concierge-scope .service-variant-info b { color: #24190f; }
         .concierge-scope .service-variant-info small { color: #8c795c; }
@@ -438,7 +589,15 @@ export function PublicCatalogMoniqueConcierge() {
         @media (max-width: 767px) { .concierge-scope .gold-promo-grid { grid-template-columns: 1fr; gap: 1.6rem; } .concierge-scope .gold-promo { padding: 2.8rem 0; } .concierge-scope .gold-promo-copy h2 { font-size: 3.5rem; } }
       `}</style>
 
-      <header className="site-header">
+      {/*
+        Bug real reportado (30/08/2026): no iPhone, o menu hambúrguer e o logo
+        ficavam atrás da barra de status (relógio/bateria/sinal) — mesma causa
+        raiz já corrigida em `Header.tsx` (25/08/2026): `viewport-fit=cover`
+        no `index.html` estende o conteúdo por trás da status bar, e esse
+        header (componente isolado, não reaproveita `Header.tsx`) nunca tinha
+        recebido o mesmo `env(safe-area-inset-top)`.
+      */}
+      <header className="site-header" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="container flex items-center justify-between py-4">
           <a href="#inicio" className="brand" aria-label="Monique Sorrilha Beauty Studio, inicio">
             <span className="brand-mark">MS</span>
@@ -449,7 +608,6 @@ export function PublicCatalogMoniqueConcierge() {
             <a href="#servicios">Servicios</a>
             <a href="#resultados">Resultados</a>
           </nav>
-          <a href="#triagem" onClick={handleTriageAnchorClick} className="header-cta hidden md:inline-flex">Encontrar mi servicio <ArrowRight size={14} /></a>
           <button onClick={() => setMenuOpen(!menuOpen)} className="md:hidden" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}>
             {menuOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
@@ -469,14 +627,17 @@ export function PublicCatalogMoniqueConcierge() {
             <span className="kicker"><Sparkles size={14} /> Beauty Concierge para vos · Luque</span>
             <h1>Un momento para vos, <span>un resultado que te acompaña.</span></h1>
             <p>Entre trabajo, compromisos y mil pendientes, también merecés sentirte lista sin pasar horas frente al espejo. Encontrá tu servicio en menos de un minuto.</p>
-            <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Encontrar mi servicio <ArrowRight size={16} /></a>
+            <div className="hero-cta-row">
+              <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Encontrar mi servicio <ArrowRight size={16} /></a>
+              <a href={whatsappClickUrl(DIRECT_WHATSAPP_MESSAGE, undefined, 'direct', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact} className="secondary-cta">Hablar directamente por WhatsApp <MessageCircle size={15} /></a>
+            </div>
             <div className="trust-row">
               <span><ShieldCheck size={15} /> Cuidado y evaluación</span>
               <span><Clock3 size={15} /> Más tiempo para vos</span>
             </div>
           </div>
           <div className="hero-visual">
-            <div className="hero-image-wrap"><img src="/monique-novo/full-face.jpg" alt="Resultado real de belleza natural" /></div>
+            <div className="hero-image-wrap"><img src="/monique-novo/hero-retrato.jpg" alt="Resultado real de belleza natural" /></div>
             <div className="hero-note"><b>01</b><span>Elegir bien también es parte del cuidado.</span></div>
           </div>
         </div>
@@ -502,13 +663,8 @@ export function PublicCatalogMoniqueConcierge() {
             <span className="section-number">01</span>
             <h2>Antes de elegir,<br /><span>entendemos lo que necesitás.</span></h2>
             <p>Tres preguntas breves para que recibas una orientación clara, respetuosa y pensada para vos.</p>
-            <div className="step-rail">
-              <span className={step >= 1 ? 'active' : ''}>01 Objetivo</span>
-              <span className={step >= 2 ? 'active' : ''}>02 Contexto</span>
-              <span className={step >= 3 ? 'active' : ''}>03 Contacto</span>
-            </div>
           </div>
-          <div className="triage-card">
+          <div className="triage-card" ref={triageCardRef}>
             <div className="triage-top">
               <span>Paso {step} de 3</span>
               <div className="progress"><i style={{ width: `${(step / 3) * 100}%` }} /></div>
@@ -516,22 +672,63 @@ export function PublicCatalogMoniqueConcierge() {
             {step === 1 && (
               <div className="triage-body">
                 <h3>¿Qué querés regalarte hoy?</h3>
-                <p className="helper">Pensá en cómo querés salir del estudio y elegí la opción que más se acerca a vos.</p>
+                <p className="helper">Elegí el servicio y en la próxima pantalla vas a ver las opciones con precio real.</p>
                 <div className="option-grid">
-                  {objectives.map((item) => (
-                    <button key={item.id} onClick={() => { if (!suppressObjectiveClicks) setObjective(item.id); }} className={objective === item.id ? 'option selected' : 'option'}>
-                      <span className="option-icon">{objective === item.id ? <Check size={17} /> : item.id === 'natural' ? 'N' : item.id === 'practical' ? 'T' : item.id === 'brows' ? 'C' : 'L'}</span>
+                  {serviceCategories.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        if (suppressObjectiveClicks) return;
+                        setCategory(item.id);
+                        setSelectedItem(null);
+                        window.setTimeout(() => setStep(2), 220);
+                      }}
+                      className={category === item.id ? 'option selected' : 'option'}
+                    >
+                      <span className="option-icon">{category === item.id ? <Check size={17} /> : item.id === 'Cejas' ? 'CJ' : item.id === 'Pestañas' ? 'PS' : item.id === 'Labios' ? 'LB' : 'CB'}</span>
                       <span><b>{item.title}</b><small>{item.text}</small></span>
                     </button>
                   ))}
                 </div>
-                <button disabled={!objective} onClick={() => setStep(2)} className="next-cta">Continuar <ArrowRight size={16} /></button>
               </div>
             )}
             {step === 2 && (
               <div className="triage-body">
-                <h3>Dos respuestas para orientarte mejor.</h3>
-                <p className="helper">Estas preguntas ayudan a evitar recomendaciones inadecuadas.</p>
+                <h3>{category}: elegí tu opción.</h3>
+                <p className="helper">Precios reales, así ya sabés qué esperar antes de escribirnos.</p>
+                {!catalog && !productsError && <p className="helper">Cargando precios…</p>}
+                {productsError && <p className="helper">No pudimos cargar los precios ahora. Volvé y probá de nuevo en unos minutos, o escribinos directo por WhatsApp.</p>}
+                {catalog && (
+                  <div className="option-grid">
+                    {categoryOptions.map((option) => (
+                      <button
+                        key={option.key}
+                        onClick={() => {
+                          setSelectedItem(option);
+                          window.setTimeout(() => setStep(3), 220);
+                        }}
+                        className={selectedItem?.key === option.key ? 'option selected' : 'option'}
+                      >
+                        <span className="option-icon">{selectedItem?.key === option.key ? <Check size={17} /> : <Sparkles size={15} />}</span>
+                        <span>
+                          {option.isMicro && <span className="option-badge">Micropigmentación</span>}
+                          <b>{option.label}</b>
+                          {option.description && <small>{option.description}</small>}
+                          <em className="option-service">{option.price}{formatDuration(option.durationMinutes) ? ` · ${formatDuration(option.durationMinutes)}` : ''}</em>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="triage-actions">
+                  <button onClick={() => setStep(1)} className="back-cta">Volver</button>
+                </div>
+              </div>
+            )}
+            {step === 3 && (
+              <form onSubmit={submit} className="triage-body">
+                <h3>Listo. Conversemos con contexto.</h3>
+                <p className="helper">Dos preguntas rápidas y tu nombre — te enviaremos todo junto con tu mensaje.</p>
                 <label className="field">
                   <span>¿Tenés una micropigmentación previa?</span>
                   <select value={previousWork} onChange={(event) => setPreviousWork(event.target.value)}>
@@ -549,16 +746,6 @@ export function PublicCatalogMoniqueConcierge() {
                     <option>No estoy segura</option>
                   </select>
                 </label>
-                <div className="triage-actions">
-                  <button onClick={() => setStep(1)} className="back-cta">Volver</button>
-                  <button onClick={() => setStep(3)} className="next-cta">Continuar <ArrowRight size={16} /></button>
-                </div>
-              </div>
-            )}
-            {step === 3 && (
-              <form onSubmit={submit} className="triage-body">
-                <h3>Listo. Conversemos con contexto.</h3>
-                <p className="helper">Te enviaremos la información de tu evaluación junto con tu mensaje.</p>
                 <label className="field">
                   <span>Tu nombre</span>
                   <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="¿Cómo te llamamos?" />
@@ -603,16 +790,7 @@ export function PublicCatalogMoniqueConcierge() {
         <div className="container">
           <div className="section-heading">
             <div><span className="section-number">03</span><h2>Catálogo claro.<br /><span>Elegí con confianza.</span></h2></div>
-            <p>Precios, duración y objetivo de cada servicio en una sola vista.</p>
-          </div>
-          <div className="starting-points">
-            {startingPoints.map((point) => (
-              <a key={point.title} href={whatsappClickUrl(point.message)} target="_blank" rel="noreferrer" className="starting-point" onClick={trackWhatsAppContact}>
-                <b>{point.title}</b>
-                <span>{point.text}</span>
-                <small>Consultar <ArrowRight size={12} /></small>
-              </a>
-            ))}
+            <p>Tocá una categoría para ver precios, duración y detalle de cada servicio.</p>
           </div>
           {!catalog && !productsError && (
             <div className="catalog-grid" aria-label="Cargando servicios y precios" aria-busy="true">
@@ -632,53 +810,73 @@ export function PublicCatalogMoniqueConcierge() {
           )}
           {productsError && <p className="helper">No se pudieron cargar los servicios en este momento. Probá de nuevo en unos minutos.</p>}
           {catalog && (
-            <div className="catalog-grid">
-              {catalog.products.map((service) => {
-                const consultMessage = catalog.contact.whatsappMessageProduct
-                  ? catalog.contact.whatsappMessageProduct.split('{produto}').join(service.name)
-                  : `Hola Monique, me interesa ${service.name}. Quiero saber si es para mí.`;
-                const cardImage = service.imageUrl || PROMO_IMAGE_BY_PRODUCT_NAME[service.name];
-                return (
-                  <article className="service-card" key={service.name}>
-                    {cardImage && <img className="service-card-image" src={cardImage} alt={service.name} loading="lazy" />}
-                    <div className="service-meta">
-                      <span>{service.category || 'Servicios'}</span>
-                      {formatDuration(service.durationMinutes) && <span><Clock3 size={12} /> {formatDuration(service.durationMinutes)}</span>}
-                    </div>
-                    <h3>{service.name}</h3>
-                    {service.description && <p>{service.description}</p>}
-                    {service.variants?.length ? (
-                      <ul className="service-variants">
-                        {service.variants.map((variant) => {
-                          const variantMessage = variant.whatsappMessage
-                            ? variant.whatsappMessage.split('{produto}').join(variant.code)
-                            : `Hola Monique, me interesa ${service.name} (${variant.code}). Quiero saber si es para mí.`;
-                          return (
-                            <li key={variant.code}>
-                              <div className="service-variant-info">
-                                <b>{variant.code}</b>
-                                {variant.description && <small>{variant.description}</small>}
-                              </div>
-                              <div className="service-variant-price">
-                                <span>{variant.price}</span>
-                                {formatDuration(variant.durationMinutes) && <span className="service-variant-duration"><Clock3 size={11} /> {formatDuration(variant.durationMinutes)}</span>}
-                                <a href={whatsappClickUrl(variantMessage, `${service.name} - ${variant.code}`)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={12} /></a>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : (
-                      <div className="service-bottom">
-                        <b>{service.price}</b>
-                        <a href={whatsappClickUrl(consultMessage, service.name)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
+            <div className="catalog-accordion">
+              {catalogGroups.map((group) => (
+                <details key={group.category} className="catalog-category">
+                  <summary>
+                    <span>{group.category}</span>
+                    <span className="catalog-category-count">{group.products.length} {group.products.length === 1 ? 'servicio' : 'servicios'} <ChevronDown size={16} /></span>
+                  </summary>
+                  <div className="catalog-grid">
+                    {group.products.map((service) => {
+                      const consultMessage = fillWhatsappTemplate(catalog.contact.whatsappMessageProduct, service.name, service.name);
+                      const cardImage = service.imageUrl || PROMO_IMAGE_BY_PRODUCT_NAME[service.name];
+                      return (
+                        <article className="service-card" key={service.name}>
+                          {cardImage && <img className="service-card-image" src={cardImage} alt={service.name} loading="lazy" />}
+                          <div className="service-meta">
+                            <span>{service.category || 'Servicios'}</span>
+                            {formatDuration(service.durationMinutes) && <span><Clock3 size={12} /> {formatDuration(service.durationMinutes)}</span>}
+                          </div>
+                          <h3>{service.name}</h3>
+                          {service.description && <p>{service.description}</p>}
+                          {service.variants?.length ? (
+                            <>
+                              {service.price && <p className="service-price-range">{service.price}</p>}
+                              <ul className="service-variants">
+                              {service.variants.map((variant) => {
+                                const variantMessage = fillWhatsappTemplate(variant.whatsappMessage, variant.code, `${service.name} (${variant.code})`);
+                                return (
+                                  <li key={variant.code}>
+                                    <div className="service-variant-info">
+                                      <b>{variant.code}</b>
+                                      {variant.description && <small>{variant.description}</small>}
+                                    </div>
+                                    <div className="service-variant-price">
+                                      <span>{variant.price}</span>
+                                      {formatDuration(variant.durationMinutes) && <span className="service-variant-duration"><Clock3 size={11} /> {formatDuration(variant.durationMinutes)}</span>}
+                                      <a href={whatsappClickUrl(variantMessage, `${service.name} - ${variant.code}`, 'novo', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={12} /></a>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                            </>
+                          ) : (
+                            <div className="service-bottom">
+                              <b>{service.price}</b>
+                              <a href={whatsappClickUrl(consultMessage, service.name, 'novo', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </details>
+              ))}
             </div>
           )}
+          {/*
+            Achado da revisão de redundância (28/08/2026): este resumo e a
+            Knowledge Base do tenant (campo `pricingAndPolicies`, usado pela
+            IA na conversa privada do WhatsApp) descrevem a mesma política —
+            valores como a seña de Gs 50.000, os 24h de cancelamento e os 15
+            min de tolerância precisam ficar em sincronia manual se algum dia
+            mudarem. Essa duplicação é intencional, não um bug: a KB completa
+            inclui dado bancário (alias/cédula, titular da conta) que não
+            pode ir num JSON público sem autenticação (`/api/public/catalog`)
+            — só este resumo, sem dado sensível, é seguro pra expor aqui.
+          */}
           <details className="policy-box">
             <summary>Información importante antes de confirmar <ChevronDown size={16} /></summary>
             <div>

@@ -48,6 +48,7 @@ const fullyEnabledCapabilities: TenantNavigationCapabilities = {
   catalog: true,
   quality: true,
   systemLogs: true,
+  broadcast: true,
 };
 
 function renderHeader(
@@ -67,6 +68,7 @@ function renderHeader(
         activeTenant={activeTenant}
         onSelectTenant={vi.fn()}
         capabilities={capabilities}
+        onOpenChangePasswordModal={vi.fn()}
       />
     </AppPreferencesProvider>,
   );
@@ -79,31 +81,13 @@ afterEach(() => cleanup());
 // logo e botão de menu parcialmente cobertos, toque no menu não registrava.
 // Fix: `style={{ paddingTop: 'env(safe-area-inset-top)' }}` no <header>.
 describe('grupos de navegação no desktop', () => {
-  it('oculta exclusivamente Financeiro sem ocultar Agenda quando o módulo não foi liberado', () => {
-    renderHeader({ ...fullyEnabledCapabilities, financial: false }, { ...saasAdmin, role: 'admin' });
-
-    expect(screen.getByRole('button', { name: 'Agenda' })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Financeiro' })).toBeNull();
-  });
-
-  it('mantém todos os recursos visíveis ao SaaS Admin mesmo antes da liberação para a empresa ativa', async () => {
-    const user = userEvent.setup();
-    renderHeader({
-      conversations: false, crm: false, agenda: false, financial: false,
-      growth: false, agent: false, catalog: false, quality: false, systemLogs: false,
-    });
-
-    expect(screen.getByRole('button', { name: 'Conversas' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Vendas' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Agenda' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Financeiro' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Crescimento' })).not.toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Configurar' }));
-    const menu = screen.getByRole('menu', { name: 'Configurar' });
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'Agente & catálogo', 'Catálogo público', 'Qualidade do agente', 'Logs do sistema',
-    ]);
-  });
+  // TASK-0301 (pedido direto): Atendimento, CRM (Vendas), Agenda e
+  // Financeiro saíram do menu superior por completo — Atendimento virou a
+  // tela padrão do sistema (sem botão próprio, o logo clicável leva de
+  // volta pra lá) e os outros três só ficam acessíveis pela caixa de
+  // ferramentas dentro do Atendimento (ver WhatsAppLeadsSim.tsx). O teste
+  // que cobria "esconde Financeiro sem esconder Agenda no topo" ficou sem
+  // objeto — nenhum dos dois existe mais ali, com ou sem capability.
 
   it('remove todos os menus correspondentes às capacidades bloqueadas da empresa ativa', async () => {
     const user = userEvent.setup();
@@ -142,6 +126,7 @@ describe('grupos de navegação no desktop', () => {
       'Catálogo público',
       'Qualidade do agente',
       'Logs do sistema',
+      'Disparo em Massa',
     ]);
   });
 

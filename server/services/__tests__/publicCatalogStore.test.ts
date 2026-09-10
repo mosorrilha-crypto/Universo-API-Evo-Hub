@@ -1,9 +1,22 @@
-import { describe, expect, it } from 'vitest';
-import {
+import { describe, expect, it, vi } from 'vitest';
+
+// PNG 1x1 mínimo válido — só precisa ser uma imagem decodificável pelo sharp.
+const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+// TASK-0218: mesmo contrato real de resolveKnowledgeBaseImageBinary — sem
+// fetch() de verdade, devolve a mesma imagem de teste quando há imageId.
+const resolveKnowledgeBaseImageBinary = vi.fn(async (_url?: string, _key?: string, _tenantId?: string, imageId?: string, mimeType?: string, legacyBase64?: string) => {
+  if (imageId) return { buffer: Buffer.from(TINY_PNG_BASE64, 'base64'), mimeType: mimeType || 'image/png' };
+  if (legacyBase64) return { buffer: Buffer.from(legacyBase64.replace(/^data:[^;]+;base64,/, ''), 'base64'), mimeType: mimeType || 'image/png' };
+  return null;
+});
+vi.mock('../knowledgeBaseImageStore', () => ({ resolveKnowledgeBaseImageBinary }));
+
+const {
   normalizeSlug,
   toPublicCatalog,
   toPublicCatalogProduct,
-} from '../publicCatalogStore';
+} = await import('../publicCatalogStore');
 
 describe('publicCatalogStore', () => {
   it('normaliza apenas slugs seguros', () => {
@@ -15,7 +28,7 @@ describe('publicCatalogStore', () => {
 
   it('publica somente campos comerciais e filtra produtos inativos', async () => {
     const catalog = await toPublicCatalog(
-      { name: 'Monique', slug: 'monique', currency: 'PYG', locale: 'es-PY' },
+      { id: 'tenant-1', name: 'Monique', slug: 'monique', currency: 'PYG', locale: 'es-PY' },
       [
         {
           name: 'Microlips Labios',
@@ -34,6 +47,7 @@ describe('publicCatalogStore', () => {
           active: false,
         },
       ],
+      { supabaseUrl: undefined, supabaseKey: undefined },
     );
 
     expect(catalog.products).toHaveLength(1);
@@ -88,6 +102,7 @@ describe('publicCatalogStore', () => {
         }],
       },
       'PYG',
+      { supabaseUrl: undefined, supabaseKey: undefined, tenantId: 'tenant-1' },
     );
 
     expect(product.variants?.[0]).toMatchObject({
@@ -127,10 +142,50 @@ describe('publicCatalogStore', () => {
         exampleImageMimeType: 'image/png',
       },
       'PYG',
+      { supabaseUrl: undefined, supabaseKey: undefined, tenantId: 'tenant-1' },
     );
 
     expect(product.imageUrl).toBeDefined();
     expect(product.imageUrl).toMatch(/^data:image\/jpeg;base64,/);
     expect(product).not.toHaveProperty('exampleImageBase64');
+  });
+
+  // TASK-0218: produto/variante/antes-depois já migrados pro Storage
+  // (exampleImageId/beforeImageId/afterImageId, sem Base64 legado nenhum) —
+  // a miniatura ainda precisa sair comprimida, resolvendo o binário via
+  // resolveKnowledgeBaseImageBinary antes de comprimir.
+  it('publica miniatura comprimida quando a foto já está no Storage (exampleImageId/beforeImageId/afterImageId, sem Base64 legado)', async () => {
+    resolveKnowledgeBaseImageBinary.mockClear();
+    const product = await toPublicCatalogProduct(
+      {
+        name: 'Cejas — Diseño & Tratamientos',
+        price: 'Gs 60.000',
+        exampleImageId: 'image-storage-product',
+        exampleImageMimeType: 'image/png',
+        beforeAfter: [{ id: 'ba1', beforeImageId: 'image-storage-before', afterImageId: 'image-storage-after' }],
+        variants: [{ code: 'V1', price: 'Gs 40.000', exampleImageId: 'image-storage-variant' }],
+      },
+      'PYG',
+      { supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key', tenantId: 'tenant-1' },
+    );
+
+    expect(product.imageUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(product.beforeAfter?.[0]).toMatchObject({
+      beforeImageUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+      afterImageUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+    });
+    expect(product.variants?.[0].imageUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(resolveKnowledgeBaseImageBinary).toHaveBeenCalledWith(
+      'https://fake.supabase.co', 'fake-key', 'tenant-1', 'image-storage-product', 'image/png', undefined, 'publicCatalogStore:thumbnail'
+    );
+  });
+
+  it('produto sem foto nenhuma (nem imageId nem Base64) fica sem imageUrl, sem quebrar', async () => {
+    const product = await toPublicCatalogProduct(
+      { name: 'Sem foto', price: 'Gs 10.000' },
+      'PYG',
+      { supabaseUrl: undefined, supabaseKey: undefined, tenantId: 'tenant-1' },
+    );
+    expect(product.imageUrl).toBeUndefined();
   });
 });

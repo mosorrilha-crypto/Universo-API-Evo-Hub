@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { 
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
+import { Loader2 } from 'lucide-react';
+import {
   ActiveTab,
   Tenant,
   UserProfile,
@@ -12,24 +13,50 @@ import {
   EscalationInfo,
   SystemIncidentInfo
 } from './types';
+import { stripLegacyImageBase64FromProduct } from './lib/knowledgeBaseImageCache';
 import { Header } from './components/Header';
-import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
 import AtendimentoWorkspaceFrame from './components/AtendimentoWorkspaceFrame';
 import OperationsModuleFrame from './components/OperationsModuleFrame';
-import { CrmWorkspace } from './components/CrmWorkspace';
-import { EscalationsPanel } from './components/EscalationsPanel';
-import { SystemLogsPanel } from './components/SystemLogsPanel';
-import { AgendaWorkspace } from './components/AgendaWorkspace';
-import { FinancialWorkspace } from './components/FinancialWorkspace';
-import { AdAttributionCAPI } from './components/AdAttributionCAPI';
-import { AgentKnowledgeBaseView, emptyKnowledgeBase } from './components/AgentKnowledgeBase';
-import { PublicCatalogSettings } from './components/PublicCatalogSettings';
-import { OperationsHomeWorkspace } from './components/OperationsHomeWorkspace';
-import { QualityAuditCenter } from './components/QualityAuditCenter';
+import { emptyKnowledgeBase } from './lib/emptyKnowledgeBase';
+import { TenantActivationChecklist } from './components/TenantActivationChecklist';
+import { evaluateTenantActivation } from './lib/tenantActivation';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
+// TASK-0376 (pedido direto, "o carregamento das páginas pode ficar mais
+// rápido"): o bundle inicial do frontend passava de 1,9MB porque toda aba —
+// mesmo as que um operador comum nunca abre (Empresas, Qualidade, Logs do
+// Sistema, Disparo em Massa, Anúncios...) — vinha junto no mesmo arquivo
+// carregado por QUALQUER pessoa, em QUALQUER aba. Diferente da aba
+// Atendimento (que precisa ficar sempre montada — ver comentário mais
+// abaixo, perto de `canSeeConversations &&`), todas as abas abaixo já
+// desmontam de verdade ao trocar (`{activeTab === 'x' && <Componente/>}`),
+// então `React.lazy` é seguro aqui: o código só baixa na primeira vez que a
+// aba é aberta, sem perder nenhum estado que já não seria perdido mesmo sem
+// lazy (a troca de aba já desmontava o componente antes desta mudança).
+const SaaSAdminDashboard = lazy(() => import('./components/SaaSAdminDashboard').then((m) => ({ default: m.SaaSAdminDashboard })));
+const CrmWorkspace = lazy(() => import('./components/CrmWorkspace').then((m) => ({ default: m.CrmWorkspace })));
+const EscalationsPanel = lazy(() => import('./components/EscalationsPanel').then((m) => ({ default: m.EscalationsPanel })));
+const SystemLogsPanel = lazy(() => import('./components/SystemLogsPanel').then((m) => ({ default: m.SystemLogsPanel })));
+const BroadcastAdminPanel = lazy(() => import('./components/BroadcastAdminPanel').then((m) => ({ default: m.BroadcastAdminPanel })));
+const AgendaWorkspace = lazy(() => import('./components/AgendaWorkspace').then((m) => ({ default: m.AgendaWorkspace })));
+const FinancialWorkspace = lazy(() => import('./components/FinancialWorkspace').then((m) => ({ default: m.FinancialWorkspace })));
+const AdAttributionCAPI = lazy(() => import('./components/AdAttributionCAPI').then((m) => ({ default: m.AdAttributionCAPI })));
+const AgentKnowledgeBaseView = lazy(() => import('./components/AgentKnowledgeBase').then((m) => ({ default: m.AgentKnowledgeBaseView })));
+const PublicCatalogSettings = lazy(() => import('./components/PublicCatalogSettings').then((m) => ({ default: m.PublicCatalogSettings })));
+const QualityAuditCenter = lazy(() => import('./components/QualityAuditCenter').then((m) => ({ default: m.QualityAuditCenter })));
+
+// Fallback simples e consistente enquanto o código de uma aba ainda não
+// carregada baixa — aparece só na primeira troca pra cada aba, o navegador
+// cacheia o chunk depois disso.
+const TabLoadingFallback: React.FC = () => (
+  <div className="flex min-h-[40vh] items-center justify-center text-slate-400">
+    <Loader2 className="h-6 w-6 animate-spin" />
+  </div>
+);
+import { AtendimentoSecondaryNav } from './components/AtendimentoSecondaryNav';
 import { LoginModal } from './components/LoginModal';
-import { getAuthToken, setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
+import { setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
 import { hasRoleAtLeast } from './lib/roles';
 import {
@@ -97,8 +124,6 @@ const kbCacheKey = (tenantId: string) => `saas_agent_kb_${tenantId}`;
 // que WhatsAppLeadsSim.tsx também lê ao montar — contato de um tenant
 // aparecia na lista de outro. Chave por tenant + poda corrigem os dois lados.
 const leadsCacheKey = (tenantId: string) => `saas_crm_leads_${tenantId}`;
-/** Mesmo raciocínio de leadsCacheKey acima, pro cache de transações financeiras. */
-const transactionsCacheKey = (tenantId: string) => `saas_transactions_${tenantId}`;
 
 export const App: React.FC = () => {
   // Navigation & View State
@@ -110,7 +135,7 @@ export const App: React.FC = () => {
     try {
       return parseStoredActiveTab(localStorage.getItem(ACTIVE_TAB_STORAGE_KEY));
     } catch {
-      return 'home';
+      return 'whatsapp';
     }
   });
   // Lead a abrir automaticamente ao entrar na aba WhatsApp — usado pelo
@@ -148,16 +173,36 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState<boolean>(false);
   // Um perfil em localStorage só melhora a continuidade visual; nunca libera
   // a plataforma SaaS até que a sessão seja confirmada pelo servidor.
   const [isSaasSessionConfirmed, setIsSaasSessionConfirmed] = useState(false);
+  // Impersonação (TASK-0363, "saas_admin acessa como um operador") — vem de
+  // GET /api/auth/session.impersonation, nunca inferido no cliente. Alimenta
+  // a faixa de aviso persistente + "Voltar para admin" logo abaixo.
+  const [impersonation, setImpersonation] = useState<{ active: boolean; byOperatorId?: string; byOperatorName?: string }>({ active: false });
+  const [isEndingImpersonation, setIsEndingImpersonation] = useState(false);
+  const handleEndImpersonation = async () => {
+    setIsEndingImpersonation(true);
+    try {
+      const res = await apiFetch('/api/auth/end-impersonation', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      window.location.href = '/';
+    } catch {
+      setIsEndingImpersonation(false);
+      alert('Não foi possível voltar para a conta de admin agora. Tente de novo.');
+    }
+  };
 
+  // TASK-0311 (TASK-0249 item 1): a sessão virou cookie httpOnly — o
+  // frontend não tem mais como saber, antes de perguntar, se existe uma
+  // sessão válida (o valor é invisível pro JS por desenho). Antes havia um
+  // guard aqui (`if (!getAuthToken())`) pra nem tentar `/api/auth/session`
+  // sem token; agora sempre tenta, e deixa o backend decidir (cookie
+  // ausente/inválido cai direto no `.catch`/no ramo de campos faltando
+  // abaixo, que já tratavam esse caso).
   useEffect(() => {
     let cancelled = false;
-    if (!getAuthToken()) {
-      setCurrentUser(null);
-      return () => { cancelled = true; };
-    }
 
     apiFetch('/api/auth/session')
       .then((response) => (response.ok ? response.json() : null))
@@ -165,7 +210,6 @@ export const App: React.FC = () => {
         if (cancelled) return;
         const operator = data?.operator;
         if (!operator?.id || !operator?.tenantId || !operator?.role) {
-          setAuthToken(null);
           setCurrentUser(null);
           return;
         }
@@ -179,11 +223,13 @@ export const App: React.FC = () => {
           department: previous?.department || 'Operador',
         }));
         setIsSaasSessionConfirmed(operator.role === 'saas_admin');
+        setImpersonation(data?.impersonation?.active ? data.impersonation : { active: false });
       })
       .catch(() => {
         if (cancelled) return;
         setIsSaasSessionConfirmed(false);
         setCurrentUser(null);
+        setImpersonation({ active: false });
       });
 
     return () => { cancelled = true; };
@@ -207,22 +253,35 @@ export const App: React.FC = () => {
   const tenantCapabilities = tenantCapabilitiesState.tenantId === activeTenant.id
     ? tenantCapabilitiesState.values
     : EMPTY_TENANT_NAVIGATION_CAPABILITIES;
-  // O SaaS Admin precisa enxergar toda a operação para administrar a plataforma
-  // e liberar recursos por empresa. O bloqueio comercial continua para os
-  // papéis internos de cada tenant e também é reforçado nas rotas protegidas.
+  // Achado real, 30/08/2026 (pedido direto do dono do produto): o SaaS
+  // Admin usa o seletor de empresas pra entrar no contexto de um tenant
+  // específico e ver a operação exatamente como aquela empresa a vê —
+  // inclusive os recursos que ELA não tem liberados. Um commit anterior
+  // ("fix: preserva acesso do saas admin aos recursos", 27/08/2026) tinha
+  // feito o SaaS Admin ignorar `tenantCapabilities` e ver tudo sempre,
+  // achando que isso era necessário "para auditoria" — na prática isso
+  // quebrou exatamente a função de pré-visualizar uma empresa (ex: Clic
+  // Piscinas, que só tem 6 recursos liberados, mostrava todos). Revertido:
+  // a única coisa exclusiva do SaaS Admin continua sendo o próprio seletor
+  // de empresas pra voltar à conta principal (`canSeeSaasMaster`, usado em
+  // `canAccessSaasAdmin`/`canSwitchTenant` abaixo) — cada recurso
+  // operacional individual volta a depender só do papel + do que a empresa
+  // ATIVA tem contratado, igual pra qualquer tenant admin.
   const canSeeSaasMaster = isSaasSessionConfirmed && hasRoleAtLeast(currentUser?.role, 'saas_admin');
-  const canSeeConversations = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.conversations);
-  const canSeeCrm = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.crm);
-  const canSeeAgenda = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.agenda);
-  const canSeeFinancial = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.financial);
+  const canSeeConversations = hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.conversations;
+  const canSeeCrm = hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.crm;
+  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.agenda;
+  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.financial;
   const canSeeAdminTools = hasRoleAtLeast(currentUser?.role, 'admin');
-  const canSeeGrowth = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.growth);
-  const canManageAgent = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.agent);
-  const canSeeCatalog = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.catalog);
-  const canSeeQuality = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.quality);
+  const canSeeGrowth = canSeeAdminTools && tenantCapabilities.growth;
+  const canManageAgent = canSeeAdminTools && tenantCapabilities.agent;
+  const canSeeCatalog = canSeeAdminTools && tenantCapabilities.catalog;
+  const canSeeQuality = canSeeAdminTools && tenantCapabilities.quality;
   // Recurso novo: SaaS Admin sempre audita; admins de tenant só acessam após
   // liberação explícita no Centro de Controle para a empresa ativa.
   const canSeeSystemLogs = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.systemLogs);
+  // Mesmo padrão de canSeeSystemLogs: TASK-0252, módulo opt-in por tenant.
+  const canSeeBroadcast = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.broadcast);
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
   // mais permissão pra ver a aba em que estava — cobre re-login com outro
@@ -231,6 +290,18 @@ export const App: React.FC = () => {
     // Durante o carregamento/login não redireciona a preferência restaurada.
     // A permissão é verificada assim que o usuário real estiver disponível.
     if (!currentUser) return;
+    // Achado real, 29/08/2026 (pedido do dono do produto: "quando recarrego
+    // a página ela volta pra página inicial, não permanece onde está"):
+    // `canSeeConversations`/`canSeeCrm`/etc. dependem de `tenantCapabilities`,
+    // que só chega depois de um fetch assíncrono (/api/me/entitlements) —
+    // antes dele resolver, `tenantCapabilitiesState.tenantId` ainda não bate
+    // com `activeTenant.id` e todas as capacidades ficam `false` por padrão
+    // (EMPTY_TENANT_NAVIGATION_CAPABILITIES), mesmo pra quem tem permissão de
+    // verdade. Como este efeito rodava mesmo nessa janela, ele confundia
+    // "ainda carregando" com "sem permissão" e chamava handleSetActiveTab
+    // ('home') — que também GRAVA 'home' no localStorage, apagando de vez a
+    // aba salva (ex: Atendimento) a cada recarregamento de página.
+    if (tenantCapabilitiesState.tenantId !== activeTenant.id) return;
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
       (activeTab === 'whatsapp' && !canSeeConversations) ||
@@ -241,10 +312,11 @@ export const App: React.FC = () => {
       (activeTab === 'knowledge' && !canManageAgent) ||
       (activeTab === 'catalog' && !canSeeCatalog) ||
       (activeTab === 'quality' && !canSeeQuality) ||
-      (activeTab === 'system_logs' && !canSeeSystemLogs);
-    if (blocked) handleSetActiveTab('home');
+      (activeTab === 'system_logs' && !canSeeSystemLogs) ||
+      (activeTab === 'broadcast' && !canSeeBroadcast);
+    if (blocked) handleSetActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, currentUser?.role]);
+  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, canSeeBroadcast, currentUser?.role, tenantCapabilitiesState.tenantId, activeTenant.id]);
 
   // A decisão vem do contrato self-scoped do tenant e falha fechada. O estado
   // carrega o tenant de origem, evitando que uma troca de empresa mostre por
@@ -309,9 +381,7 @@ export const App: React.FC = () => {
     // reais do Supabase (só o painel SaaS Master, restrito a saas_admin,
     // busca a lista real via /api/admin/tenants). Sem isso, o badge do
     // cabeçalho ficava preso no nome do mock pra qualquer operador que não
-    // fosse saas_admin, mesmo depois do fix acima. GET /api/tenant é
-    // self-scoped (resolve pelo JWT, sem exigir role nenhuma) e sempre
-    // reflete o tenant real de quem está logado.
+    // fosse saas_admin, mesmo depois do fix acima.
     apiFetch('/api/tenant')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -331,6 +401,27 @@ export const App: React.FC = () => {
         // pra outro tenant.
         const savedOverrideId = currentUser.role === 'saas_admin' ? localStorage.getItem(ACTIVE_TENANT_OVERRIDE_KEY) : null;
         if (savedOverrideId && savedOverrideId !== data.tenant.id) return;
+        // Segundo achado real (04/09/2026, TASK-0264, encontrado testando o
+        // app de verdade num F5): GET /api/tenant NÃO é imune ao seletor de
+        // tenant do saas_admin como o comentário acima (removido) afirmava —
+        // ele usa exatamente o mesmo `tenantOf()`/`resolveTenantId()` de
+        // qualquer outra rota tenant-scoped, então também respeita o header
+        // `X-Tenant-Id` (ver conversations.ts). No F5, `activeTenant` nasce
+        // do primeiro item de `tenants` (cache local, ordem arbitrária vinda
+        // de /api/admin/tenants — não necessariamente o tenant de login) até
+        // este efeito corrigir; nesse intervalo, `setTenantOverride` (chamado
+        // a cada render, ver mais abaixo) já mandou esse id ERRADO pro
+        // apiFetch, e ESTA chamada específica saiu com o `X-Tenant-Id`
+        // errado ainda grudado, embora o bloco síncrono logo acima já tivesse
+        // corrigido `activeTenant` corretamente pro tenant de login. Quando a
+        // resposta chega, ela then reflete o tenant ERRADO (não o de login) —
+        // aplicá-la sem checar desfaz a correção síncrona, prendendo
+        // `activeTenant` (e todo fetch que depende dele — conversas, CRM,
+        // etc.) no tenant errado até o próximo F5 acidentalmente "acertar" a
+        // ordem do cache. Nunca aplica um tenant diferente do tenant de login
+        // real do operador; esta chamada só serve pra enriquecer
+        // currency/locale do tenant que a correção síncrona já escolheu.
+        if (data.tenant.id !== currentUser.tenantId) return;
         // currency/locale entraram aqui (19/08/2026) pro Financeiro formatar
         // valores na moeda real do tenant em vez de R$/pt-BR fixo.
         setActiveTenant((prev) =>
@@ -435,15 +526,17 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Financial Transactions — mesmo raciocínio do fix de leads fake
-  // (12/08/2026): cache vazio nunca deveria cair pro dataset fictício, senão
-  // dado de demonstração "gruda" pra sempre (o merge com transações reais,
-  // GET /api/financial/transactions abaixo, só ADICIONA por id, nunca
-  // remove). Começa vazia.
-  const [transactions, setTransactions] = useState<FinancialTransaction[]>(() => {
-    const saved = localStorage.getItem(transactionsCacheKey(activeTenant.id));
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Financial Transactions — achado real de auditoria (TASK-0249/TASK-0274,
+  // mesmo padrão do CodeQL "Clear text storage of sensitive information" já
+  // corrigido pro cache de leads em WhatsAppLeadsSim.tsx, TASK-0243): esse
+  // estado chegou a persistir em localStorage (nome/telefone do lead, valor,
+  // pixQrCode, paymentLinkUrl) sem nenhuma criptografia. Confirmado que era
+  // só cache-pra-performance (pintura instantânea antes do fetch real
+  // responder) — nenhum comportamento real dependia dele, o merge com dado
+  // real (GET /api/financial/transactions abaixo) sempre sobrescreve. Lista
+  // começa vazia e é populada pelo fetch real a cada carregamento/troca de
+  // tenant, mesma correção aplicada ao cache de leads.
+  const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
 
   // Despesas recorrentes (TASK-0097) — cadastro, não precisa do mesmo cache
   // local otimista dos leads/transações (baixo volume, sem tela offline
@@ -476,6 +569,138 @@ export const App: React.FC = () => {
   // oferecer horário fora do expediente; até aqui só existia via SQL direto,
   // sem nenhuma tela pro operador ver ou editar.
   const [businessHours, setBusinessHours] = useState<BusinessHours>({});
+
+  // true quando uma conversa está aberta no mobile (WhatsAppLeadsSim avisa
+  // via onThreadOpenChange) — usado pra esconder o cabeçalho global
+  // (Header.tsx: marca, seletor de idioma/tema) e o cabeçalho fino do
+  // Atendimento enquanto o operador está numa conversa, igual ao app real
+  // do WhatsApp (pedido direto, 29/08/2026). Sem efeito no desktop.
+  const [isMobileWhatsAppThreadOpen, setIsMobileWhatsAppThreadOpen] = useState(false);
+
+  // TASK-0326 (pedido direto, comparando prints anotados): o botão "Agenda"
+  // da barra inferior abria coisas diferentes dependendo de onde o operador
+  // estava — dentro de Conversas abria um popup rápido de próximos eventos
+  // (handleOpenUpcomingEvents, estado local de WhatsAppLeadsSim); dentro de
+  // Pendências (AtendimentoSecondaryNav, componente irmão, fora da árvore de
+  // WhatsAppLeadsSim) navegava pra página completa da Agenda. Decisão do
+  // dono do produto: sempre o popup rápido, em qualquer tela. Como o popup
+  // é estado local de WhatsAppLeadsSim, a única forma seguro sem içar toda a
+  // lógica de Google Calendar pra cá é: navegar pra Conversas e sinalizar
+  // aqui qual ação pendente ela deve dar 1 vez ao montar/perceber o sinal
+  // (mesmo padrão de `openLeadRequestId` — WhatsAppLeadsSim consome e avisa
+  // de volta). Também cobre "Ferramentas", que também só existia dentro de
+  // Conversas e não tinha equivalente em Pendências/Agenda.
+  const [pendingConversasAction, setPendingConversasAction] = useState<'openTools' | null>(null);
+
+  // TASK-0290 (pedido direto, print do botão físico/gesto de voltar do
+  // Android circulado): "esse botão minimiza o aplicativo e não volta as
+  // páginas dentro do aplicativo". Achado real: o app inteiro nunca chamou
+  // `history.pushState` — sem nenhuma entrada própria no histórico do
+  // navegador/WebView, o botão de voltar do Android não tem nada pra
+  // "desfazer" e cai direto no comportamento padrão (minimizar/fechar a
+  // PWA). Corrigido empilhando uma entrada toda vez que o app fica "mais
+  // fundo" (troca de aba saindo de "Hoje", ou abre uma conversa no mobile)
+  // e escutando `popstate` pra desfazer exatamente um nível por vez — só
+  // quando já está em "Hoje" sem conversa aberta é que sobra pro
+  // comportamento nativo (minimizar), exatamente o pedido.
+  const isMobileWhatsAppThreadOpenRef = useRef(isMobileWhatsAppThreadOpen);
+  useEffect(() => { isMobileWhatsAppThreadOpenRef.current = isMobileWhatsAppThreadOpen; }, [isMobileWhatsAppThreadOpen]);
+  const [closeThreadSignal, setCloseThreadSignal] = useState(0);
+  // Evita que o próprio `setActiveTab`/fechamento disparado pelo popstate
+  // empilhe uma entrada NOVA (o que faria o histórico crescer sem fim e a
+  // volta nunca "andar" de verdade) — sem isso o efeito de push abaixo não
+  // sabe distinguir "usuário navegou pra frente" de "voltamos por causa do
+  // botão de voltar".
+  const suppressTabPushRef = useRef(false);
+  useEffect(() => {
+    if (suppressTabPushRef.current) { suppressTabPushRef.current = false; return; }
+    if (activeTab !== 'whatsapp') {
+      window.history.pushState({ universoNav: 'tab', tab: activeTab }, '');
+    }
+  }, [activeTab]);
+  useEffect(() => {
+    if (isMobileWhatsAppThreadOpen) {
+      window.history.pushState({ universoNav: 'thread' }, '');
+    }
+    // Fechar a conversa manualmente (botão "voltar pra lista" dentro do
+    // app, não o botão do Android) não desempilha a entrada — aceito como
+    // limitação conhecida: na pior hipótese sobra 1 aperto de voltar "à
+    // toa" antes de sair de verdade, nunca uma trava sem conseguir sair.
+  }, [isMobileWhatsAppThreadOpen]);
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      if (isMobileWhatsAppThreadOpenRef.current) {
+        setCloseThreadSignal((n) => n + 1);
+        return;
+      }
+      const state = event.state as { universoNav?: string; tab?: ActiveTab } | null;
+      suppressTabPushRef.current = true;
+      handleSetActiveTab(state?.universoNav === 'tab' && state.tab ? state.tab : 'whatsapp');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // TASK-0337 (pedido direto, prints reais mostrando que a TASK-0333 —
+  // trocar vh por dvh — não resolveu de verdade): a "faixa vazia" embaixo
+  // da barra inferior, ao abrir a Agenda, continuou aparecendo mesmo depois
+  // da troca pra `dvh`. `dvh`/`svh`/`env(safe-area-inset-bottom)` têm
+  // suporte inconsistente entre navegadores/skins Android (ex: MIUI) — o
+  // valor que `100dvh` resolve nem sempre bate com a altura real e visível
+  // da viewport nesse aparelho. Em vez de confiar só em unidades CSS,
+  // mede a altura real via `window.visualViewport` (o padrão mais robusto
+  // pra esse problema, atualizado a cada resize/scroll do teclado/barra do
+  // navegador) e alimenta `--real-vh`, usada como valor preferido (com
+  // `dvh` só de fallback) no `body` (index.css) e no wrapper raiz abaixo.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const applyRealVh = () => {
+      const height = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--real-vh', `${height}px`);
+    };
+    applyRealVh();
+    const viewport = window.visualViewport;
+    if (viewport) {
+      viewport.addEventListener('resize', applyRealVh);
+      viewport.addEventListener('scroll', applyRealVh);
+    }
+    window.addEventListener('resize', applyRealVh);
+    window.addEventListener('orientationchange', applyRealVh);
+    return () => {
+      if (viewport) {
+        viewport.removeEventListener('resize', applyRealVh);
+        viewport.removeEventListener('scroll', applyRealVh);
+      }
+      window.removeEventListener('resize', applyRealVh);
+      window.removeEventListener('orientationchange', applyRealVh);
+    };
+  }, []);
+
+  // Achado real, 29/08/2026 (TASK-0159 resolveu a cadeia de flex interna do
+  // Atendimento, mas a lista de conversas mobile — cabeçalho global visível —
+  // continuava passando um pouco da tela): o wrapper do Atendimento em
+  // App.tsx usa `h-[calc(100dvh-1.5rem)]`, que só cancela o padding do
+  // próprio `.app-main` — nunca soube quanto o <Header/> acima dele mede de
+  // verdade (varia por breakpoint/conteúdo do seletor de empresa). Em vez de
+  // chutar mais um valor fixo (mesmo erro das seis tentativas anteriores),
+  // mede a altura real do Header via ResizeObserver — inclusive quando ele
+  // vira `display:none` (fica 0 automaticamente) enquanto uma conversa está
+  // aberta — e alimenta uma custom property CSS que o cálculo usa.
+  const atendimentoHeaderRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = atendimentoHeaderRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const applyHeight = (height: number) => {
+      document.documentElement.style.setProperty('--atendimento-header-h', `${height}px`);
+    };
+    applyHeight(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) applyHeight(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Transcripts
   const [savedTranscripts, setSavedTranscripts] = useState<SavedTranscriptItem[]>([]);
@@ -582,7 +807,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     setUnauthorizedHandler(() => {
       setCurrentUser(null);
-      setAuthToken(null);
       setIsLoginModalOpen(true);
       clearCachedTenantScopedData();
       showToast('Sessão expirada — faça login novamente.');
@@ -606,24 +830,39 @@ export const App: React.FC = () => {
   useEffect(() => {
     const cachedLeads = localStorage.getItem(leadsCacheKey(activeTenant.id));
     setLeads(cachedLeads ? JSON.parse(cachedLeads) : []);
-    const cachedTx = localStorage.getItem(transactionsCacheKey(activeTenant.id));
-    setTransactions(cachedTx ? JSON.parse(cachedTx) : []);
+    setTransactions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTenant.id]);
 
+  // Purga ativa, uma vez por montagem (mesmo padrão de WhatsAppLeadsSim.tsx,
+  // TASK-0243): navegadores que usaram o painel antes desta correção podem
+  // ter transações financeiras reais em texto puro gravadas de uma sessão
+  // anterior — sem isso, ficariam lá indefinidamente, já que parar de
+  // escrever não apaga o que já foi escrito. Varre todos os tenants (não só
+  // o ativo); a limpeza de logout (clearCachedTenantScopedData) continua
+  // existindo, mas só roda no logout.
   useEffect(() => {
-    safeSetLocalStorage(transactionsCacheKey(activeTenant.id), JSON.stringify(transactions));
-  }, [transactions, activeTenant.id]);
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('saas_transactions_')) localStorage.removeItem(key);
+    }
+  }, []);
 
-  // As fotos de exemplo (`exampleImageBase64`, Epic 4.5.2) são o que estoura
-  // a cota — e não precisam estar no cache: são carregadas de novo, completas,
+  // As fotos de exemplo em Base64 legado (Epic 4.5.2) são o que estoura a
+  // cota — e não precisam estar no cache: são carregadas de novo, completas,
   // do backend real logo abaixo (GET /api/knowledge-base) toda vez que a
   // página abre. O cache existe só pra evitar a tela vazia entre o primeiro
-  // render e essa busca terminar, não pra guardar imagem nenhuma.
+  // render e essa busca terminar, não pra guardar imagem nenhuma. Fotos já
+  // migradas pro Storage (`exampleImageId` etc.) são ids curtos — seguras
+  // pro cache, ficam.
   useEffect(() => {
     const cacheableKb = {
       ...knowledgeBase,
-      products: knowledgeBase.products.map(({ exampleImageBase64, exampleImageMimeType, ...rest }) => rest),
+      products: knowledgeBase.products.map(stripLegacyImageBase64FromProduct),
+      firstContactBlocks: knowledgeBase.firstContactBlocks?.map((block) => {
+        if (block.type !== 'image') return block;
+        const { imageBase64, ...rest } = block;
+        return rest;
+      }),
     };
     safeSetLocalStorage(kbCacheKey(activeTenant.id), JSON.stringify(cacheableKb));
   }, [knowledgeBase, activeTenant.id]);
@@ -668,42 +907,75 @@ export const App: React.FC = () => {
     // knowledge_base ainda — o guard abaixo nem troca esse estado, então
     // ficava assim pra sempre, não só "por um instante"). emptyKnowledgeBase
     // é o fallback correto.
-    const cachedForTenant = localStorage.getItem(kbCacheKey(activeTenant.id));
+    const tenantId = activeTenant.id;
+    const cachedForTenant = localStorage.getItem(kbCacheKey(tenantId));
     setKnowledgeBase(cachedForTenant ? JSON.parse(cachedForTenant) : emptyKnowledgeBase);
-    apiFetch('/api/knowledge-base')
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (cancelled) return;
-        if (data?.knowledgeBase) {
-          setKnowledgeBase((prev) => ({
-            ...prev,
-            ...data.knowledgeBase,
-            products: data.knowledgeBase.products || prev.products || [],
-            businessRules: data.knowledgeBase.businessRules || prev.businessRules || [],
-            faqs: data.knowledgeBase.faqs || prev.faqs || [],
-            documents: data.knowledgeBase.documents || prev.documents || [],
-          }));
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setKbLoaded(true);
-      });
+    const fetchKnowledgeBase = () => {
+      apiFetch('/api/knowledge-base')
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (cancelled) return;
+          if (data?.knowledgeBase) {
+            setKnowledgeBase((prev) => ({
+              ...prev,
+              ...data.knowledgeBase,
+              products: data.knowledgeBase.products || prev.products || [],
+              businessRules: data.knowledgeBase.businessRules || prev.businessRules || [],
+              faqs: data.knowledgeBase.faqs || prev.faqs || [],
+              documents: data.knowledgeBase.documents || prev.documents || [],
+            }));
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setKbLoaded(true);
+        });
+    };
+    fetchKnowledgeBase();
+    // TASK-0308: o editor tipado (AgentKnowledgeBase.tsx) publica direto,
+    // sem nunca remontar esta tela — sem isso, este estado (usado por
+    // WhatsAppLeadsSim e PublicCatalogSettings) só refletia uma publicação
+    // depois de um F5 ou de trocar de tenant. Mesmo formato do listener de
+    // universo:entitlements-changed acima, agora com um dispatcher real do
+    // outro lado (ver handlePublishTypedDrafts).
+    const onKnowledgeBasePublished = (event: Event) => {
+      const publishedTenantId = (event as CustomEvent<{ tenantId?: string }>).detail?.tenantId;
+      if (publishedTenantId === tenantId) fetchKnowledgeBase();
+    };
+    window.addEventListener('universo:knowledge-base-published', onKnowledgeBasePublished);
     return () => {
       cancelled = true;
+      window.removeEventListener('universo:knowledge-base-published', onKnowledgeBasePublished);
     };
   }, [activeTenant.id]);
 
   // Busca o horário de funcionamento real salvo no backend (usado pelo
   // agendamento automático de verdade) e sincroniza no painel, se existir.
+  // TASK-0306 (achado real, pedido direto: "já fizemos várias tentativas mas
+  // os horários ainda não persistem"): confirmado no Supabase que o valor
+  // estava salvo corretamente no tenant (seg-sáb 09:00-18:00) — o problema
+  // nunca foi a gravação, e sim esta busca. Ela tinha `useEffect(..., [])`,
+  // sem depender de `currentUser`: dispara uma ÚNICA vez, no mount, usando o
+  // token/`X-Tenant-Id` que existir NAQUELE instante — se rodar antes da
+  // sessão terminar de resolver (ou antes do saas_admin trocar de empresa),
+  // a resposta vem vazia/errada e NUNCA tenta de novo pelo resto da sessão,
+  // mesmo depois do login terminar ou da troca de tenant. Mesma classe de
+  // bug já encontrada e corrigida 3x neste mesmo arquivo (linhas ~246, ~281,
+  // ~327) — todas guardam com `if (!currentUser) return;` e reagem a
+  // `currentUser`/`activeTenant.id` nas deps; esta busca era a única que
+  // ainda faltava esse tratamento. Também passa a resetar pra `{}` quando o
+  // backend não devolve nada (antes só atualizava se viesse algo, então uma
+  // troca de tenant sem horário configurado continuava mostrando o horário
+  // do tenant anterior).
   useEffect(() => {
+    if (!currentUser) return;
     apiFetch('/api/business-hours')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.businessHours) setBusinessHours(data.businessHours);
+        setBusinessHours(data?.businessHours || {});
       })
       .catch(() => {});
-  }, []);
+  }, [currentUser?.id, activeTenant.id]);
 
   // [CRM] Achado real em produção: OperatorCRM.tsx era 100% mock/localStorage
   // — leads reais que já chegam via WhatsApp nunca apareciam no CRM a menos
@@ -1028,6 +1300,25 @@ export const App: React.FC = () => {
     }
   };
 
+  // Restrito a saas_admin (checado de novo no backend, ver requireRole na
+  // rota) — apaga o caso e o histórico de auditoria de vez, sem passar pela
+  // aba Arquivados. Pedido do gestor (28/08/2026): testes do próprio time
+  // (ex: número pessoal usado pra testar o agente) contaminavam a fila real
+  // de escalonamentos e o "Arquivar" normal não tirava o caso de circulação
+  // de verdade.
+  const handlePermanentlyDeleteEscalation = async (id: string, contactLabel: string) => {
+    if (!window.confirm(`Excluir definitivamente o escalonamento de "${contactLabel}"? Essa ação não pode ser desfeita e não fica na aba Arquivados.`)) return;
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/permanent`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setEscalations((prev) => prev.filter((e) => e.id !== id));
+      showToast('Escalonamento excluído definitivamente.');
+    } catch (err) {
+      console.error('Falha ao excluir escalonamento definitivamente:', err);
+      showToast('Não foi possível excluir esse escalonamento. Tente de novo.');
+    }
+  };
+
   const handleRestoreEscalation = async (id: string) => {
     try {
       const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/restore`, { method: 'POST' });
@@ -1050,7 +1341,11 @@ export const App: React.FC = () => {
       const sendRes = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        // escalationId: evita que o envio já auto-resolva este caso (achado
+        // real, 29/08/2026 — ver resolveOpenEscalationsAfterManualReply em
+        // conversations.ts) — a chamada seguinte fecha com o código e o
+        // exemplo aprovado corretos.
+        body: JSON.stringify({ text, escalationId: id }),
       });
       const sendData = await sendRes.json().catch(() => null);
       if (!sendRes.ok) throw new Error(sendData?.error || `HTTP ${sendRes.status}`);
@@ -1099,6 +1394,7 @@ export const App: React.FC = () => {
           pixQrCode: newTx.pixQrCode,
           paymentLinkUrl: newTx.paymentLinkUrl,
           entryType: newTx.entryType,
+          sourceRef: newTx.sourceRef,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1205,6 +1501,22 @@ export const App: React.FC = () => {
     showToast(`Empresa alterada para: ${tenant.name}`);
   };
 
+  // TASK-0331 (pedido direto): extraído de dentro do JSX do <Header> pra
+  // ser reaproveitado também por <WhatsAppLeadsSim> — o botão "Sair" saiu
+  // do menu ⋮ (eliminado) e mudou pra dentro da gaveta Ferramentas.
+  const handleLogout = () => {
+    // TASK-0311 (TASK-0249 item 1): o cookie httpOnly não pode ser
+    // apagado pelo JS — precisa desse POST pro backend limpar de
+    // verdade (senão a sessão "volta" no próximo reload).
+    void apiFetch('/api/auth/logout', { method: 'POST' });
+    handleSetActiveTab('whatsapp');
+    setCurrentUser(null);
+    setIsSaasSessionConfirmed(false);
+    setIsLoginModalOpen(true);
+    clearCachedTenantScopedData();
+    showToast('Sessão encerrada');
+  };
+
   // Tab Cross-Navigation Handlers
   const handleNavigateToFinancial = (lead: LeadInfo) => {
     if (!canSeeFinancial) {
@@ -1216,39 +1528,141 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
-      
-      {/* Header Navigation */}
+    // TASK-0333 (pedido direto, prints comparando Escalonamentos/Conversas
+    // "normais" com uma faixa vazia embaixo da barra inferior ao abrir
+    // Agenda/Ferramentas no mobile): `min-h-screen` (100vh) não acompanha o
+    // chrome dinâmico do navegador mobile — o resto do app já mede altura
+    // via `dvh` (App.tsx mais abaixo, .atendimento-workspace etc.), que
+    // encolhe/cresce junto quando a barra de endereço reaparece/some. Como
+    // este wrapper raiz ficava preso em `100vh` (o valor "grande", medido
+    // com a barra escondida), sobrava um vão do tamanho da diferença sempre
+    // que algo (como os popups fixed em tela cheia de Agenda/Ferramentas)
+    // fazia o navegador reexibir a barra — exatamente a "faixa embaixo"
+    // relatada. Trocado por `min-h-dvh` — mas isso sozinho não resolveu de
+    // verdade em todo aparelho Android (ver TASK-0337 acima, `--real-vh`
+    // medido via `visualViewport`, mais robusto que `dvh` puro).
+    <div className="min-h-[var(--real-vh,100dvh)] bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
+
+      {/* Faixa de aviso persistente de impersonação (TASK-0363) — fora do
+          wrapper que se esconde com uma conversa aberta no mobile (abaixo),
+          de propósito: quem está impersonando precisa SEMPRE conseguir ver
+          que está numa sessão emprestada e voltar, em qualquer tela/aba. */}
+      {impersonation.active && (
+        <div className="sticky top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-amber-500 px-3 py-2 text-center text-xs font-semibold text-slate-950">
+          <span>
+            Você está vendo como <strong>{currentUser?.name || 'este usuário'}</strong>
+            {impersonation.byOperatorName ? ` (impersonado por ${impersonation.byOperatorName})` : ''}.
+          </span>
+          <button
+            type="button"
+            onClick={handleEndImpersonation}
+            disabled={isEndingImpersonation}
+            className="rounded-lg bg-slate-950 px-2.5 py-1 text-[11px] font-bold text-amber-300 transition hover:bg-slate-900 disabled:opacity-50"
+          >
+            {isEndingImpersonation ? 'Voltando...' : 'Voltar para admin'}
+          </button>
+        </div>
+      )}
+
+      {/* Header Navigation — escondido no mobile enquanto uma conversa está
+          aberta no Atendimento (pedido direto, 29/08/2026: "esse menu e
+          cabeçalho não precisa em cima"; o seletor de idioma/tema também
+          sai daqui, junto do resto do Header). No desktop continua sempre
+          visível — as três colunas do Atendimento já ficam lado a lado lá,
+          então não existe o "modo conversa em tela cheia" que faz sentido
+          só no mobile. */}
+      <div ref={atendimentoHeaderRef} className={isMobileWhatsAppThreadOpen ? 'hidden lg:block' : ''}>
       <Header
         activeTab={activeTab}
         setActiveTab={handleSetActiveTab}
         savedCount={savedTranscripts.length}
         currentUser={currentUser}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
-        onLogout={() => {
-          handleSetActiveTab('home');
-          setCurrentUser(null);
-          setAuthToken(null);
-          setIsSaasSessionConfirmed(false);
-          setIsLoginModalOpen(true);
-          clearCachedTenantScopedData();
-          showToast('Sessão encerrada');
-        }}
+        onLogout={handleLogout}
         tenants={tenants}
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
                 capabilities={tenantCapabilities}
         canAccessSaasAdmin={canSeeSaasMaster}
+        escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
+        onOpenChangePasswordModal={() => setIsChangePasswordModalOpen(true)}
+        onToast={showToast}
       />
-      {activeTab !== 'whatsapp' && canSeeConversations && (
+      </div>
+      {/* TASK-0319 (pedido direto, 2 prints anotados do celular): em
+          Escalonamentos/Agenda o `AtendimentoSecondaryNav` abaixo já cobre
+          a volta pra Conversas com o mesmo "menu de baixo" que o usuário
+          pediu de volta — manter o atalho flutuante redundante ali também
+          só duplicaria/sobreporia UI no mobile (os dois são `fixed` perto
+          do rodapé). Nos demais módulos (CRM, Financeiro, Qualidade, Logs,
+          Disparo) o atalho continua sendo o único caminho de volta. */}
+      {activeTab !== 'whatsapp' && activeTab !== 'escalations' && activeTab !== 'agenda' && canSeeConversations && (
         <FloatingAttendanceButton
           storageKey={`floating_attendance_position:${currentUser?.id || 'guest'}`}
           onOpen={() => handleSetActiveTab('whatsapp')}
         />
       )}
+      {(activeTab === 'escalations' || activeTab === 'agenda') && canSeeConversations && (
+        <AtendimentoSecondaryNav
+          activeTab={activeTab}
+          onGoToConversas={() => handleSetActiveTab('whatsapp')}
+          onGoToEscalations={() => handleSetActiveTab('escalations')}
+          onGoToAgenda={canSeeAgenda ? () => handleSetActiveTab('agenda') : undefined}
+          onGoToTools={() => { handleSetActiveTab('whatsapp'); setPendingConversasAction('openTools'); }}
+          escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
+        />
+      )}
 
       {/* Main Content Area */}
-      <main className="app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8">
+      {/* app-main--atendimento — achado real, 29/08/2026: o
+          .atendimento-chat-shell já é desenhado pra ir de ponta a ponta na
+          tela (border-0 rounded-none, fundo #111b21 igual ao WhatsApp real),
+          mas o padding horizontal do .app-main (herdado por TODAS as abas)
+          nunca era zerado — sobrava uma faixa da cor de fundo do app
+          (--surface-deep, quase preto) nas duas laterais, exatamente onde o
+          WhatsApp real não deixa nenhuma. Escopo ampliado (TASK-0163
+          cobria só a conversa aberta): o dono do produto apontou que a
+          MESMA faixa lateral aparece na lista de conversas também, ao redor
+          da barra de abas inferior (.atendimento-bottom-nav, que tem seu
+          próprio fundo --surface-panel) — por isso a condição não depende
+          mais de `isMobileWhatsAppThreadOpen`, só da aba ativa.
+
+          TASK-0221 (03/09/2026): o zeramento que até aqui só cobria
+          mobile/tablet (padding lateral sempre, padding vertical só abaixo
+          de `lg`) passou a valer em qualquer largura — `.app-main.app-main
+          --atendimento` no index.css agora também zera `max-width` (a
+          classe utilitária `max-w-7xl` acima é herdada por TODAS as abas,
+          mas some pro Atendimento) e todo o padding, inclusive em `lg`, a
+          pedido direto do dono do produto pra ocupar 100% da tela também
+          em desktop, sem cartão flutuante nem faixas de fundo nas
+          laterais.
+
+          TASK-0231 (pedido direto, 03/09/2026): mesmo tratamento
+          estendido pra aba "Qualidade da IA" — `.app-main--quality` reusa
+          a MESMA regra CSS de `.app-main--atendimento` (index.css, `.app-
+          main.app-main--atendimento, .app-main.app-main--quality { max-
+          width: none; padding: 0; }`), zerando padding/max-width só
+          nessa aba. `OperationsModuleFrame` (que envolve o conteúdo desta
+          aba) já tem seu próprio card com padding/borda/cantos
+          arredondados — não depende do padding do `.app-main` pra ter
+          respiro, então zerar aqui é seguro (mesma lógica já validada no
+          Atendimento). */}
+      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${
+        activeTab === 'whatsapp' ? ' app-main--atendimento'
+        : activeTab === 'quality' ? ' app-main--quality'
+        // TASK-0319 (pedido direto, "o sistema utiliza páginas de borda a
+        // borda" comparando Escalonamentos com Atendimento/Qualidade da
+        // IA): mesmo tratamento — `OperationsModuleFrame` (hideHeader) já
+        // dá o próprio respiro via card com borda/padding, então zerar o
+        // padding do `.app-main` aqui é seguro (mesma lógica das duas
+        // abas acima). `pb-*` extra (regra dedicada em index.css) evita o
+        // `AtendimentoSecondaryNav` fixo cobrir o fim da lista no mobile.
+        : activeTab === 'escalations' ? ' app-main--escalations'
+        // Agenda não pediu tratamento borda a borda — só precisa do
+        // mesmo respiro extra embaixo pro AtendimentoSecondaryNav fixo.
+        : activeTab === 'agenda' ? ' pb-24 lg:pb-8'
+        : ''
+      }`}>
         
         {/* Toast Alert */}
         {toastMsg && (
@@ -1257,42 +1671,43 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'home' && (
-          <OperationsHomeWorkspace
-            activeTenant={activeTenant}
-            currentUser={currentUser}
-            leads={leads}
-            transactions={transactions}
-            escalations={escalations}
-            knowledgeBase={knowledgeBase}
-            businessHours={businessHours}
-            canSeeAgenda={canSeeAgenda}
-            canSeeFinancial={canSeeFinancial}
-            canSeeAdminTools={canSeeAdminTools}
-            onNavigate={handleSetActiveTab}
-          />
-        )}
-
+        {/* TASK-0301 (pedido direto): o painel "Hoje" (Prioridades/Atalhos/
+            Configurar) saiu — Atendimento agora é a tela padrão do sistema.
+            Só a etapa "Configurar" sobrevive, focada na ativação de um tenant
+            novo (checklist de canal/contexto/agenda/serviços) — mora agora
+            dentro de Empresas, visível só pra quem já enxerga essa aba
+            (saas_admin). Prioridades/Atalhos (fila de pendências, métricas,
+            acessos rápidos) foram excluídos por pedido direto — "vamos
+            refinar isso futuramente". */}
         {activeTab === 'saas' && canSeeSaasMaster && (
-          <SaaSAdminDashboard
-            tenants={tenants}
-            activeTenant={activeTenant}
-            onSelectTenant={handleSelectTenant}
-            onEnterTenant={(tenant) => {
-              handleSelectTenant(tenant);
-              handleSetActiveTab('home');
-            }}
-            onAddTenant={(newT) => {
-              setTenants((prev) => [newT, ...prev]);
-              showToast(`Nova empresa ${newT.name} cadastrada`);
-            }}
-            onUpdateTenant={(updatedT) => {
-              setTenants((prev) => prev.map((t) => (t.id === updatedT.id ? updatedT : t)));
-              if (activeTenant.id === updatedT.id) setActiveTenant(updatedT);
-              showToast('Empresa atualizada');
-            }}
-            currentUser={currentUser || GUEST_USER}
-          />
+          <>
+            <TenantActivationChecklist
+              status={evaluateTenantActivation(activeTenant, knowledgeBase, businessHours)}
+              canConfigure={canSeeAdminTools}
+              onNavigate={handleSetActiveTab}
+            />
+            <Suspense fallback={<TabLoadingFallback />}>
+              <SaaSAdminDashboard
+                tenants={tenants}
+                activeTenant={activeTenant}
+                onSelectTenant={handleSelectTenant}
+                onEnterTenant={(tenant) => {
+                  handleSelectTenant(tenant);
+                  handleSetActiveTab('whatsapp');
+                }}
+                onAddTenant={(newT) => {
+                  setTenants((prev) => [newT, ...prev]);
+                  showToast(`Nova empresa ${newT.name} cadastrada`);
+                }}
+                onUpdateTenant={(updatedT) => {
+                  setTenants((prev) => prev.map((t) => (t.id === updatedT.id ? updatedT : t)));
+                  if (activeTenant.id === updatedT.id) setActiveTenant(updatedT);
+                  showToast('Empresa atualizada');
+                }}
+                currentUser={currentUser || GUEST_USER}
+              />
+            </Suspense>
+          </>
         )}
 
         {/* Sempre montado (visibilidade controlada por CSS, não por
@@ -1302,22 +1717,63 @@ export const App: React.FC = () => {
             perdendo temporariamente mensagens reais recém-chegadas do
             polling até o próximo ciclo de 8s. Bug real relatado em
             produção: mensagem aparecia e sumia da conversa. */}
-        {canSeeConversations && <div style={{ display: activeTab === 'whatsapp' ? 'block' : 'none' }}>
-          <AtendimentoWorkspaceFrame
-            activeTenantName={activeTenant.name}
-            activeTenant={activeTenant}
-            tenants={tenants}
-            canSwitchTenant={canSeeSaasMaster}
-            onSelectTenant={handleSelectTenant}
-            pendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
-            leadCount={leads.length}
-            onOpenEscalations={() => handleSetActiveTab('escalations')}
-          >
+        {/* flex flex-col + altura explícita: sem isso, o
+            .atendimento-chat-shell interno (WhatsAppLeadsSim) não tem uma
+            altura real de referência pra se basear e sobrava/faltava
+            espaço em telas reais — achado real em produção, 29/08/2026,
+            depois de três rodadas anteriores tentando acertar com valores
+            fixos de dvh (TASK-0150/0153/0157).
+
+            Achado real, 29/08/2026 (TASK-0162): esse cálculo nunca soube
+            quanto o <Header/> global mede quando está visível (lista de
+            conversas, sem conversa aberta) — sobrava exatamente essa altura
+            embaixo da tela, mesmo depois da TASK-0159 corrigir a cadeia de
+            flex interna. var(--atendimento-header-h) é medida de verdade via
+            ResizeObserver (ver useEffect perto de isMobileWhatsAppThreadOpen)
+            — 0px quando o Header está escondido (conversa aberta), altura
+            real caso contrário. Sem isso, mais um valor chutado igual às
+            seis tentativas anteriores.
+
+            Achado real, 01/09/2026 (TASK-0184): até aqui o cálculo também
+            subtraía 1.5rem (mobile) / 3rem (sm), pra cancelar o padding
+            vertical do .app-main (p-3/sm:p-6) que sobrava como faixa preta
+            acima e abaixo da tela. Em vez de cancelar o padding só na
+            altura, ele foi zerado na raiz (ver
+            `.app-main.app-main--atendimento` no index.css, abaixo de
+            1024px) — nada a subtrair abaixo de `lg`.
+
+            Achado real, 01/09/2026 (TASK-0212): até aqui, em `lg` (desktop),
+            a aba escapava pro fluxo normal (`lg:block lg:h-auto`) e o
+            `.atendimento-chat-shell` tentava se virar sozinho com uma altura
+            fixa chutada (`lg:h-[calc(100dvh-154px)]`) — nunca soube que era
+            irmã da caixa de ferramentas acima dela nem que o `.app-main`
+            mantém o padding vertical em `lg` (só é zerado abaixo de 1024px;
+            em `lg` fica de propósito, pra dar respiro ao redor do card
+            arredondado da conversa — diferente do mobile "edge to edge").
+            Resultado: a soma de tudo passava de `100dvh`, gerando rolagem
+            na página inteira (pedido direto pra eliminar, comparando com o
+            WhatsApp Web). Agora a aba fica com altura limitada em QUALQUER
+            largura — sem escape pra `lg:h-auto` — e o `lg:h-[...]` extra
+            subtrai também o padding vertical de `.app-main` nesse breakpoint
+            (`lg:p-8` = 2rem de cada lado = 4rem no total) já que ele
+            continua existindo ali. O `.atendimento-chat-shell` (WhatsAppLeadsSim)
+            passou de altura fixa pra `lg:flex-1 lg:min-h-0`, dividindo esse
+            espaço já correto via flexbox em vez de mais um número mágico.
+
+            Achado real, 03/09/2026 (TASK-0221): o "respiro" de `lg:p-8` em
+            `.app-main` (que motivava a subtração extra de `4rem` só em `lg`,
+            acima) foi removido — `.app-main.app-main--atendimento` agora
+            zera padding em qualquer largura (index.css), pedido direto do
+            dono do produto pra página ocupar 100% da tela em desktop
+            também, sem cartão flutuante. Sem mais padding pra cancelar, a
+            mesma fórmula da TASK-0162 (sem a subtração extra) já serve pra
+            qualquer largura — removida a variante `lg:` diferente. */}
+        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-var(--atendimento-header-h,0px))]' : 'hidden'}>
+          <AtendimentoWorkspaceFrame>
           <WhatsAppLeadsSim
             key={activeTenant.id}
             knowledgeBase={knowledgeBase}
             activeTenant={activeTenant}
-            canManageWhatsAppConnection={canSeeAdminTools}
             onSaveTranscript={(item) => {
               setSavedTranscripts((prev) => [item, ...prev]);
               showToast('Atendimento salvo no histórico');
@@ -1328,28 +1784,61 @@ export const App: React.FC = () => {
             }}
             onDeleteLead={handleDeleteLead}
             escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
+            // TASK-0187 (pedido direto, 01/09/2026): antes só o número
+            // agregado chegava aqui — o alerta de escalonamento específico
+            // de UMA conversa aberta só existia como um evento SSE
+            // transitório (aiReplyStatusByPhone, some sozinho em 9s, real
+            // incidente relatado: "não consigo perceber" quando o revisor
+            // trava a resposta ou vira escalonamento). Agora a lista real
+            // (persistida) desce inteira, pra WhatsAppLeadsSim conseguir
+            // achar e manter visível o escalonamento aberto do lead atual.
+            escalations={escalations}
             onGoToEscalations={() => handleSetActiveTab('escalations')}
+            onGoToAgenda={canSeeAgenda ? () => handleSetActiveTab('agenda') : undefined}
+            onGoToCrm={canSeeCrm ? () => handleSetActiveTab('crm') : undefined}
+            onGoToFinancial={canSeeFinancial ? () => handleSetActiveTab('financial') : undefined}
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
+            onThreadOpenChange={setIsMobileWhatsAppThreadOpen}
+            financialModuleEnabled={canSeeFinancial}
+            onAddTransaction={handleAddTransaction}
+            operatorName={currentUser?.name}
+            closeThreadSignal={closeThreadSignal}
+            pendingConversasAction={pendingConversasAction}
+            onPendingConversasActionHandled={() => setPendingConversasAction(null)}
+            onToast={showToast}
+            onSelectTab={handleSetActiveTab}
+            canSeeGrowth={canSeeGrowth}
+            canManageAgent={canManageAgent}
+            canSeeCatalog={canSeeCatalog}
+            canSeeQuality={canSeeQuality}
+            canSeeSystemLogs={canSeeSystemLogs}
+            canSeeBroadcast={canSeeBroadcast}
+            canSeeSaasMaster={canSeeSaasMaster}
+            tenants={tenants}
+            onSelectTenant={handleSelectTenant}
+            onLogout={handleLogout}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}
         {activeTab === 'crm' && canSeeCrm && (
           <OperationsModuleFrame title="CRM e Vendas" eyebrow="Relacionamento comercial" description="Acompanhe oportunidades, clientes e próximas ações em uma visão conectada ao atendimento." accent="blue" compact>
-          <CrmWorkspace
-            leads={leads}
-            onUpdateLead={handleUpdateLead}
-            onDeleteLead={handleDeleteLead}
-            onClearAllLeads={() => {
-              setLeads([]);
-              showToast('Leads limpos do CRM');
-            }}
-            currentUser={currentUser || GUEST_USER}
-            onNavigateToFinancial={handleNavigateToFinancial}
-            escalations={escalations}
-            transactions={transactions}
-            onGoToEscalations={() => handleSetActiveTab('escalations')}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <CrmWorkspace
+              leads={leads}
+              onUpdateLead={handleUpdateLead}
+              onDeleteLead={handleDeleteLead}
+              onClearAllLeads={() => {
+                setLeads([]);
+                showToast('Leads limpos do CRM');
+              }}
+              currentUser={currentUser || GUEST_USER}
+              onNavigateToFinancial={handleNavigateToFinancial}
+              escalations={escalations}
+              transactions={transactions}
+              onGoToEscalations={() => handleSetActiveTab('escalations')}
+            />
+          </Suspense>
           </OperationsModuleFrame>
         )}
         {activeTab === 'agenda' && canSeeAgenda && (
@@ -1359,19 +1848,23 @@ export const App: React.FC = () => {
             description="Transforme oportunidades em horários confirmados e acompanhe a próxima ação comercial."
             accent="green"
             compact
+            hideHeader
           >
-          <AgendaWorkspace
-            transactions={transactions}
-            onAddTransaction={handleAddTransaction}
-            onUpdateTransactionStatus={handleUpdateTransactionStatus}
-            onDeleteTransaction={handleDeleteTransaction}
-            leads={leads}
-            currentUser={currentUser || GUEST_USER}
-            currency={activeTenant.currency}
-            locale={activeTenant.locale}
-            financialModuleEnabled={canSeeFinancial}
-            onToast={showToast}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <AgendaWorkspace
+              transactions={transactions}
+              onAddTransaction={handleAddTransaction}
+              onUpdateTransactionStatus={handleUpdateTransactionStatus}
+              onDeleteTransaction={handleDeleteTransaction}
+              leads={leads}
+              currentUser={currentUser || GUEST_USER}
+              currency={activeTenant.currency}
+              locale={activeTenant.locale}
+              financialModuleEnabled={canSeeFinancial}
+              onToast={showToast}
+              catalogProducts={knowledgeBase.products}
+            />
+          </Suspense>
           </OperationsModuleFrame>
         )}
         {activeTab === 'financial' && canSeeFinancial && (
@@ -1381,35 +1874,40 @@ export const App: React.FC = () => {
             description="Acompanhe receitas, despesas e cobranças em aberto em uma área dedicada."
             accent="blue"
             compact
+            hideHeader
           >
-          <FinancialWorkspace
-            transactions={transactions}
-            onAddTransaction={handleAddTransaction}
-            onUpdateTransactionStatus={handleUpdateTransactionStatus}
-            onDeleteTransaction={handleDeleteTransaction}
-            leads={leads}
-            currentUser={currentUser || GUEST_USER}
-            currency={activeTenant.currency}
-            locale={activeTenant.locale}
-            onToast={showToast}
-            recurringExpenses={recurringExpenses}
-            onAddRecurringExpense={handleAddRecurringExpense}
-            onToggleRecurringExpense={handleToggleRecurringExpense}
-            onDeleteRecurringExpense={handleDeleteRecurringExpense}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <FinancialWorkspace
+              transactions={transactions}
+              onAddTransaction={handleAddTransaction}
+              onUpdateTransactionStatus={handleUpdateTransactionStatus}
+              onDeleteTransaction={handleDeleteTransaction}
+              leads={leads}
+              currentUser={currentUser || GUEST_USER}
+              currency={activeTenant.currency}
+              locale={activeTenant.locale}
+              onToast={showToast}
+              recurringExpenses={recurringExpenses}
+              onAddRecurringExpense={handleAddRecurringExpense}
+              onToggleRecurringExpense={handleToggleRecurringExpense}
+              onDeleteRecurringExpense={handleDeleteRecurringExpense}
+            />
+          </Suspense>
           </OperationsModuleFrame>
         )}
         {activeTab === 'attribution' && canSeeGrowth && (
-          <AdAttributionCAPI
-            leads={leads}
-            onTriggerCAPIEvent={(lead, eventName) => {
-              showToast(`Evento Meta CAPI [${eventName}] enviado para ${lead.name}`);
-            }}
-            onAddNewAttributedLead={(newLead) => {
-              setLeads((prev) => [newLead, ...prev]);
-              showToast(`Lead ${newLead.name} adicionado via simulador CAPI`);
-            }}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <AdAttributionCAPI
+              leads={leads}
+              onTriggerCAPIEvent={(lead, eventName) => {
+                showToast(`Evento Meta CAPI [${eventName}] enviado para ${lead.name}`);
+              }}
+              onAddNewAttributedLead={(newLead) => {
+                setLeads((prev) => [newLead, ...prev]);
+                showToast(`Lead ${newLead.name} adicionado via simulador CAPI`);
+              }}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'knowledge' && canManageAgent && !kbLoaded && (
@@ -1417,9 +1915,11 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'knowledge' && canManageAgent && kbLoaded && (
+          <Suspense fallback={<TabLoadingFallback />}>
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
             activeTenantId={activeTenant.id}
+            canManageWhatsAppConnection={canSeeAdminTools}
             usesPublishedKnowledgeBase
             businessHours={businessHours}
             onSaveBusinessHours={async (updatedHours) => {
@@ -1436,23 +1936,6 @@ export const App: React.FC = () => {
               } catch (err) {
                 console.error('Falha ao salvar horário de funcionamento no backend:', err);
                 showToast('Não foi possível salvar o horário — o agendamento automático pode continuar usando o horário antigo. Tente novamente.');
-                return false;
-              }
-            }}
-            onSaveKnowledgeBase={async (updatedKb) => {
-              setKnowledgeBase(updatedKb);
-              try {
-                const res = await apiFetch('/api/knowledge-base', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ knowledgeBase: updatedKb }),
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                showToast('Base de conhecimento do Agente salva!');
-                return true;
-              } catch (err) {
-                console.error('Falha ao salvar base de conhecimento no backend:', err);
-                showToast('Não foi possível salvar no servidor — o agente pode continuar respondendo com a base antiga. Tente novamente.');
                 return false;
               }
             }}
@@ -1483,9 +1966,11 @@ export const App: React.FC = () => {
               }
             }}
           />
+          </Suspense>
         )}
 
         {activeTab === 'catalog' && canSeeCatalog && (
+          <Suspense fallback={<TabLoadingFallback />}>
           <PublicCatalogSettings
             tenantSlug={activeTenant.slug}
             tenantName={activeTenant.name}
@@ -1497,24 +1982,43 @@ export const App: React.FC = () => {
               handleSetActiveTab('whatsapp');
             }}
           />
+          </Suspense>
         )}
 
         {activeTab === 'system_logs' && canSeeSystemLogs && (
           <OperationsModuleFrame title="Logs do Sistema" eyebrow="Auditoria técnica" description="Incidentes técnicos por empresa, com recorrência e sugestões para decisão humana — sem alertas automáticos." accent="blue">
-            <SystemLogsPanel
-              incidents={systemIncidents}
-              isLoading={systemLogsLoading}
-              onRefresh={refreshSystemIncidents}
-              onReview={(id) => void updateSystemIncident(id, 'review')}
-              onResolve={(id, note) => void updateSystemIncident(id, 'resolve', note)}
-              onArchive={(id) => void updateSystemIncident(id, 'archive')}
-              onRestore={(id) => void updateSystemIncident(id, 'restore')}
-            />
+            <Suspense fallback={<TabLoadingFallback />}>
+              <SystemLogsPanel
+                incidents={systemIncidents}
+                isLoading={systemLogsLoading}
+                onRefresh={refreshSystemIncidents}
+                onReview={(id) => void updateSystemIncident(id, 'review')}
+                onResolve={(id, note) => void updateSystemIncident(id, 'resolve', note)}
+                onArchive={(id) => void updateSystemIncident(id, 'archive')}
+                onRestore={(id) => void updateSystemIncident(id, 'restore')}
+              />
+            </Suspense>
+          </OperationsModuleFrame>
+        )}
+
+        {activeTab === 'broadcast' && canSeeBroadcast && (
+          <OperationsModuleFrame title="Disparo em Massa" eyebrow="Marketing via WhatsApp" description="Campanhas de disparo com aquecimento guiado, deduplicação e integração com o Atendimento." accent="blue">
+            <Suspense fallback={<TabLoadingFallback />}>
+              <BroadcastAdminPanel tenantName={activeTenant?.name} />
+            </Suspense>
           </OperationsModuleFrame>
         )}
 
         {activeTab === 'escalations' && (
-          <OperationsModuleFrame title="Escalonamentos" eyebrow="Decisões humanas" description="Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você." accent="green">
+          // TASK-0319 (pedido direto, print anotado — "tira o cabeçalho
+          // duplo, coloca a descrição de cima no de baixo"): `EscalationsPanel`
+          // já renderiza o próprio `<header>` (título + descrição + filtros),
+          // igual Agenda/Financeiro fazem com `AgendaFinanceiroCenter`/
+          // `FinancialWorkspace` — mesmo `hideHeader` usado lá. A descrição
+          // deste frame ("Resolva pendências...") migrou pro header interno
+          // do EscalationsPanel em vez de sumir.
+          <OperationsModuleFrame title="Escalonamentos" eyebrow="Decisões humanas" description="Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você." accent="green" compact hideHeader>
+          <Suspense fallback={<TabLoadingFallback />}>
           <EscalationsPanel
             escalations={escalations}
             onResolve={handleResolveEscalation}
@@ -1526,16 +2030,20 @@ export const App: React.FC = () => {
             onResolvePayment={handleResolvePaymentEscalation}
             onApproveAndSend={handleApproveAndSendEscalation}
             onRestore={handleRestoreEscalation}
+            onPermanentDelete={currentUser?.role === 'saas_admin' ? handlePermanentlyDeleteEscalation : undefined}
             onGoToConversation={(phone) => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });
               handleSetActiveTab('whatsapp');
             }}
                     />
+          </Suspense>
           </OperationsModuleFrame>
         )}
         {activeTab === 'quality' && canSeeQuality && (
           <OperationsModuleFrame title="Qualidade da IA" eyebrow="Aprendizado operacional" description="Transforme revisões humanas em regras e melhorias consistentes para o atendimento." accent="green">
-            <QualityAuditCenter onToast={showToast} />
+            <Suspense fallback={<TabLoadingFallback />}>
+              <QualityAuditCenter onToast={showToast} />
+            </Suspense>
           </OperationsModuleFrame>
         )}
 
@@ -1548,13 +2056,20 @@ export const App: React.FC = () => {
         onClose={() => {
           if (currentUser) setIsLoginModalOpen(false);
         }}
-        onLogin={(usr, token) => {
+        onLogin={(usr) => {
+          // TASK-0311 (TASK-0249 item 1): a sessão já chega via cookie
+          // httpOnly no próprio `Set-Cookie` da resposta de login — não
+          // existe mais token pro frontend guardar/repassar.
           setCurrentUser(usr);
-          setAuthToken(token || null);
-          setIsSaasSessionConfirmed(Boolean(token) && usr.role === 'saas_admin');
+          setIsSaasSessionConfirmed(usr.role === 'saas_admin');
           setIsLoginModalOpen(false);
           showToast(`Bem-vindo, ${usr.name}!`);
         }}
+      />
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordModalOpen}
+        onClose={() => setIsChangePasswordModalOpen(false)}
       />
 
     </div>

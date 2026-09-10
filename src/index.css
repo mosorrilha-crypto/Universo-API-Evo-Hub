@@ -34,6 +34,31 @@
 }
 
 /*
+ * TASK-0318 — tokens estruturais `--app-*`. Namespace deliberadamente
+ * diferente do `--radius-*` do @theme acima: aquele gera classes utilitárias
+ * Tailwind (`rounded-control`, etc.) e é consumido no JSX; este é consumido
+ * só via `var()` em CSS novo (BEM/light-theme), nunca vira classe utilitária.
+ * Valores também diferem de propósito (arredondamento um pouco maior, no
+ * espírito do print de referência do WhatsApp mobile) — não confundir os
+ * dois sistemas nem tentar unificá-los.
+ * Compartilhados por todos os temas (spacing/radius/shadow, sem cor), mas
+ * hoje só são referenciados por regras novas escopadas a
+ * html[data-theme='light'], então dark/blue/clean ficam visualmente
+ * intocados até decidirem adotá-los.
+ */
+:root {
+  --app-radius-control: 0.85rem;
+  --app-radius-card: 1.15rem;
+  --app-radius-panel: 1.35rem;
+  --app-radius-pill: 9999px;
+  --app-spacing-page: 1rem;
+  --app-spacing-section: 1.25rem;
+  --app-touch-target: 2.75rem;
+  --app-shadow-card: 0 2px 10px rgba(15, 23, 42, 0.06);
+  --app-shadow-modal: 0 12px 38px rgba(15, 23, 42, 0.16);
+}
+
+/*
  * Sombra — convenção por contexto (não geramos classe nomeada nova aqui,
  * risco de reproduzir um box-shadow ligeiramente diferente do valor real
  * do Tailwind pra zero ganho; a classe padrão já é a fonte da verdade).
@@ -73,6 +98,19 @@
    container próprio, não no body/html). */
 html, body {
   overflow-x: hidden;
+}
+
+/* Rolagem funcional sem barra visível — pedido direto (TASK-0284): menus
+   compactos (ex: menu ⋮ da conversa) que precisam rolar quando o conteúdo
+   não cabe, mas sem a faixa de scrollbar do navegador poluindo um cartão
+   pequeno (o WhatsApp real não mostra scrollbar nesses menus). */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* High-Contrast Emerald Horizontal Scrollbar for Navigation Menu */
@@ -160,7 +198,25 @@ html, body {
 }
 
 body {
-  min-height: 100vh;
+  /* TASK-0333 (pedido direto, prints comparando Escalonamentos/Conversas
+     "normais" com uma faixa vazia aparecendo embaixo da barra inferior ao
+     abrir Agenda/Ferramentas no mobile): `vh` no mobile não acompanha o
+     chrome dinâmico do navegador (barra de endereço escondendo/reaparecendo)
+     — o conteúdo real do app já usa `dvh` em toda parte (inclusive o cálculo
+     de altura do Atendimento em App.tsx), que acompanha corretamente. Como
+     este `body` ficava só em `vh`, ele não encolhia junto quando a barra do
+     navegador reaparecia (heurística que os popups fixed em tela cheia,
+     Agenda/Ferramentas, disparam), sobrando um vão do tamanho da diferença
+     — exatamente a "faixa embaixo" relatada. O `#root` já tinha esse mesmo
+     ajuste (TASK-0318), mas só para o tema light; aqui cobre todos os temas.
+
+     TASK-0337 (achado real, mesmo bug persistindo mesmo depois do ajuste
+     acima em pelo menos um aparelho Android real): `dvh` sozinho não é
+     suficiente — suporte inconsistente entre navegadores/skins Android.
+     `--real-vh` (App.tsx, medida via `window.visualViewport`) é o valor
+     preferido agora; `100dvh` continua só como fallback antes do primeiro
+     measure (SSR/primeiro paint) ou em navegadores sem `visualViewport`. */
+  min-height: var(--real-vh, 100dvh);
   background:
     radial-gradient(circle at 8% -10%, rgba(16, 185, 129, 0.10), transparent 28rem),
     radial-gradient(circle at 94% 5%, rgba(79, 70, 229, 0.08), transparent 24rem),
@@ -194,6 +250,25 @@ button:not(:disabled) {
 
 .animate-page-enter {
   animation: page-enter 260ms var(--ease-premium) both;
+}
+
+/* TASK-0195 (pedido direto, 01/09/2026, print do menu mobile "Universo"):
+   "ajusta ... tamanho da fonte e ícones" — renderTab/renderSubmenuItem
+   (Header.tsx) são compartilhados com a barra de navegação DESKTOP, que o
+   dono do produto não reclamou. Em vez de mexer nos helpers compartilhados
+   (risco de mudar o desktop sem querer), escopado só dentro de
+   `.mobile-nav-menu__items` (só a lista de navegação, NÃO o menu inteiro —
+   os cartões de "Empresa ativa"/"Modo visual" logo abaixo têm botões bem
+   menores de propósito, um seletor pego no wrapper inteiro ia inflar eles
+   também). Maior especificidade que as classes utilitárias do Tailwind
+   (`.text-sm`/`.w-4`/`.h-4`), então ganha sem precisar de !important. */
+.mobile-nav-menu__items button {
+  font-size: 0.9375rem; /* 15px, era text-sm = 14px */
+}
+
+.mobile-nav-menu__items button svg {
+  width: 20px;
+  height: 20px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -507,6 +582,12 @@ html[data-theme='blue'] .custom-scrollbar { scrollbar-color: #1688c7 #0b2b47; }
 html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-track { background: #0b2b47; border-color: #215276; }
 html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-thumb { background: #1688c7; box-shadow: none; }
 html[data-theme='blue'] .bg-emerald-500 { background-color: #0b78b5 !important; }
+/* Achado real (28/08/2026, estética do calendário da Agenda inspirada no
+   Google Agenda): `.bg-emerald-400` — usado em 46 lugares por 16
+   componentes (ex: o círculo de "hoje" e o selo de contagem do dia na
+   Agenda) — nunca teve nenhuma regra de tema, ao contrário de `.bg-emerald-
+   500`/`.bg-emerald-600` já cobertos. Mesmo padrão de correção. */
+html[data-theme='blue'] .bg-emerald-400 { background-color: #0b78b5 !important; }
 /* Achado real (mesmo da TASK-0061, tema Limpo): `.bg-emerald-600` (usado por
    vários botões primários no app, ex: LoginModal) nunca teve regra aqui —
    só `.bg-emerald-500` tinha. Botão de login ficava verde-Tailwind padrão
@@ -516,7 +597,8 @@ html[data-theme='blue'] .bg-emerald-600 { background-color: #0b78b5 !important; 
    `bg-emerald-600`, pensado pro verde-Tailwind claro padrão — sem isso o
    texto ficaria ilegível sobre o azul #0b78b5 (bem mais escuro). */
 html[data-theme='blue'] .bg-emerald-500.text-slate-950,
-html[data-theme='blue'] .bg-emerald-600.text-slate-950 { color: #FFFFFF !important; }
+html[data-theme='blue'] .bg-emerald-600.text-slate-950,
+html[data-theme='blue'] .bg-emerald-400.text-slate-950 { color: #FFFFFF !important; }
 html[data-theme='blue'] .text-emerald-400,
 html[data-theme='blue'] .text-emerald-300 { color: #69d0ff !important; }
 html[data-theme='blue'] .border-emerald-500\/25,
@@ -525,18 +607,28 @@ html[data-theme='blue'] .bg-emerald-500\/10,
 html[data-theme='blue'] .bg-emerald-500\/15 { background-color: rgba(14, 165, 233, 0.16) !important; }
 html[data-theme='blue'] .hover\:bg-emerald-500:hover,
 html[data-theme='blue'] .hover\:bg-emerald-600:hover { background-color: #1596d0 !important; }
+/* TASK-0071 (follow-up, 26/08/2026): mesma lacuna do bloco Claro/Escuro/Azul
+   acima (`.bg-emerald-500`/`.bg-emerald-600` já cobertos) — `.border-emerald-500`
+   sólido (sem opacidade) nunca tinha regra pro tema Azul. */
+html[data-theme='blue'] .border-emerald-500 { border-color: #0b78b5 !important; }
+/* Achado real (28/08/2026, estética do calendário da Agenda inspirada no
+   Google Agenda): mesma lacuna acima, mas pra cor de anel (--tw-ring-color),
+   que é uma custom property própria e nunca herda de border-color. */
+html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important; }
 
-/* Shell operacional compartilhado do Atendimento */
-.atendimento-workspace { display: flex; flex-direction: column; gap: .7rem; }
-.atendimento-workspace__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1.1rem; border: 1px solid rgba(148,163,184,.18); border-radius: 1.1rem; background: linear-gradient(135deg, rgba(15,118,110,.18), rgba(15,23,42,.62)); box-shadow: 0 14px 38px -30px rgba(0,0,0,.9); }
-.atendimento-workspace__identity { display: flex; align-items: flex-start; gap: .8rem; min-width: 0; }
-.atendimento-workspace__icon { display: grid; place-items: center; width: 2.35rem; height: 2.35rem; border-radius: .8rem; color: #ecfdf5; background: linear-gradient(135deg,#0f9f88,#087f6d); box-shadow: 0 8px 20px -10px rgba(16,185,129,.75); flex: 0 0 auto; }
-.atendimento-workspace__eyebrow { display: flex; align-items: center; gap: .35rem; color: #6ee7b7; font-size: .67rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.atendimento-workspace h1 { margin: .18rem 0 .15rem; color: #f8fafc; font-size: clamp(1.2rem, 2vw, 1.65rem); font-weight: 800; letter-spacing: -.025em; }
-.atendimento-workspace__header p { margin: 0; color: #94a3b8; font-size: .78rem; line-height: 1.5; }
-.atendimento-workspace__tenant { min-width: 10rem; max-width: 15rem; padding: .45rem .65rem; border-left: 1px solid rgba(148,163,184,.18); text-align: right; }
-.atendimento-workspace__tenant > span { display:block; color:#64748b; font-size:.58rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; }
-.atendimento-workspace__tenant strong { display:block; margin-top:.12rem; overflow:hidden; color:#e2e8f0; font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }
+/* Shell operacional compartilhado do Atendimento — faixa fina, sem card de
+   resumo (removido a pedido do dono do produto, 28/08/2026: repetia dado já
+   visível na própria lista de conversas e ocupava tela útil que o WhatsApp
+   real não gasta com isso). Sem gradiente verde — a marca do app (theme-color)
+   também deixou de usar o verde do WhatsApp, ver index.html/manifest.json. */
+.atendimento-workspace { display: flex; flex-direction: column; gap: .5rem; height: 100%; min-height: 0; }
+.atendimento-workspace__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1.1rem; border: 1px solid rgba(148,163,184,.18); border-radius: 1.1rem; background: var(--surface-panel); box-shadow: var(--shadow-premium); }
+.atendimento-workspace__header--compact { padding: .55rem .85rem; }
+.atendimento-workspace__identity { display: flex; align-items: center; gap: .65rem; min-width: 0; }
+.atendimento-workspace__icon { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: .7rem; color: var(--action-contrast); background: var(--action); flex: 0 0 auto; }
+.atendimento-workspace h1 { margin: 0; color: var(--text-primary); font-size: 1rem; font-weight: 800; letter-spacing: -.01em; }
+.atendimento-workspace__tenant { min-width: 8rem; max-width: 15rem; padding: 0; text-align: right; }
+.atendimento-workspace__tenant strong { display:block; overflow:hidden; color:var(--text-primary); font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }
 .atendimento-workspace__tenant { position:relative; }
 .atendimento-workspace__tenant-trigger { display:flex; align-items:center; justify-content:flex-end; gap:.25rem; width:100%; min-height:2.5rem; padding:0; border:0; color:inherit; background:transparent; text-align:right; cursor:pointer; }
 .atendimento-workspace__tenant-trigger:focus-visible { outline:2px solid var(--action); outline-offset:3px; border-radius:.25rem; }
@@ -547,54 +639,97 @@ html[data-theme='blue'] .hover\:bg-emerald-600:hover { background-color: #1596d0
 .atendimento-workspace__tenant-option > span { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .atendimento-workspace__tenant-option:hover, .atendimento-workspace__tenant-option:focus-visible { color:var(--text-primary); background:color-mix(in srgb, var(--action) 12%, transparent); outline:none; }
 .atendimento-workspace__tenant-option.is-active { color:var(--text-primary); background:color-mix(in srgb, var(--action) 16%, transparent); }
-.atendimento-workspace__summary-toggle { display:flex; align-items:center; justify-content:space-between; gap:.5rem; width:100%; min-height:2.35rem; padding:.5rem .8rem; border:1px solid rgba(148,163,184,.16); border-radius:.8rem; background:rgba(15,23,42,.4); color:#94a3b8; font-size:.68rem; font-weight:700; text-align:left; cursor:pointer; transition:border-color .18s, color .18s, background .18s; }
-.atendimento-workspace__summary-toggle:hover, .atendimento-workspace__summary-toggle:focus-visible { color:#e2e8f0; border-color:rgba(148,163,184,.32); outline:none; }
-.atendimento-workspace__summary-chevron { flex:0 0 auto; color:var(--action); transition:transform .18s ease; }
-.atendimento-workspace__summary-chevron.is-open { transform:rotate(180deg); }
-.atendimento-workspace__signals { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .65rem; margin-top: .65rem; }
-.atendimento-signal { display: flex; align-items: center; gap: .62rem; min-width: 0; padding: .72rem .8rem; border: 1px solid rgba(148,163,184,.16); border-radius: .9rem; background: rgba(15,23,42,.52); color: #cbd5e1; text-align: left; }
-.atendimento-signal--button { width: 100%; cursor: pointer; transition: border-color .18s, transform .18s, background .18s; }
-.atendimento-signal--button:hover:not(:disabled) { transform: translateY(-1px); border-color: rgba(245,158,11,.45); background: rgba(30,41,59,.8); }
-.atendimento-signal--button:disabled { cursor: default; }
-.atendimento-signal__icon { display:grid; place-items:center; width:1.8rem; height:1.8rem; border-radius:.65rem; flex:0 0 auto; }
-.atendimento-signal__icon--green { color:#6ee7b7; background:rgba(16,185,129,.13); }
-.atendimento-signal__icon--amber { color:#fcd34d; background:rgba(245,158,11,.13); }
-.atendimento-signal__icon--blue { color:#7dd3fc; background:rgba(14,165,233,.13); }
-.atendimento-signal strong { display:block; overflow:hidden; color:#f8fafc; font-size:.78rem; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
-.atendimento-signal span:not(.atendimento-signal__icon) { display:block; margin-top:.12rem; overflow:hidden; color:#94a3b8; font-size:.63rem; text-overflow:ellipsis; white-space:nowrap; }
-.atendimento-workspace__approval { display:flex; align-items:center; justify-content:center; gap:.4rem; padding:.62rem .75rem; border:1px dashed rgba(110,231,183,.28); border-radius:.9rem; color:#a7f3d0; background:rgba(16,185,129,.06); font-size:.65rem; line-height:1.35; text-align:center; }
-.atendimento-workspace__content { min-width: 0; }
-html[data-theme='light'] .atendimento-workspace__header { background: linear-gradient(135deg, rgba(236,253,245,.95), rgba(255,255,255,.98)); border-color: rgba(15,118,110,.16); }
+.atendimento-workspace__content { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; min-height: 0; }
+@media (max-width: 640px) { .atendimento-workspace__header--compact { padding:.5rem .7rem; } .atendimento-workspace__tenant { max-width:8.5rem; } }
 
-html[data-theme='clean'] .atendimento-workspace__header { background: linear-gradient(135deg, rgba(245, 246, 248, 0.95), rgba(255,255,255,.98)); border-color: rgba(15, 23, 42, 0.10); }
-html[data-theme='light'] .atendimento-workspace h1 { color:#0f172a; }
+/* TASK-0318/TASK-0320 — cabeçalho global (Header.tsx) mais compacto no
+   mobile, tema claro, no espírito do print de referência (WhatsApp mobile).
+   Header.tsx agora carrega a classe `app-header` (TASK-0320, aditiva, ao
+   lado das utilitárias Tailwind que o remapeamento genérico de
+   .bg-slate-900/.border-slate-800 mais abaixo neste arquivo já recolore).
+   `!important` no padding-top é necessário: o <header> também tem
+   `style={{ paddingTop: 'env(safe-area-inset-top)' }}` inline, e um estilo
+   inline sempre vence uma regra de stylesheet sem !important — sem isso
+   esta regra nunca tinha efeito visual (achado real, TASK-0320). Escopo
+   restrito só ao próprio <header> (não a `button`, que também casaria com a
+   gaveta do menu mobile renderizada dentro do mesmo elemento — arredondar
+   em pill os botões de lista da gaveta quebraria o layout deles). */
+@media (max-width: 640px) {
+  html[data-theme='light'] .app-header {
+    padding-top: calc(env(safe-area-inset-top) + .35rem) !important;
+  }
+}
 
-html[data-theme='clean'] .atendimento-workspace h1 { color:#0F172A; }
-html[data-theme='light'] .atendimento-workspace__header p, html[data-theme='light'] .atendimento-signal span:not(.atendimento-signal__icon) { color:#64748b; }
+/* TASK-0320 — busca e chips de filtro do Atendimento ganham a forma "pill"
+   e os tokens dedicados de busca/chip do print de referência. As cores já
+   funcionavam antes (bg-[#202c33]/bg-emerald-500 já são recoloridas pelo
+   remapeamento genérico mais abaixo) — o que faltava era a forma (raio
+   total em vez de rounded-lg) e um fundo consistente com --app-search-bg
+   em vez de depender só do hex do WhatsApp remapeado. */
+html[data-theme='light'] .atendimento-search-input {
+  border-radius: var(--app-radius-pill) !important;
+  background: var(--app-search-bg) !important;
+}
+html[data-theme='light'] .atendimento-filter {
+  border-radius: var(--app-radius-pill);
+}
+html[data-theme='light'] .atendimento-filter:not(.is-active) {
+  background: var(--app-chip-bg) !important;
+  border: 1px solid var(--app-border-strong);
+  color: var(--app-text-secondary) !important;
+}
+html[data-theme='light'] .atendimento-filter.is-active {
+  background: var(--app-action) !important;
+  color: #ffffff !important;
+}
 
-html[data-theme='clean'] .atendimento-workspace__header p, html[data-theme='clean'] .atendimento-signal span:not(.atendimento-signal__icon) { color:#64748B; }
-html[data-theme='light'] .atendimento-workspace__tenant strong, html[data-theme='light'] .atendimento-signal strong { color:#0f172a; }
+/* TASK-0322 — achado real auditando a tela de conversa aberta: o fundo do
+   corpo da conversa usa DUAS classes `bg-*` separadas — `bg-[#0b141a]`
+   (background-color, já recolorida pelo remapeamento genérico mais abaixo
+   neste arquivo) e `bg-[radial-gradient(#1e293b_1px,transparent_1px)]`
+   (background-image, o padrão de pontinhos estilo papel de parede do
+   WhatsApp) — como são propriedades CSS diferentes, elas se somam, e só a
+   primeira tinha cobertura. Sem esta regra, o tema claro mostrava pontinhos
+   azul-marinho escuros espalhados sobre um fundo claro. */
+html[data-theme='light'] [class~='bg-[radial-gradient(#1e293b_1px,transparent_1px)]'] {
+  background-image: radial-gradient(var(--app-border) 1px, transparent 1px) !important;
+}
+html[data-theme='clean'] [class~='bg-[radial-gradient(#1e293b_1px,transparent_1px)]'] {
+  background-image: radial-gradient(var(--border) 1px, transparent 1px) !important;
+}
 
-html[data-theme='clean'] .atendimento-workspace__tenant strong, html[data-theme='clean'] .atendimento-signal strong { color:#0F172A; }
-html[data-theme='light'] .atendimento-signal { background:rgba(255,255,255,.86); border-color:rgba(15,118,110,.12); }
-html[data-theme='light'] .atendimento-workspace__summary-toggle { background:rgba(255,255,255,.7); border-color:rgba(15,118,110,.14); color:#64748b; }
-html[data-theme='light'] .atendimento-workspace__summary-toggle:hover, html[data-theme='light'] .atendimento-workspace__summary-toggle:focus-visible { color:#0f172a; }
+/* Barra inferior estilo WhatsApp (Conversas/Pendências/Agenda/Ficha IA/
+   Ferramentas) — só no mobile, onde a tela de Atendimento é a única coisa
+   visível; no desktop as mesmas ações já ficam na barra de controles. */
+/* TASK-0184: padding-bottom extra = env(safe-area-inset-bottom) — o padding
+   inferior do .app-main que cobria a barra de gestos do iOS/Android nesta
+   tela foi zerado no mobile (ver .app-main.app-main--atendimento acima). */
+.atendimento-bottom-nav { display: flex; align-items: stretch; justify-content: space-around; flex-shrink: 0; border-top: 1px solid var(--line-subtle); background: var(--surface-panel); padding-bottom: env(safe-area-inset-bottom); }
+/* Escala aumentada (pedido real, 01/09/2026, print comparando lado a lado
+   com o WhatsApp Business real): ícones e rótulos ficavam visivelmente
+   menores que a barra inferior do app real, mesma proporção do ajuste já
+   feito na conversa aberta (TASK-0164).
 
-html[data-theme='clean'] .atendimento-signal { background:rgba(255,255,255,.86); border-color:rgba(15, 23, 42, 0.08); }
-html[data-theme='clean'] .atendimento-workspace__summary-toggle { background:rgba(255,255,255,.7); border-color:rgba(15, 23, 42, 0.08); color:#64748B; }
-html[data-theme='clean'] .atendimento-workspace__summary-toggle:hover, html[data-theme='clean'] .atendimento-workspace__summary-toggle:focus-visible { color:#0F172A; }
-html[data-theme='light'] .atendimento-workspace__approval { color:#047857; background:rgba(16,185,129,.06); border-color:rgba(5,150,105,.2); }
+   TASK-0216 (pedido direto, 02/09/2026, novo print): ainda ficava pequena
+   e desproporcional perto do resto da UI (ex: texto da lista de conversas
+   ao lado) — outro ajuste de escala, mesmo espírito do que já foi feito no
+   menu hambúrguer mobile (TASK-0195, w-4->w-5, text-sm->15px). Rótulo
+   .68rem->.75rem, padding vertical maior (toque mais generoso), ícones no
+   JSX (WhatsAppLeadsSim.tsx, w-[22px]->w-6/24px) e badge acompanhando. */
+.atendimento-bottom-nav__item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; flex: 1 1 0; min-width: 0; padding: .6rem .2rem .65rem; border: 0; background: transparent; color: var(--text-secondary); font-size: .75rem; font-weight: 700; cursor: pointer; }
+.atendimento-bottom-nav__item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.atendimento-bottom-nav__item.is-active { color: var(--action); }
+.atendimento-bottom-nav__item:disabled { opacity: .45; cursor: default; }
+.atendimento-bottom-nav__badge { position: absolute; top: .02rem; right: 18%; min-width: 1.25rem; height: 1.25rem; padding: 0 .28rem; border-radius: 999px; background: var(--danger, #ef4444); color: #fff; font-size: .66rem; font-weight: 800; line-height: 1.25rem; text-align: center; }
 
-html[data-theme='clean'] .atendimento-workspace__approval { color:#2563EB; background:rgba(59,130,246,.06); border-color:rgba(37,99,235,.2); }
-html[data-theme='blue'] .atendimento-workspace__header { background: linear-gradient(135deg, rgba(8,47,73,.95), rgba(15,64,100,.82)); border-color: rgba(56,189,248,.28); }
-html[data-theme='blue'] .atendimento-workspace__icon { background:linear-gradient(135deg,#0b78b5,#075985); }
-html[data-theme='blue'] .atendimento-workspace__eyebrow { color:#7dd3fc; }
-html[data-theme='blue'] .atendimento-signal { background:rgba(8,47,73,.72); border-color:rgba(56,189,248,.2); }
-html[data-theme='blue'] .atendimento-workspace__approval { color:#bae6fd; border-color:rgba(56,189,248,.3); background:rgba(14,165,233,.08); }
-html[data-theme='blue'] .atendimento-workspace__summary-toggle { background:rgba(8,47,73,.5); border-color:rgba(56,189,248,.2); color:#9fc1da; }
-html[data-theme='blue'] .atendimento-workspace__summary-toggle:hover, html[data-theme='blue'] .atendimento-workspace__summary-toggle:focus-visible { color:#e8f4ff; }
-@media (max-width: 900px) { .atendimento-workspace__signals { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-@media (max-width: 640px) { .atendimento-workspace__header { align-items:center; padding:.75rem .85rem; } .atendimento-workspace__identity { gap:.6rem; } .atendimento-workspace__icon { width:2.1rem; height:2.1rem; border-radius:.7rem; } .atendimento-workspace__header p { display:none; } .atendimento-workspace__tenant { width:auto; min-width:0; max-width:10rem; border-left:1px solid rgba(148,163,184,.18); border-top:0; padding:.25rem 0 .25rem .65rem; text-align:right; } .atendimento-workspace__tenant > span { font-size:.52rem; } .atendimento-workspace__tenant strong { max-width:9.5rem; font-size:.66rem; } .atendimento-workspace__signals { grid-template-columns: repeat(2, minmax(0,1fr)); gap:.45rem; } .atendimento-workspace__approval { grid-column:1 / -1; } }
+/* TASK-0318 — aba ativa da barra inferior ganha uma "pill" de fundo no tema
+   claro, como no print de referência (WhatsApp mobile). Aditivo só pro
+   light: dark/blue/clean continuam só com a mudança de cor do texto. */
+html[data-theme='light'] .atendimento-bottom-nav__item.is-active {
+  background: var(--app-chip-active-bg);
+  border-radius: var(--app-radius-pill);
+  margin: 0 .35rem;
+}
 
 /* Frame compartilhado para módulos de Agenda e Financeiro */
 .operations-module-frame { display:flex; flex-direction:column; gap:1rem; }
@@ -663,29 +798,62 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--agenda { gap: .65rem; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero { border-radius: .9rem; padding: .65rem .8rem; background: transparent; box-shadow: none; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero > div { align-items: center; gap: .35rem; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero .max-w-2xl { width: 100%; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero .max-w-2xl > div { display: none; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero h1 { font-size: 1.15rem; line-height: 1.15; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero p { display: none; }
+  /* Achado real (28/08/2026, pedido do dono do produto com print): a tab bar
+     Hoje/Calendário/Pendências (AgendaWorkspace.tsx) já deixa claro que a
+     tela é a Agenda — o título "Agenda" do hero por baixo (que só tinha o
+     tamanho de fonte reduzido antes, não escondido) ficou redundante nesse
+     contexto. Escondido o bloco inteiro (não só título/legenda); sobra só o
+     botão de ação, que passa a ocupar a largura toda e vira o CTA principal
+     da tela — fácil de tocar, sem espaço vazio sobrando por cima dele. */
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero .max-w-2xl { display: none; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions { width: 100%; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions button { width: auto; min-height: 2.15rem; padding: .45rem .7rem; font-size: .7rem; box-shadow: none; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics { gap: .45rem; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article { min-height: 0; padding: .55rem .65rem; border-radius: .9rem; box-shadow: none; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article > p:nth-child(2) { margin-top: .25rem; font-size: 1.35rem; line-height: 1; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article > p:last-child { margin-top: .25rem; font-size: .62rem; line-height: 1.2; }
-  .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
-  .agenda-financeiro-workspace--agenda-mobile-pending > section:has(.grid-cols-7) > div:first-child { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-pending > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div { border-radius: 1rem; padding: .75rem; box-shadow: none; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child p { display: none; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child { margin-bottom: .55rem; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:nth-child(2) { margin-bottom: .5rem; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:nth-child(2) p { line-height: 1.15; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) { padding: .75rem; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) h2 { font-size: .9rem; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) p { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions button { width: 100%; min-height: 2.4rem; padding: .55rem .8rem; font-size: .72rem; box-shadow: none; }
+  /* TASK-0347 (pedido direto, "reformular está agenda completa... está
+     complexa" → mockup confirmado): cartões de métrica e as listas
+     "Próximos compromissos"/"Pendências da agenda" ficam escondidos em
+     TODAS as abas mobile agora (não só na antiga aba "Calendário") — viraram
+     uma lista única (`__mobile-today-list`, JSX) visível só na aba "Hoje".
+     O nav de 3 abas (Hoje/Semana/Mês, AgendaWorkspace.tsx) substitui o
+     antigo Hoje/Calendário + o seletor Semana/Mês que morava escondido
+     dentro do próprio card da Agenda.
+
+     TASK-0351 (2 achados reais, print anotado):
+     1. "Próximos compromissos" (coluna `__upcoming-column`) ficava escondida
+        só nas abas Semana/Mês — faltava escondê-la também em "Hoje", onde
+        ela duplicava exatamente o que `__mobile-today-list` já mostra.
+        Agora sempre escondida no mobile (as 3 abas têm equivalente próprio:
+        Hoje usa a lista mesclada, Semana/Mês mostram só o calendário).
+     2. Os seletores usavam `section:has(.grid-cols-7)` — só bate quando a
+        grade de MÊS está renderizada (é a única visão com um elemento com
+        essa classe; a grade de Semana usa `flex`). Resultado: trocar pra
+        Semana e voltar pra "Hoje" nunca escondia a grade de semana (o
+        seletor não reconhecia a seção). Trocado por classes próprias
+        (`__calendar-section`/`__calendar-column`), que existem sempre,
+        em Semana ou Mês. */
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics,
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__pending,
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__upcoming-column { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-today .agenda-financeiro-workspace__calendar-column { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-section { grid-template-columns: minmax(0, 1fr); }
+  .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__mobile-today-list,
+  .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__mobile-today-list { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-column { border-radius: 1rem; padding: .75rem; box-shadow: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-column > div:first-child p { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-column > div:first-child { margin-bottom: .55rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-column > div:nth-child(2) { margin-bottom: .5rem; }
+  /* TASK-0292 (pedido direto, print real: "o calendário pode ocupar melhor
+     a página... pode ficar de ponta a ponta... preencher os espaços
+     vazios igual no desktop e no calendário do google") — só nas visões
+     Semana/Mês (não afeta Hoje): padding lateral do card reduzido mais
+     ainda (mais perto de borda a borda) e células da grade de mês mais
+     altas, aproveitando o espaço vertical que sobrava vazio no celular
+     real. */
+  .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__calendar-column,
+  .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__calendar-column { padding-left: .4rem; padding-right: .4rem; }
+  .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__calendar-column .grid-cols-7 > button,
+  .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__calendar-column .grid-cols-7 > div[aria-hidden="true"],
+  .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__calendar-column .grid-cols-7 > button,
+  .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__calendar-column .grid-cols-7 > div[aria-hidden="true"] { min-height: 3.25rem; }
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }
@@ -759,13 +927,28 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .operations-center__metrics > * > span:last-child { font-size: .85rem; }
 }
 
+/* TASK-0318 — `.financial-workspace__mobile-detail-close` (definida acima)
+   usa hex fixo (#102018/#5ebf92) sem escopo de tema nenhum — só "parece
+   certo" no dark por coincidência (mesmos tons de --action/--action-contrast
+   de lá). Fix restrito ao light; blue/clean ficam com o mesmo bug latente,
+   fora do escopo desta tarefa (mudar a regra base afetaria os dois). */
+@media (max-width: 639px) {
+  html[data-theme='light'] .financial-workspace__mobile-detail-close {
+    color: var(--app-action-dark);
+    background: var(--app-action-soft);
+    border: 1px solid var(--app-action);
+  }
+}
+
 /* Modelo estrutural 6a: contexto essencial dentro da conversa, sem terceira coluna permanente */
-.atendimento-context-strip { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:11px 24px; border-bottom:1px solid var(--border-subtle, #1b242b); background:var(--surface-sunken, #11161b); }
+/* TASK-0259 (pedido direto): "diminui as caixa de contexto com uma fonte
+   menor" — padding e tipografia reduzidos, mesmo conteúdo/lógica. */
+.atendimento-context-strip { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:7px 14px; border-bottom:1px solid var(--border-subtle, #1b242b); background:var(--surface-sunken, #11161b); }
 .atendimento-context-strip__copy { min-width:0; }
-.atendimento-context-strip__label { display:block; color:var(--text-label, #6e7c87); font:700 10.5px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.12em; }
-.atendimento-context-strip__copy p { margin:4px 0 0; color:var(--text-secondary, #a7b4be); font-size:13.5px; line-height:1.45; }
+.atendimento-context-strip__label { display:block; color:var(--text-label, #6e7c87); font:700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.1em; }
+.atendimento-context-strip__copy p { margin:2px 0 0; color:var(--text-secondary, #a7b4be); font-size:11.5px; line-height:1.4; }
 .atendimento-context-strip__rationale { color:var(--text-muted, #8494a0); }
-.atendimento-context-strip__action { flex:none; border:1px solid var(--border, #232c33); border-radius:7px; padding:7px 11px; color:var(--text-secondary, #a7b4be); background:transparent; font-size:12px; font-weight:700; cursor:pointer; }
+.atendimento-context-strip__action { flex:none; border:1px solid var(--border, #232c33); border-radius:6px; padding:5px 8px; color:var(--text-secondary, #a7b4be); background:transparent; font-size:10.5px; font-weight:700; cursor:pointer; }
 .atendimento-context-strip__action:hover { color:var(--text-primary, #f2f6f9); border-color:var(--action, #5ebf92); }
 html[data-theme='light'] .atendimento-context-strip { background:#fbfaf7; border-color:#e7e5de; }
 
@@ -782,7 +965,28 @@ html[data-theme='clean'] .atendimento-context-strip__rationale { color:#94A3B8; 
 html[data-theme='light'] .atendimento-context-strip__action { border-color:#dcdad3; color:#5a5b54; }
 
 html[data-theme='clean'] .atendimento-context-strip__action { border-color:#E4E7EC; color:#64748B; }
-@media (max-width:760px) { .atendimento-context-strip { align-items:flex-start; padding:10px 16px; } .atendimento-context-strip__action { padding:8px 10px; } }
+@media (max-width:760px) { .atendimento-context-strip { align-items:flex-start; padding:6px 12px; } .atendimento-context-strip__action { padding:5px 7px; } }
+
+/* TASK-0259 (pedido direto): campo de digitação da conversa não usa o
+   contorno verde global de foco (regra acima, button/a/input/textarea/
+   select:focus-visible) — no toque em mobile, o Chrome/Android trata o
+   toque num <textarea> como navegação por teclado e o contorno cheio
+   aparecia mesmo sem uso de teclado real, "não ficou bom". A sobrescrita
+   mora aqui (CSS solto, fora de qualquer @layer) porque o `focus:outline-
+   none` do Tailwind vive dentro de @layer utilities — nas camadas CSS do
+   Tailwind v4, CSS solto sempre vence camada nomeada, então o utilitário
+   sozinho nunca conseguiria sobrescrever a regra global acima. */
+.atendimento-composer-textarea:focus-visible { outline: none; }
+
+/* Mesmo problema da regra acima (TASK-0259), agora na busca de conversas e
+   no botão de filtro por etiqueta da lista (pedido direto, 05/09/2026, print
+   real mostrando o contorno verde cheio em volta da caixa de busca no toque
+   em Android/Chrome): ambos são controles de formulário (input/button) que
+   o Chrome trata como alvo de "navegação por teclado" mesmo em toque de
+   tela, então herdam o contorno verde global acima sem nunca ter usado
+   teclado de verdade. */
+.atendimento-search-input:focus-visible,
+.atendimento-label-filter-trigger:focus-visible { outline: none; }
 
 /* ──────────────────────────────────────────────────────────────────────────
    Handoff aprovado — Atendimento: tokens neutros, ação única e hierarquia
@@ -847,6 +1051,47 @@ html[data-theme='light'] {
   --bubble-ai-border: #CFE0D6;
   --bubble-client: #F1EFE9;
   --shadow-premium: 0 1px 2px rgba(0, 0, 0, .06);
+
+  /* TASK-0318 — tokens semânticos `--app-*`, camada nova alinhada ao
+     print de referência (WhatsApp mobile). Nome `--app-*` (não `--light-*`)
+     é proposital: um futuro html[data-theme='whatsapp-dark'] pode reusar os
+     mesmos nomes com valores escuros, sem precisar renomear nada. Os que
+     aliasam pra var(...) mantêm uma única fonte de verdade com os tokens
+     canônicos acima; os demais são genuinamente novos (esta paleta ainda
+     não tinha search bar / chip / bolha de mensagem dedicados). */
+  --app-page: #F7F8F7;
+  --app-surface: var(--surface-panel);
+  --app-surface-soft: #F5F5F3;
+  --app-surface-muted: #EFEFEC;
+  --app-surface-control: #E9E9E6;
+  --app-text-primary: var(--text-primary);
+  --app-text-secondary: var(--text-secondary);
+  --app-text-muted: var(--text-muted);
+  --app-text-disabled: #A5ABAD;
+  --app-border: var(--border);
+  --app-border-strong: #D2D5D3;
+  --app-action: var(--action);
+  --app-action-dark: #126447;
+  --app-action-soft: #E5F2EB;
+  --app-action-subtle: #F0F8F3;
+  --app-success: #168B68;
+  --app-success-soft: #E4F5EC;
+  --app-success-border: #9CD4B8;
+  --app-warning: #98702B;
+  --app-warning-soft: #FFF4DF;
+  --app-warning-border: #E6BB58;
+  --app-danger: #A44842;
+  --app-danger-soft: #FBE9E7;
+  --app-danger-border: #E6B8AC;
+  --app-info: #32758C;
+  --app-info-soft: #E5F2F6;
+  --app-info-border: #9BCFD6;
+  --app-input-bg: #FFFFFF;
+  --app-search-bg: #F1F0EE;
+  --app-chip-bg: #FFFFFF;
+  --app-chip-active-bg: #E5F2EB;
+  --app-message-incoming: #FFFFFF;
+  --app-message-outgoing: #D9FDD3;
 }
 
 html[data-theme='clean'] {
@@ -877,7 +1122,20 @@ html[data-theme='clean'] {
 }
 
 html[data-theme='light'] body {
-  background: var(--surface-deep);
+  background: var(--app-page);
+}
+
+/* TASK-0318 — mobile: garante altura real de viewport (dvh) e mantém o
+   fundo --app-page também no #root, escopado só ao light.
+   TASK-0337: `--real-vh` (medida via visualViewport, ver App.tsx) é o valor
+   preferido agora, `dvh` só de fallback — mesmo motivo do ajuste em `body`
+   acima. */
+@media (max-width: 640px) {
+  html[data-theme='light'] body,
+  html[data-theme='light'] #root {
+    min-height: var(--real-vh, 100dvh);
+    background: var(--app-page);
+  }
 }
 
 html[data-theme='clean'] body {
@@ -1115,6 +1373,16 @@ html[data-theme='dark'] .bg-emerald-500 {
   background-color: var(--action) !important;
 }
 
+/* Achado real (28/08/2026, estética do calendário da Agenda inspirada no
+   Google Agenda): mesma lacuna do `.bg-emerald-600` abaixo, mas pro
+   `.bg-emerald-400` — usado em 46 lugares por 16 componentes (círculo de
+   "hoje"/selo de contagem da Agenda incluídos) e nunca coberto antes. */
+html[data-theme='light'] .bg-emerald-400,
+html[data-theme='dark'] .bg-emerald-400,
+html[data-theme='clean'] .bg-emerald-400 {
+  background-color: var(--action) !important;
+}
+
 /* Normalização dos 4 temas (pedido do dono do produto, 25/08/2026): achado
    real ao trocar o acento do tema Limpo de verde pra azul (TASK-0061) — só
    `.bg-emerald-500` tinha essa regra. `.bg-emerald-600` é usado por DEZENAS
@@ -1142,7 +1410,8 @@ html[data-theme='dark'] .bg-emerald-500.text-white {
   color: var(--action-contrast) !important;
 }
 
-html[data-theme='clean'] .bg-emerald-600.text-slate-950 {
+html[data-theme='clean'] .bg-emerald-600.text-slate-950,
+html[data-theme='clean'] .bg-emerald-400.text-slate-950 {
   color: var(--action-contrast) !important;
 }
 
@@ -1153,7 +1422,8 @@ html[data-theme='clean'] .bg-emerald-600.text-slate-950 {
    pastel claro (#5EBF92), que já contrasta bem com texto quase-preto sem
    nenhuma mudança — mesma razão pela qual esse gap nunca foi notado lá. */
 html[data-theme='light'] .bg-emerald-500.text-slate-950,
-html[data-theme='light'] .bg-emerald-600.text-slate-950 {
+html[data-theme='light'] .bg-emerald-600.text-slate-950,
+html[data-theme='light'] .bg-emerald-400.text-slate-950 {
   color: var(--action-contrast) !important;
 }
 
@@ -1169,6 +1439,29 @@ html[data-theme='clean'] .text-emerald-400,
 html[data-theme='dark'] .text-emerald-300,
 html[data-theme='dark'] .text-emerald-400 {
   color: var(--action) !important;
+}
+
+/* TASK-0071 (follow-up, decisão do dono do produto 26/08/2026): os últimos
+   usos de `border-[#00a884]` (verde de marca do WhatsApp) em
+   WhatsAppLeadsSim.tsx passaram a usar `.border-emerald-500`, que nunca
+   tinha cobertura de tema (só as variantes com opacidade, ex: `/25`, já
+   eram cobertas). */
+html[data-theme='light'] .border-emerald-500,
+html[data-theme='dark'] .border-emerald-500,
+html[data-theme='clean'] .border-emerald-500 {
+  border-color: var(--action) !important;
+}
+
+/* Achado real (28/08/2026, estética do calendário da Agenda inspirada no
+   Google Agenda): o anel do dia selecionado usa `.ring-emerald-400` (sem
+   opacidade) — cor de anel é uma custom property própria (--tw-ring-color),
+   nunca herda de uma regra de `border-color`, então nunca tinha cobertura de
+   tema nenhuma (nem a variante com opacidade que já existia antes desta
+   mudança). */
+html[data-theme='light'] .ring-emerald-400,
+html[data-theme='dark'] .ring-emerald-400,
+html[data-theme='clean'] .ring-emerald-400 {
+  --tw-ring-color: var(--action) !important;
 }
 
 html[data-theme='light'] .bg-amber-500\/20,
@@ -1565,7 +1858,16 @@ html[data-theme='clean'] .operations-module-frame__header {
   .atendimento-conversations > .relative.p-3 { padding: .55rem; border-radius: .85rem; }
   .atendimento-conversations > .relative.p-3 > div:first-child { gap: .4rem; }
   .atendimento-conversations > .relative.p-3 button { min-height: 2.15rem; }
-  .atendimento-conversations [class~='h-[82dvh]'] { min-height: 28rem; height: 70dvh; }
+  /* Regra antiga que mirava a classe literal `h-[82dvh]` removida do
+     .atendimento-chat-shell na TASK-0158 — achado real, 29/08/2026: essa
+     regra (seletor de 2 classes, mais específico que uma utilitária
+     isolada) forçava `height:70dvh` no chat-shell independente de qual
+     valor de altura o componente tentasse aplicar via className, e ficou
+     ativa durante as quatro tentativas anteriores (TASK-0150/0153/0155/
+     0157) sem que ninguém percebesse — provável causa raiz de todas elas
+     nunca terem "pegado" de verdade no mobile. Removida; o chat-shell
+     agora só precisa de `flex-1 min-h-0` (ver .atendimento-conversations
+     abaixo), sem precisar de altura fixa/chutada em nenhum breakpoint. */
 }
 
 
@@ -1629,6 +1931,52 @@ html[data-theme='clean'] .operations-module-frame__header {
    O Atendimento define o padrão: contexto breve, próxima ação legível e
    conteúdo rolável dentro do módulo — nunca a página inteira lateralmente.
    -------------------------------------------------------------------------- */
+/* TASK-0221 (pedido direto, 03/09/2026, comparação com o WhatsApp Web real):
+   até aqui o Atendimento só ia "de ponta a ponta" (sem padding, sem
+   max-width, sem cartão arredondado) abaixo de `lg` — em desktop o
+   `.app-main` mantinha `max-w-7xl`/`lg:p-8` e o `.atendimento-chat-shell`
+   ganhava borda/cantos arredondados/sombra, de propósito, pra dar um
+   "respiro" ao redor do card (decisão da TASK-0212). O dono do produto
+   pediu pra abandonar esse respiro também em desktop: quer uma página
+   dinâmica ocupando 100% da tela em qualquer largura, igual ao WhatsApp
+   Web (sem faixas de fundo vazias nas laterais nem cartão flutuante).
+   Regra fora de qualquer media query (aplica em qualquer largura) e sem
+   `@layer`: por especificidade de duas classes E por não estar em
+   `@layer utilities`, vence sempre `max-w-7xl`/`p-3 sm:p-6 lg:p-8` do
+   Tailwind — mesmo padrão de prioridade de cascata já usado nesta tela
+   (TASK-0159/0213).
+
+   TASK-0231 (pedido direto, 03/09/2026): mesmo tratamento estendido pra
+   `.app-main--quality` (aba "Qualidade da IA") — pedido explícito de
+   aplicar o mesmo ajuste "borda a borda" do Atendimento nessa página
+   também. `OperationsModuleFrame` (que envolve o conteúdo dessa aba) já
+   tem seu próprio card com padding/borda/cantos arredondados, então
+   zerar o padding do `.app-main` aqui não deixa o conteúdo colado sem
+   respiro nenhum — só remove a faixa de fundo vazia ao redor do card. */
+.app-main.app-main--atendimento,
+.app-main.app-main--quality,
+.app-main.app-main--escalations {
+  max-width: none;
+  padding: 0;
+}
+
+/* TASK-0319 (pedido direto, 2 prints anotados do celular): "Pendências"
+   ganhou o mesmo tratamento borda a borda acima, mas o `AtendimentoSecondaryNav`
+   (App.tsx, nav fixa no rodapé restaurando "Conversas"/"Pendências"/"Agenda"
+   quando o menu antigo some) fica sobreposto ao fim da lista sem um respiro
+   reservado — só no mobile, onde essa nav aparece (`lg:!hidden`). */
+@media (max-width: 1023.98px) {
+  .app-main.app-main--escalations {
+    /* TASK-0336 (mesma causa raiz do vão visto no popup de Ferramentas/
+       Agenda): "4.75rem" era um chute que não batia com a altura real do
+       nav — agora usa a custom property medida de verdade via
+       ResizeObserver (WhatsAppLeadsSim.tsx, `--atendimento-bottom-nav-h`).
+       Sem `+ env(safe-area-inset-bottom)`: a altura medida já inclui esse
+       padding, que o CSS do próprio nav já aplica. */
+    padding-bottom: var(--atendimento-bottom-nav-h, 4.75rem);
+  }
+}
+
 @media (max-width: 640px) {
   .app-main {
     gap: .75rem;
@@ -1936,12 +2284,27 @@ html[data-theme='clean'] .quality-workspace__persistence-alert .text-amber-100\/
     line-height: 1.25;
   }
 
+  /* Achado real, 29/08/2026: `height: 70dvh !important` / `max-height: 38rem`
+     aqui (adicionados em 22/08, ANTES da TASK-0158/0159 existirem) sobreviveram
+     a TODAS as cinco tentativas de acertar a altura no mobile (TASK-0150/0153/
+     0155/0157/0158/0159) sem que ninguém percebesse — porque nenhuma das
+     verificações estáticas anteriores (a minha própria incluída) emulava um
+     dispositivo de toque de verdade; sem isso, `(hover: none) and
+     (pointer: coarse)` nunca casa (Chromium sem emulação de device reporta
+     hover:hover/pointer:fine, igual a um mouse), então este bloco inteiro
+     nunca era exercitado nos testes, mesmo rodando contra o CSS real
+     compilado. Num dispositivo de toque real, porém, este `!important`
+     sempre venceu e travava `.atendimento-chat-shell` numa altura fixa —
+     por isso a faixa em branco nunca sumia de verdade, mesmo depois da
+     TASK-0159 corrigir a cadeia de flex corretamente. Removida a
+     altura/min/max fixas; o `flex-1 min-h-0` (className, TASK-0159) resolve
+     a altura de verdade também aqui. Mantido `display:grid`/
+     `grid-template-columns` — isso é comportamento intencional (colapsar
+     fila/conversa numa coluna só em telas de toque, mesmo quando o
+     navegador reporta viewport largo — ver comentário no topo deste bloco). */
   .atendimento-chat-shell {
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    height: 70dvh !important;
-    min-height: 26rem !important;
-    max-height: 38rem;
   }
 
   .atendimento-chat-shell .atendimento-queue,
@@ -2338,264 +2701,39 @@ html[data-theme='light'] .quality-workspace__control-pill--emerald > p:last-chil
 html[data-theme='clean'] .quality-workspace__control-pill--emerald > p:last-child { color: #2563EB !important; }
 
 
-/* Qualidade IA — superfícies claras inspiradas no Atendimento validado.
-   Esta área é deliberadamente clara mesmo se o operador estiver usando outro
-   tema global: informação de auditoria, leitura de evidências e ações humanas
-   não devem depender de texto claro sobre azul escuro para serem compreendidas. */
-.quality-workspace--clear {
-  --quality-canvas: #F4F3EF;
-  --quality-panel: #FFFFFF;
-  --quality-soft: #F8F8F5;
-  --quality-line: #DCDAD3;
-  --quality-line-strong: #C9C6BD;
-  --quality-text: #22241F;
-  --quality-secondary: #5A5B54;
-  --quality-muted: #77766F;
-  --quality-action: #176B4C;
-  color: var(--quality-text);
-  padding: 1rem;
-  border: 1px solid var(--quality-line);
-  border-radius: 1rem;
-  background: var(--quality-canvas);
-  box-shadow: 0 1px 2px rgba(34, 36, 31, 0.05);
-}
-
-.quality-workspace--clear .text-white,
-.quality-workspace--clear .text-slate-100,
-.quality-workspace--clear .text-slate-200,
-.quality-workspace--clear .text-slate-300 {
-  color: var(--quality-text) !important;
-}
-
-.quality-workspace--clear .text-slate-400,
-.quality-workspace--clear .text-slate-500,
-.quality-workspace--clear .text-slate-600,
-.quality-workspace--clear .placeholder\:text-slate-600,
-.quality-workspace--clear .placeholder\:text-slate-400 {
-  color: var(--quality-secondary) !important;
-}
-
-html .quality-workspace.quality-workspace--clear .bg-slate-950,
-html .quality-workspace.quality-workspace--clear .bg-slate-950\/90,
-html .quality-workspace.quality-workspace--clear .bg-slate-950\/80,
-html .quality-workspace.quality-workspace--clear .bg-slate-950\/60,
-html .quality-workspace.quality-workspace--clear .bg-slate-950\/50,
-html .quality-workspace.quality-workspace--clear .bg-slate-950\/45 {
-  background-color: var(--quality-soft) !important;
-}
-
-html .quality-workspace.quality-workspace--clear .bg-slate-900,
-html .quality-workspace.quality-workspace--clear .bg-slate-900\/90,
-html .quality-workspace.quality-workspace--clear .bg-slate-900\/80,
-html .quality-workspace.quality-workspace--clear .bg-slate-900\/70,
-html .quality-workspace.quality-workspace--clear .bg-slate-900\/65 {
-  background-color: var(--quality-panel) !important;
-}
-
-html .quality-workspace.quality-workspace--clear .bg-slate-800,
-html .quality-workspace.quality-workspace--clear .bg-slate-800\/90,
-html .quality-workspace.quality-workspace--clear .bg-slate-800\/70,
-html .quality-workspace.quality-workspace--clear .bg-slate-800\/65 {
-  background-color: #ECEBE6 !important;
-}
-
-html .quality-workspace.quality-workspace--clear .border-slate-800,
-html .quality-workspace.quality-workspace--clear .border-slate-800\/80,
-html .quality-workspace.quality-workspace--clear .border-slate-800\/60,
-html .quality-workspace.quality-workspace--clear .border-slate-700,
-html .quality-workspace.quality-workspace--clear .border-slate-700\/80 {
-  border-color: var(--quality-line) !important;
-}
-
-.quality-workspace--clear .bg-gradient-to-br {
-  background-image: none !important;
-  background-color: var(--quality-panel) !important;
-}
-
-.quality-workspace--clear .text-sky-300,
-.quality-workspace--clear .text-sky-200,
-.quality-workspace--clear .text-sky-100 {
-  color: #086780 !important;
-}
-
-.quality-workspace--clear .bg-sky-500\/5,
-.quality-workspace--clear .bg-sky-500\/10,
-.quality-workspace--clear .bg-sky-500\/15,
-.quality-workspace--clear .bg-sky-500\/20 {
-  background-color: #E7F4F6 !important;
-}
-
-.quality-workspace--clear .border-sky-500\/20,
-.quality-workspace--clear .border-sky-500\/25,
-.quality-workspace--clear .border-sky-500\/30,
-.quality-workspace--clear .border-sky-400\/20,
-.quality-workspace--clear .border-sky-400\/30,
-.quality-workspace--clear .border-sky-400\/50 {
-  border-color: #9BCFD6 !important;
-}
-
-.quality-workspace--clear .bg-sky-500.text-white {
-  background-color: #0D718A !important;
-  color: #FFFFFF !important;
-}
-
-.quality-workspace--clear .bg-sky-500\/10:hover,
-.quality-workspace--clear .bg-sky-500\/20:hover,
-.quality-workspace--clear .hover\:bg-sky-500\/20:hover {
-  background-color: #D7EDF0 !important;
-}
-
-.quality-workspace--clear .text-emerald-300,
-.quality-workspace--clear .text-emerald-200,
-.quality-workspace--clear .text-emerald-100 {
-  color: #0A704C !important;
-}
-
-.quality-workspace--clear .bg-emerald-500\/5,
-.quality-workspace--clear .bg-emerald-500\/10,
-.quality-workspace--clear .bg-emerald-500\/15 {
-  background-color: #EAF7F0 !important;
-}
-
-.quality-workspace--clear .border-emerald-500\/20,
-.quality-workspace--clear .border-emerald-500\/25,
-.quality-workspace--clear .border-emerald-400\/20,
-.quality-workspace--clear .border-emerald-400\/25 {
-  border-color: #9CD4B8 !important;
-}
-
-.quality-workspace--clear .text-amber-300,
-.quality-workspace--clear .text-amber-200,
-.quality-workspace--clear .text-amber-100 {
-  color: #825300 !important;
-}
-
-.quality-workspace--clear .bg-amber-500\/5,
-.quality-workspace--clear .bg-amber-500\/10 {
-  background-color: #FFF4D8 !important;
-}
-
-.quality-workspace--clear .border-amber-500\/25,
-.quality-workspace--clear .border-amber-500\/30,
-.quality-workspace--clear .border-amber-400\/25,
-.quality-workspace--clear .border-amber-400\/30 {
-  border-color: #E6BB58 !important;
-}
-
-.quality-workspace--clear .text-rose-300,
-.quality-workspace--clear .text-rose-200,
-.quality-workspace--clear .text-rose-100 {
-  color: #9C3F2C !important;
-}
-
-.quality-workspace--clear .bg-rose-500\/5,
-.quality-workspace--clear .bg-rose-500\/10 {
-  background-color: #FCEEEA !important;
-}
-
-.quality-workspace--clear .border-rose-500\/20,
-.quality-workspace--clear .border-rose-500\/25,
-.quality-workspace--clear .border-rose-500\/30,
-.quality-workspace--clear .border-rose-400\/20,
-.quality-workspace--clear .border-rose-400\/25 {
-  border-color: #E6B8AC !important;
-}
-
-.quality-workspace--clear .text-orange-300,
-.quality-workspace--clear .text-orange-200 {
-  color: #954A19 !important;
-}
-
-.quality-workspace--clear .bg-orange-500\/10 {
-  background-color: #FCEEE4 !important;
-}
-
-.quality-workspace--clear .border-orange-500\/30 {
-  border-color: #E8BF9F !important;
-}
-
-.quality-workspace--clear .quality-workspace__timeline,
-.quality-workspace--clear .quality-workspace__event {
-  background: var(--quality-panel) !important;
-  border-color: var(--quality-line) !important;
-}
-
-.quality-workspace--clear .quality-workspace__event-details {
-  background: var(--quality-soft) !important;
-  border-color: var(--quality-line) !important;
-}
-
-.quality-workspace--clear .quality-workspace__event-title,
-.quality-workspace--clear .quality-workspace__event-summary,
-.quality-workspace--clear .quality-workspace__timeline-header h3 {
-  color: var(--quality-text) !important;
-}
-
-.quality-workspace--clear .quality-workspace__event-time,
-.quality-workspace--clear .quality-workspace__event-meta,
-.quality-workspace--clear .quality-workspace__timeline-header p,
-.quality-workspace--clear .quality-workspace__event-details summary {
-  color: var(--quality-secondary) !important;
-}
-
-.quality-workspace--clear .quality-workspace__control-card {
-  background: var(--quality-panel) !important;
-  border-color: var(--quality-line) !important;
-}
-
-.quality-workspace--clear .quality-workspace__control-quote {
-  background: #EAF7F0 !important;
-  border-color: #9CD4B8 !important;
-}
-
-.quality-workspace--clear .quality-workspace__control-pill {
-  background: var(--quality-soft) !important;
-  border-color: var(--quality-line) !important;
-}
-
-@media (max-width: 640px) {
-  .quality-workspace--clear {
-    padding: .75rem;
-    border-radius: .85rem;
-  }
-
-  .quality-workspace--clear .responsive-tab-strip {
-    margin-right: -.75rem;
-    margin-left: -.75rem;
-    padding-right: .75rem;
-    padding-left: .75rem;
-  }
-}
-/* Ações secundárias da conversa: menu compacto no desktop, bottom sheet no mobile. */
-@media (max-width: 640px) {
-  .mobile-header-context-menu {
-    position: fixed !important;
-    inset: auto 0 0 0 !important;
-    width: 100% !important;
-    max-height: min(78dvh, 34rem);
-    overflow-y: auto;
-    padding: .45rem .5rem max(.5rem, env(safe-area-inset-bottom));
-    border-radius: 1rem 1rem 0 0 !important;
-    box-shadow: 0 -18px 42px -24px rgba(0, 0, 0, .72) !important;
-    transform-origin: bottom center !important;
-  }
-  .mobile-header-context-menu button {
-    min-height: 2.9rem;
-    padding: .7rem .8rem;
-    border-radius: .65rem;
-    text-align: left;
-  }
+/* TASK-0231 (pedido direto, 03/09/2026): o bloco `.quality-workspace--clear`
+   que existia aqui (comentário original: "deliberadamente clara mesmo se o
+   operador estiver usando outro tema global") forçava uma paleta fixa via
+   `!important`, ignorando os 4 temas — achado real ao investigar um print
+   mostrando a página sempre branca, em qualquer tema selecionado. Removido:
+   a classe não é mais usada no JSX (`QualityAuditCenter.tsx`), então a
+   página passou a herdar o sistema de remapeamento de tema já existente
+   pra essas mesmas classes Tailwind cruas (`bg-slate-900`/`text-white`/
+   `text-slate-400`/etc., ver `html[data-theme='...']` acima) — o mesmo
+   usado pelo resto do painel, em vez de uma paleta própria e fixa. */
+/* Ações secundárias da conversa — cartão compacto ancorado no ícone "⋮",
+   igual em qualquer largura de tela (pedido direto, 04/09/2026, com print
+   do menu ⋮ real do WhatsApp: uma caixa PEQUENA no canto, nunca uma gaveta
+   ocupando a largura toda). Antes desta correção, esta regra (só abaixo de
+   640px) transformava o mesmo menu num bottom sheet full-width — por isso
+   sobrava um vão vazio enorme do lado, bem diferente do WhatsApp real. As
+   classes já definidas inline no JSX (`absolute right-0 top-10 w-52
+   rounded-xl origin-top-right`) já bastam sozinhas pra esse resultado; esta
+   regra agora só ajusta o tamanho do alvo de toque de cada item (WCAG,
+   ainda relevante no mobile) e o tom em temas claros. */
+.mobile-header-context-menu button {
+  min-height: 2.25rem;
 }
 html[data-theme='light'] .mobile-header-context-menu {
   background: var(--surface-raised) !important;
   border-color: var(--border) !important;
-  box-shadow: 0 -18px 42px -24px rgba(34, 36, 31, .2) !important;
+  box-shadow: 0 16px 34px -16px rgba(34, 36, 31, .28) !important;
 }
 
 html[data-theme='clean'] .mobile-header-context-menu {
   background: var(--surface-raised) !important;
   border-color: var(--border) !important;
-  box-shadow: 0 -18px 42px -24px rgba(15, 23, 42, 0.14) !important;
+  box-shadow: 0 16px 34px -16px rgba(15, 23, 42, 0.18) !important;
 }
 html[data-theme='light'] .mobile-header-context-menu .border-t {
   border-color: var(--border) !important;
@@ -3435,6 +3573,18 @@ html[data-theme='clean'] .bg-slate-950\/90 {
   background-color: var(--surface-sunken) !important;
 }
 
+/* TASK-0247 (pedido direto, 03/09/2026, print real do mobile em tema
+   claro): a Ficha do Contato (`ContactContextPanel.tsx`, variant="detail")
+   usa `bg-slate-950/65` como fundo do painel PRINCIPAL, mas a regra geral
+   logo acima mapeia essa família pra `var(--surface-sunken)` — certo pra
+   um "poço" recuado dentro de um card, errado aqui (o painel principal
+   deveria ficar branco igual aos cards vizinhos da Ficha IA, não
+   cinza-amarelado). `.contact-context-detail` (2 classes) vence a regra
+   geral (1 classe) sem precisar mudar o comportamento padrão de -950 pros
+   outros usos legítimos dele. */
+html[data-theme='light'] .contact-context-detail.bg-slate-950\/65 { background-color: var(--surface-panel) !important; }
+html[data-theme='clean'] .contact-context-detail.bg-slate-950\/65 { background-color: var(--surface-panel) !important; }
+
 html[data-theme='light'] .border-slate-700,
 html[data-theme='light'] .border-slate-700\/50,
 html[data-theme='light'] .border-slate-700\/60,
@@ -3464,6 +3614,46 @@ html[data-theme='clean'] .border-slate-800\/60,
 html[data-theme='clean'] .border-slate-800\/70,
 html[data-theme='clean'] .border-slate-800\/80,
 html[data-theme='clean'] .border-slate-800\/90 {
+  border-color: var(--border) !important;
+}
+
+/* TASK-0320 — `divide-slate-700/800` (Tailwind `divide-y divide-{cor}`,
+   usado como divisória entre linhas de lista — Atendimento, Financeiro,
+   CRM, Qualidade da IA, CAPI, Catálogo) gera um seletor diferente de
+   `.border-slate-800` (`.divide-slate-800\/40 > :not([hidden]) ~
+   :not([hidden])`), então a auditoria de borda acima nunca cobria essas
+   divisórias — ficavam cinza-escuro (dark) sobre fundo branco no claro.
+   Achado real auditando a lista de conversas do Atendimento (linha
+   divisória escura entre linhas brancas). */
+html[data-theme='light'] .divide-slate-700 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-700\/50 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-700\/60 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-700\/70 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-700\/80 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/30 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/40 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/70 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/90 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border) !important;
+}
+
+html[data-theme='clean'] .divide-slate-700 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-700\/50 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-700\/60 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-700\/70 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-700\/80 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/30 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/40 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/70 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/90 > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--border) !important;
 }
 
@@ -3503,15 +3693,39 @@ html[data-theme='clean'] [class*='bg-[#0f191e]'] {
    propósito o fundo escuro original (azul/verde) mesmo no claro — mas a
    regra genérica `.text-white` acima escurece o texto igual, deixando texto
    escuro sobre fundo escuro quase ilegível. Restaura branco só nessas duas
-   bolhas específicas, sem tocar no resto do `.text-white` do painel. */
-html[data-theme='light'] [class*='bg-[#1f4287]'].text-white,
+   bolhas específicas, sem tocar no resto do `.text-white` do painel.
+
+   TASK-0251/TASK-0256 (achado real, 03/09/2026, prints do mobile em tema
+   claro): a bolha "VOCÊ (EQUIPE)" (mensagem manual do operador,
+   WhatsAppLeadsSim.tsx) usava `bg-[#2e261f]` (marrom) com texto
+   `text-amber-50` — a regra acima nunca cobriu essa cor (referenciava
+   `bg-[#1f4287]`, que não existe mais em nenhum componente — resquício de
+   uma paleta anterior; TASK-0251 já trocou o hex, mas manteve a paleta
+   marrom/âmbar). O dono do produto pediu, depois de ver o resultado, uma
+   cor mais neutra ("azul cinza ou verde") em vez do marrom — como a IA já
+   usa verde (`bg-[#005c4b]`), o operador passou a usar azul-acinzentado
+   (`bg-[#334155]`, Tailwind slate-700) com texto `text-slate-100`/
+   `text-slate-300`, mantendo o mesmo padrão "bolha enviada guarda a cor
+   original, com texto sempre claro" em qualquer tema — só a paleta trocou
+   de marrom pra azul-acinzentado. */
+html[data-theme='light'] [class*='bg-[#334155]'].text-white,
 html[data-theme='light'] [class*='bg-[#005c4b]'].text-white {
   color: #ffffff !important;
 }
 
-html[data-theme='clean'] [class*='bg-[#1f4287]'].text-white,
+html[data-theme='clean'] [class*='bg-[#334155]'].text-white,
 html[data-theme='clean'] [class*='bg-[#005c4b]'].text-white {
   color: #ffffff !important;
+}
+
+html[data-theme='light'] [class*='bg-[#334155]'].text-slate-100,
+html[data-theme='clean'] [class*='bg-[#334155]'].text-slate-100 {
+  color: #f1f5f9 !important;
+}
+
+html[data-theme='light'] [class*='bg-[#334155]'] .text-slate-300,
+html[data-theme='clean'] [class*='bg-[#334155]'] .text-slate-300 {
+  color: #cbd5e1 !important;
 }
 
 
@@ -3598,6 +3812,48 @@ html[data-theme='clean'] .bg-rose-950\/80,
 html[data-theme='clean'] .bg-red-950\/40,
 html[data-theme='clean'] .bg-red-950\/60 { background-color: #FEF2F2 !important; }
 
+/* TASK-0246 (pedido direto, 03/09/2026): `ContactContextPanel.tsx` ("Ficha
+   do Contato", adicionada um dia antes desta correção) usa variantes
+   -500/-600 cruas de sky/amber/rose que nunca tinham entrado nesta
+   auditoria (que até aqui só cobria a família -950 e alguns -400) — em
+   claro/limpo elas ficavam com o tom escuro original (badge/borda
+   praticamente invisível ou destoando do resto do painel já alinhado ao
+   tema). Mesmos valores já usados pras variantes -950/-400 equivalentes
+   dessas mesmas cores, pra manter consistência com o resto do app — não
+   inclui `bg-sky-600`/`hover:bg-sky-500`/`focus:border-sky-500` (botão
+   sólido com texto branco fixo e anel de foco: legíveis em qualquer tema
+   sem remapear). */
+html[data-theme='light'] .bg-amber-500\/10 { background-color: #FFF4D8 !important; }
+html[data-theme='clean'] .bg-amber-500\/10 { background-color: #FFFBEB !important; }
+
+html[data-theme='light'] .bg-sky-500\/10,
+html[data-theme='light'] .bg-sky-500\/20 { background-color: #E7F4F6 !important; }
+html[data-theme='clean'] .bg-sky-500\/10,
+html[data-theme='clean'] .bg-sky-500\/20 { background-color: #F0F9FF !important; }
+
+html[data-theme='light'] .border-amber-500\/20,
+html[data-theme='light'] .border-amber-500\/25 { border-color: #E6BB58 !important; }
+html[data-theme='clean'] .border-amber-500\/20,
+html[data-theme='clean'] .border-amber-500\/25 { border-color: #F59E0B !important; }
+
+html[data-theme='light'] .border-sky-500,
+html[data-theme='light'] .border-sky-500\/15,
+html[data-theme='light'] .border-sky-500\/25 { border-color: #9BCFD6 !important; }
+html[data-theme='clean'] .border-sky-500,
+html[data-theme='clean'] .border-sky-500\/15,
+html[data-theme='clean'] .border-sky-500\/25 { border-color: #60A5FA !important; }
+
+html[data-theme='light'] .border-rose-500\/30 { border-color: #E6B8AC !important; }
+html[data-theme='clean'] .border-rose-500\/30 { border-color: #FCA5A5 !important; }
+
+html[data-theme='light'] .text-amber-100\/80,
+html[data-theme='light'] .text-amber-100\/85 { color: #825300 !important; }
+html[data-theme='clean'] .text-amber-100\/80,
+html[data-theme='clean'] .text-amber-100\/85 { color: #B45309 !important; }
+
+html[data-theme='light'] .text-sky-300\/70 { color: #0D718A !important; }
+html[data-theme='clean'] .text-sky-300\/70 { color: #0369A1 !important; }
+
 /*
  * TASK-0051 — linguagem de superfícies em degradê.
  * O degradê é reservado aos headers e painéis principais; controles, tabelas,
@@ -3643,11 +3899,6 @@ html[data-theme='clean'] {
   box-shadow: var(--shadow-premium) !important;
 }
 
-.quality-workspace--clear {
-  background: var(--surface-gradient-soft) !important;
-  border-color: color-mix(in srgb, var(--action) 24%, var(--quality-line, var(--border))) !important;
-}
-
 .knowledge-workspace__audit {
   background: var(--surface-gradient-soft) !important;
   border-color: color-mix(in srgb, var(--action) 24%, var(--border)) !important;
@@ -3663,8 +3914,181 @@ html[data-theme='clean'] {
   .agenda-financeiro-workspace__hero,
   .knowledge-workspace__hero,
   .saas-workspace__banner,
-  .quality-workspace--clear,
   .knowledge-workspace__audit {
     box-shadow: none !important;
   }
+}
+
+/* TASK-0318 — Agenda/Financeiro (`AgendaFinanceiroCenter.tsx`): EventCard,
+   botão "Novo agendamento", Metric e FinancialTransactionCard eram Tailwind
+   puro sem nenhum hook — classes abaixo foram adicionadas ao JSX de forma
+   aditiva (sem remover nada), então dark/blue/clean continuam exatamente
+   como estavam. */
+html[data-theme='light'] .agenda-financeiro-workspace__event-card {
+  background: var(--app-surface);
+  border-color: var(--app-border);
+  box-shadow: var(--app-shadow-card);
+  border-radius: var(--app-radius-card);
+}
+html[data-theme='light'] .agenda-financeiro-workspace__primary-action {
+  background: var(--app-action);
+  color: #ffffff;
+  border-radius: var(--app-radius-pill);
+}
+html[data-theme='light'] .agenda-financeiro-workspace__metric-card,
+html[data-theme='light'] .agenda-financeiro-workspace__transaction-card {
+  background: var(--app-surface);
+  border-color: var(--app-border);
+  box-shadow: var(--app-shadow-card);
+}
+
+/* TASK-0318 — CRM (`OperatorCRM.tsx`): header de coluna do kanban e card de
+   lead também eram Tailwind puro sem hook; mesma estratégia aditiva acima. */
+html[data-theme='light'] .crm-workspace__stage-header {
+  background: var(--app-surface-soft);
+}
+html[data-theme='light'] .crm-workspace__lead-card {
+  background: var(--app-surface);
+  border-color: var(--app-border);
+}
+html[data-theme='light'] .crm-workspace__lead-card--selected {
+  background: var(--app-action-subtle);
+  border-color: var(--app-action);
+}
+
+/*
+ * TASK-0318 — correção de gap de opacidade baixa (5–30%) da família
+ * emerald/sky/blue/cyan/indigo/violet/amber/orange/yellow/rose/red em `-400`
+ * e `-500`, usada como fundo/borda de badges e pills. Achado por auditoria:
+ * nenhuma regra genérica existente no arquivo cobre essa faixa fora de
+ * contextos aninhados específicos (ex: `.knowledge-workspace__audit`) — só
+ * o `-950` (bem mais escuro) e a família `slate` têm cobertura exaustiva.
+ * Em telas com fundo escuro essas cores em baixa opacidade já ficam
+ * legíveis; no tema claro (fundo branco) o mesmo tom quase desaparece.
+ * Afeta, entre outros: badge do logo no Header, badge de data do
+ * EventCard (Agenda), STAGES_BASE do CRM, pill de probabilidade do
+ * Growth/CAPI, badges de status da Qualidade da IA.
+ * Escopo deliberadamente restrito a opacidade baixa (≤30%): valores mais
+ * altos (`/40` pra cima) em geral são bordas de foco em inputs escuros,
+ * indicadores de toggle, ou botões sólidos com texto branco fixo — já
+ * legíveis em qualquer tema, remapeá-los à toa arriscaria texto claro
+ * sobre fundo claro. Agrupado por família semântica (sucesso/aviso/perigo/
+ * informação), reaproveitando os tokens --app-*-soft/-border já definidos.
+ */
+html[data-theme='light'] .bg-emerald-400\/10,
+html[data-theme='light'] .bg-emerald-400\/15,
+html[data-theme='light'] .bg-emerald-400\/30,
+html[data-theme='light'] .bg-emerald-500\/5,
+html[data-theme='light'] .bg-emerald-500\/10,
+html[data-theme='light'] .bg-emerald-500\/12,
+html[data-theme='light'] .bg-emerald-500\/15,
+html[data-theme='light'] .bg-emerald-500\/20,
+html[data-theme='light'] .bg-emerald-500\/25,
+html[data-theme='light'] .bg-emerald-600\/20,
+html[data-theme='light'] .bg-emerald-600\/30 {
+  background-color: var(--app-success-soft) !important;
+}
+html[data-theme='light'] .border-emerald-400\/15,
+html[data-theme='light'] .border-emerald-400\/20,
+html[data-theme='light'] .border-emerald-400\/25,
+html[data-theme='light'] .border-emerald-400\/30,
+html[data-theme='light'] .border-emerald-400\/35,
+html[data-theme='light'] .border-emerald-500\/15,
+html[data-theme='light'] .border-emerald-500\/20,
+html[data-theme='light'] .border-emerald-500\/25,
+html[data-theme='light'] .border-emerald-500\/30,
+html[data-theme='light'] .border-emerald-500\/35 {
+  border-color: var(--app-success-border) !important;
+}
+
+html[data-theme='light'] .bg-amber-400\/5,
+html[data-theme='light'] .bg-amber-400\/15,
+html[data-theme='light'] .bg-amber-500\/5,
+html[data-theme='light'] .bg-amber-500\/15,
+html[data-theme='light'] .bg-amber-500\/20,
+html[data-theme='light'] .bg-orange-400\/10,
+html[data-theme='light'] .bg-orange-500\/10,
+html[data-theme='light'] .bg-orange-500\/20,
+html[data-theme='light'] .bg-yellow-500\/20 {
+  background-color: var(--app-warning-soft) !important;
+}
+html[data-theme='light'] .border-amber-400\/15,
+html[data-theme='light'] .border-amber-400\/20,
+html[data-theme='light'] .border-amber-400\/25,
+html[data-theme='light'] .border-amber-400\/30,
+html[data-theme='light'] .border-amber-400\/35,
+html[data-theme='light'] .border-amber-500\/15,
+html[data-theme='light'] .border-amber-500\/35,
+html[data-theme='light'] .border-orange-400\/20,
+html[data-theme='light'] .border-orange-400\/25,
+html[data-theme='light'] .border-orange-400\/30,
+html[data-theme='light'] .border-orange-400\/35,
+html[data-theme='light'] .border-orange-500\/30 {
+  border-color: var(--app-warning-border) !important;
+}
+
+html[data-theme='light'] .bg-red-500\/10,
+html[data-theme='light'] .bg-red-500\/20,
+html[data-theme='light'] .bg-rose-400\/10,
+html[data-theme='light'] .bg-rose-500\/5,
+html[data-theme='light'] .bg-rose-500\/10,
+html[data-theme='light'] .bg-rose-500\/15 {
+  background-color: var(--app-danger-soft) !important;
+}
+html[data-theme='light'] .border-red-500\/30,
+html[data-theme='light'] .border-rose-400\/20,
+html[data-theme='light'] .border-rose-400\/25,
+html[data-theme='light'] .border-rose-400\/30,
+html[data-theme='light'] .border-rose-400\/35,
+html[data-theme='light'] .border-rose-500\/20,
+html[data-theme='light'] .border-rose-500\/25,
+html[data-theme='light'] .border-rose-500\/35 {
+  border-color: var(--app-danger-border) !important;
+}
+
+html[data-theme='light'] .bg-blue-500\/10,
+html[data-theme='light'] .bg-blue-500\/15,
+html[data-theme='light'] .bg-blue-500\/20,
+html[data-theme='light'] .bg-cyan-400\/10,
+html[data-theme='light'] .bg-cyan-500\/5,
+html[data-theme='light'] .bg-cyan-500\/10,
+html[data-theme='light'] .bg-cyan-500\/20,
+html[data-theme='light'] .bg-indigo-500\/15,
+html[data-theme='light'] .bg-sky-400\/10,
+html[data-theme='light'] .bg-sky-500\/5,
+html[data-theme='light'] .bg-sky-500\/12,
+html[data-theme='light'] .bg-sky-500\/15,
+html[data-theme='light'] .bg-sky-500\/25,
+html[data-theme='light'] .bg-violet-400\/10,
+html[data-theme='light'] .bg-violet-500\/5,
+html[data-theme='light'] .bg-violet-500\/10,
+html[data-theme='light'] .bg-violet-500\/20 {
+  background-color: var(--app-info-soft) !important;
+}
+html[data-theme='light'] .border-blue-500\/15,
+html[data-theme='light'] .border-blue-500\/20,
+html[data-theme='light'] .border-blue-500\/25,
+html[data-theme='light'] .border-blue-500\/30,
+html[data-theme='light'] .border-cyan-400\/15,
+html[data-theme='light'] .border-cyan-400\/20,
+html[data-theme='light'] .border-cyan-400\/25,
+html[data-theme='light'] .border-cyan-400\/30,
+html[data-theme='light'] .border-cyan-400\/35,
+html[data-theme='light'] .border-cyan-500\/20,
+html[data-theme='light'] .border-indigo-500\/30,
+html[data-theme='light'] .border-sky-400\/20,
+html[data-theme='light'] .border-sky-400\/25,
+html[data-theme='light'] .border-sky-400\/30,
+html[data-theme='light'] .border-sky-400\/35,
+html[data-theme='light'] .border-sky-500\/20,
+html[data-theme='light'] .border-sky-500\/30,
+html[data-theme='light'] .border-sky-500\/35,
+html[data-theme='light'] .border-violet-400\/20,
+html[data-theme='light'] .border-violet-400\/25,
+html[data-theme='light'] .border-violet-400\/30,
+html[data-theme='light'] .border-violet-400\/35,
+html[data-theme='light'] .border-violet-500\/20,
+html[data-theme='light'] .border-violet-500\/25,
+html[data-theme='light'] .border-violet-500\/30 {
+  border-color: var(--app-info-border) !important;
 }
