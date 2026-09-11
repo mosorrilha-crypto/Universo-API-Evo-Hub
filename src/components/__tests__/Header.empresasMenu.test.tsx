@@ -157,6 +157,56 @@ describe('grupos de navegação no desktop', () => {
     expect(screen.queryByRole('button', { name: 'Plataforma' })).toBeNull();
   });
 
+  // Achado real (11/09/2026): Monique (não saas_admin) relatou "quando
+  // clico no seletor, deloga" — o botão do avatar no desktop abria o
+  // LoginModal por cima da sessão ativa pra qualquer não-saas_admin
+  // (pensado como atalho de "trocar operador", mas sem nenhuma indicação
+  // visual disso), mesmo já existindo um botão "Sair" dedicado ao lado. O
+  // mobile já tratava isso certo (só mostra "Trocar operador" dentro do
+  // menu do avatar pra saas_admin); o desktop ficou inconsistente.
+  it('avatar do desktop não abre o modal de login para quem não é SaaS Admin', async () => {
+    const user = userEvent.setup();
+    const onOpenLoginModal = vi.fn();
+    render(
+      <AppPreferencesProvider>
+        <Header
+          activeTab="whatsapp"
+          setActiveTab={vi.fn()}
+          savedCount={0}
+          currentUser={{ ...saasAdmin, role: 'admin' }}
+          onOpenLoginModal={onOpenLoginModal}
+          onLogout={vi.fn()}
+          tenants={[activeTenant]}
+          activeTenant={activeTenant}
+          onSelectTenant={vi.fn()}
+          capabilities={fullyEnabledCapabilities}
+          onOpenChangePasswordModal={vi.fn()}
+        />
+      </AppPreferencesProvider>,
+    );
+
+    const avatarButtons = screen.getAllByTitle(saasAdmin.name);
+    const desktopAvatarButton = avatarButtons.find((btn) => (btn as HTMLButtonElement).disabled);
+    expect(desktopAvatarButton).toBeDefined();
+
+    await user.click(desktopAvatarButton!);
+
+    expect(onOpenLoginModal).not.toHaveBeenCalled();
+  });
+
+  it('avatar do desktop continua abrindo o seletor de empresas para o SaaS Admin', async () => {
+    const user = userEvent.setup();
+    renderHeader();
+
+    const avatarButtons = screen.getAllByTitle(`Empresa ativa: ${activeTenant.name}`);
+    const desktopAvatarButton = avatarButtons.find((btn) => !(btn as HTMLButtonElement).disabled);
+    expect(desktopAvatarButton).toBeDefined();
+
+    await user.click(desktopAvatarButton!);
+
+    expect(screen.getByText(activeTenant.name)).not.toBeNull();
+  });
+
   it('fecha Configurar com Escape e devolve o foco ao gatilho', async () => {
     const user = userEvent.setup();
     renderHeader();
