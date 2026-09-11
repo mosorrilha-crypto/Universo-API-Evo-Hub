@@ -30,7 +30,19 @@ export async function saveMediaImage(
   mimeType: string
 ): Promise<void> {
   const config = getObjectStorageConfig();
-  if (!config) return;
+  // Achado real em produção (11/09/2026): esta checagem era um retorno
+  // 100% silencioso — sem R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/
+  // R2_BUCKET_NAME configurados (as 4 env vars da TASK-0332), TODA mídia de
+  // WhatsApp (imagem/áudio, recebida ou enviada) parava de ser salva sem
+  // NENHUM log de erro em lugar nenhum — o mesmo padrão de "falha silenciosa"
+  // que a auditoria externa citada abaixo já tinha corrigido pro caso de
+  // `putObject` lançar, mas não pro caso de config ausente. GET /api/media
+  // então devolvia 404 genérico ("Imagem não encontrada"), indistinguível de
+  // uma mídia que de fato nunca existiu — nada nos logs apontava a causa raiz.
+  if (!config) {
+    console.warn(`⚠️  [Mídia] R2 não configurado (R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET_NAME ausentes) — mídia NÃO salva (message_id=${messageId}).`);
+    return;
+  }
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
 

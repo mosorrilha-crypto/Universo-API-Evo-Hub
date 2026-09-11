@@ -13,7 +13,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
-import { markProcessedIfNew, unmarkProcessed } from '../idempotency';
+import { markProcessedIfNew, unmarkProcessed, dedupeKeyFor } from '../idempotency';
+import type { ParsedIncomingMessage } from '../webhookParsers';
 
 /**
  * Fake dedicado (mesmo padrão de conversationStoreMessageInsertFailure.test.ts):
@@ -85,6 +86,43 @@ describe('markProcessedIfNew', () => {
     expect(await markProcessedIfNew('wamid.EEE')).toBe(true);
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+// Achado real em produção (11/09/2026): duas instâncias Evolution API
+// DIFERENTES (dois tenants) geraram o mesmo `key.id` pra duas mensagens
+// `fromMe` reais e distintas, a ~0,4s de diferença — a migration que criou
+// `processed_webhook_messages` (0025) partia da premissa de que o
+// messageId do provider já é globalmente único, falsa pra Evolution/Baileys.
+// `dedupeKeyFor` escopa a chave por provider+instância antes do messageId
+// pra essas duas mensagens nunca colidirem na dedupe global.
+describe('dedupeKeyFor', () => {
+  function msg(overrides: Partial<ParsedIncomingMessage>): ParsedIncomingMessage {
+    return { provider: 'evolution', messageId: 'ID', from: '5511999999999', type: 'text', ...overrides } as ParsedIncomingMessage;
+  }
+
+  it('evolution: mesmo messageId em instâncias diferentes produz chaves diferentes', () => {
+    const a = dedupeKeyFor(msg({ provider: 'evolution', instanceName: 'tenant-a-instance', messageId: '2A96BB17E9619F2244A3' }));
+    const b = dedupeKeyFor(msg({ provider: 'evolution', instanceName: 'tenant-b-instance', messageId: '2A96BB17E9619F2244A3' }));
+    expect(a).not.toBe(b);
+  });
+
+  it('evolution: mesma instância e mesmo messageId produz a mesma chave (reentrega ainda é detectada)', () => {
+    const a = dedupeKeyFor(msg({ provider: 'evolution', instanceName: 'tenant-a-instance', messageId: '2A96BB17E9619F2244A3' }));
+    const b = dedupeKeyFor(msg({ provider: 'evolution', instanceName: 'tenant-a-instance', messageId: '2A96BB17E9619F2244A3' }));
+    expect(a).toBe(b);
+  });
+
+  it('meta: escopa por phoneNumberId', () => {
+    const a = dedupeKeyFor(msg({ provider: 'meta', phoneNumberId: '111', messageId: 'wamid.SAME' }));
+    const b = dedupeKeyFor(msg({ provider: 'meta', phoneNumberId: '222', messageId: 'wamid.SAME' }));
+    expect(a).not.toBe(b);
+  });
+
+  it('instagram: escopa por instagramAccountId', () => {
+    const a = dedupeKeyFor(msg({ provider: 'instagram', instagramAccountId: 'acc-1', messageId: 'ig.SAME' }));
+    const b = dedupeKeyFor(msg({ provider: 'instagram', instagramAccountId: 'acc-2', messageId: 'ig.SAME' }));
+    expect(a).not.toBe(b);
   });
 });
 

@@ -21,14 +21,56 @@ vi.mock('../legacySupabaseStorage', () => ({
   getLegacySupabaseStorageObject: (...args: any[]) => getLegacySupabaseStorageObjectMock(...args),
 }));
 
-import { getMediaImage } from '../mediaImageStore';
+import { getMediaImage, saveMediaImage } from '../mediaImageStore';
 
 const CONFIG = { accountId: 'acc', accessKeyId: 'key', secretAccessKey: 'secret', bucket: 'app-data' };
 
 beforeEach(() => {
   getObjectStorageConfigMock.mockReset();
   getObjectMock.mockReset();
+  putObjectMock.mockReset();
   getLegacySupabaseStorageObjectMock.mockReset();
+});
+
+// Achado real em produção (11/09/2026): sem R2 configurado, saveMediaImage
+// só fazia `return` — nenhum log, nenhum jeito de saber depois que a mídia
+// nunca foi salva (GET /api/media devolvia 404 genérico, indistinguível de
+// mídia que nunca existiu). Trava que a ausência de config agora é sempre
+// logada, e que putObject nunca é chamado nesse caso (nada pra salvar).
+describe('saveMediaImage', () => {
+  it('sem R2 configurado, avisa no log e não chama putObject', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    getObjectStorageConfigMock.mockReturnValue(undefined);
+
+    await saveMediaImage('https://proj.supabase.co', 'key', 'wa-123', 'base64data', 'image/jpeg');
+
+    expect(putObjectMock).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('R2 não configurado'));
+    warnSpy.mockRestore();
+  });
+
+  it('com R2 configurado, salva via putObject sem logar nada', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    getObjectStorageConfigMock.mockReturnValue(CONFIG);
+    putObjectMock.mockResolvedValue(undefined);
+
+    await saveMediaImage('https://proj.supabase.co', 'key', 'wa-123', 'base64data', 'image/jpeg');
+
+    expect(putObjectMock).toHaveBeenCalledWith(CONFIG, 'media/wa-123', expect.any(Buffer), 'image/jpeg');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('quando putObject falha, avisa no log com a mensagem original', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    getObjectStorageConfigMock.mockReturnValue(CONFIG);
+    putObjectMock.mockRejectedValue(new Error('AccessDenied'));
+
+    await saveMediaImage('https://proj.supabase.co', 'key', 'wa-123', 'base64data', 'image/jpeg');
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Falha ao salvar imagem recebida'), 'AccessDenied');
+    warnSpy.mockRestore();
+  });
 });
 
 describe('getMediaImage', () => {

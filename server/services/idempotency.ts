@@ -9,6 +9,27 @@
  * da IA pra leads reais).
  */
 import { getPlatformDb } from './db';
+import type { ParsedIncomingMessage } from './webhookParsers';
+
+/**
+ * Achado real em produção (11/09/2026, TASK a definir): a migration que
+ * criou esta tabela (0025) partia da premissa de que "o message_id do
+ * provider (Meta/Evolution) já é globalmente único" — falsa pra Evolution
+ * API/Baileys. Duas instâncias Evolution DIFERENTES (logo, dois tenants
+ * diferentes) geraram o MESMO `key.id` (`2A96BB17E9619F2244A3`) pra duas
+ * mensagens `fromMe` reais e distintas, a ~0,4s de diferença — confirmado
+ * nos logs de produção. Como a dedupe era só por `messageId` cru, a segunda
+ * entrega a chegar seria descartada como "reentrega" mesmo sendo uma
+ * mensagem legítima de outro tenant, perdendo a mensagem (e a mídia
+ * associada) silenciosamente, sem nenhum log de erro. A Meta Cloud API
+ * garante `wamid` globalmente único (mantido como está); só a Evolution
+ * precisa do escopo extra. Instagram usa `instagramAccountId` pelo mesmo
+ * motivo (conta, não instância compartilhada).
+ */
+export function dedupeKeyFor(msg: Pick<ParsedIncomingMessage, 'provider' | 'phoneNumberId' | 'instanceName' | 'instagramAccountId' | 'messageId'>): string {
+  const scope = msg.provider === 'evolution' ? msg.instanceName : msg.provider === 'instagram' ? msg.instagramAccountId : msg.phoneNumberId;
+  return `${msg.provider}:${scope || ''}:${msg.messageId}`;
+}
 
 /** Retorna true se essa mensagem ainda não tinha sido processada (e marca como vista agora). */
 export async function markProcessedIfNew(messageId: string): Promise<boolean> {
