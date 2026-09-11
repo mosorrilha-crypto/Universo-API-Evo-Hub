@@ -2550,6 +2550,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           }))
       : [];
     const paymentStartMs = paymentAppointment ? new Date(paymentAppointment.startIso).getTime() : null;
+    // Achado real (print da Ficha do Contato com pré-reserva "aguardando
+    // comprovante" no banner, mas "Agendou? sim" / "Agendamento Confirmado" /
+    // "confirmado" na lista de AGENDAMENTOS): `paymentAppointment` cobre
+    // TANTO uma pré-reserva sem evento real na agenda (payment_status
+    // 'awaiting_payment'/'pending_verification', ver appointmentStore.ts)
+    // QUANTO um agendamento de fato confirmado — as duas fontes tratavam
+    // qualquer `paymentAppointment` truthy como "confirmado", inflando a
+    // etapa do funil pro passo 5/5 e criando um escalonamento com a ficha já
+    // dizendo "agendado" antes de qualquer comprovante ter sido aprovado.
+    const isPendingPaymentProof = paymentAppointment?.paymentStatus === 'awaiting_payment' || paymentAppointment?.paymentStatus === 'pending_verification';
+    const isPast = paymentStartMs != null && paymentStartMs < Date.now();
     const alreadyListed = paymentStartMs != null && fromCalendar.some((appt) => {
       const applied = upcomingEvents.find((ev) => ev.id === appt.id);
       return applied?.startIso ? new Date(applied.startIso).getTime() === paymentStartMs : false;
@@ -2562,14 +2573,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             date: new Date(paymentAppointment.startIso).toLocaleDateString('pt-BR'),
             time: new Date(paymentAppointment.startIso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
             title: paymentAppointment.summary || 'Consulta',
-            status: (paymentStartMs != null && paymentStartMs < Date.now() ? 'passed' : 'scheduled') as 'passed' | 'scheduled',
+            status: (isPast ? 'passed' : isPendingPaymentProof ? 'pending_payment' : 'scheduled') as 'passed' | 'pending_payment' | 'scheduled',
           },
         ]
       : fromCalendar;
     const funnelStageName = paymentAppointment
-      ? (paymentStartMs != null && paymentStartMs < Date.now() ? 'Horário já passou' : 'Agendamento Confirmado')
+      ? (isPast ? 'Horário já passou' : isPendingPaymentProof ? 'Pré-reserva — aguardando comprovante' : 'Agendamento Confirmado')
       : (selectedLead?.fullAnalysis?.stage || 'Em Qualificação');
-    return { upcomingAppointments, funnelStageName };
+    return { upcomingAppointments, funnelStageName, isPendingPaymentProof };
   }, [selectedLead?.phone, selectedLead?.fullAnalysis?.stage, paymentAppointment, upcomingEvents]);
 
   // TASK-0267 (pedido direto): histórico completo de escalonamentos DESTE
@@ -6612,12 +6623,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   name: selectedLead.name,
                   phone: selectedLead.phone,
                   interest: selectedLead.interest || visibleContactContext?.memory?.serviceInterest || undefined,
-                  hasBooked: Boolean(paymentAppointment),
+                  hasBooked: Boolean(paymentAppointment) && !contactFunnelInfo.isPendingPaymentProof,
                   firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
                   notes: visibleContactContext?.memory?.conversationSummary || undefined,
                   funnelStage: {
                     name: contactFunnelInfo.funnelStageName,
-                    currentStep: paymentAppointment ? 5 : 3,
+                    currentStep: paymentAppointment ? (contactFunnelInfo.isPendingPaymentProof ? 4 : 5) : 3,
                     totalSteps: 5,
                   },
                   upcomingAppointments: contactFunnelInfo.upcomingAppointments,
@@ -6749,12 +6760,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   name: selectedLead.name,
                   phone: selectedLead.phone,
                   interest: selectedLead.interest || visibleContactContext?.memory?.serviceInterest || undefined,
-                  hasBooked: Boolean(paymentAppointment),
+                  hasBooked: Boolean(paymentAppointment) && !contactFunnelInfo.isPendingPaymentProof,
                   firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
                   notes: visibleContactContext?.memory?.conversationSummary || undefined,
                   funnelStage: {
                     name: contactFunnelInfo.funnelStageName,
-                    currentStep: paymentAppointment ? 5 : 3,
+                    currentStep: paymentAppointment ? (contactFunnelInfo.isPendingPaymentProof ? 4 : 5) : 3,
                     totalSteps: 5,
                   },
                   upcomingAppointments: contactFunnelInfo.upcomingAppointments,

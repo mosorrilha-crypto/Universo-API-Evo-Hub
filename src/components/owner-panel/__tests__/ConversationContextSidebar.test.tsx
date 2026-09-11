@@ -89,3 +89,34 @@ describe('ConversationContextSidebar — prontuário', () => {
     expect(screen.getByText(LONG_NOTE)).not.toBeNull();
   });
 });
+
+// Achado real (print anotado: banner "aguardando comprovante" no topo da
+// conversa, mas a Ficha do Contato dizia "Agendou? sim" / "Agendamento
+// Confirmado" / "confirmado" na lista de AGENDAMENTOS) — uma pré-reserva
+// (payment_status 'awaiting_payment'/'pending_verification', sem evento real
+// no Google Calendar ainda) nunca deve renderizar como se já estivesse
+// confirmada. `WhatsAppLeadsSim.tsx` agora passa `status: 'pending_payment'`
+// pro item de AGENDAMENTOS e um `funnelStage.name` distinto nesse caso — este
+// componente só precisa saber tratar esse status sem chamá-lo de "confirmado".
+describe('ConversationContextSidebar — pré-reserva não é agendamento confirmado', () => {
+  const contactWithPendingReservation: ContactProfileData = {
+    ...baseContact,
+    hasBooked: false,
+    funnelStage: { name: 'Pré-reserva — aguardando comprovante', currentStep: 4, totalSteps: 5 },
+    upcomingAppointments: [
+      { id: 'payment-appointment', date: '19/09/2026', time: '13:30', title: 'Combo Micro Cejas + Labios', status: 'pending_payment' },
+    ],
+  };
+
+  it('mostra "pré-reserva — aguardando comprovante", nunca "confirmado", pro item pendente', () => {
+    render(<ConversationContextSidebar contact={contactWithPendingReservation} agentStatus="active" />);
+    expect(screen.getByText('pré-reserva — aguardando comprovante')).toBeTruthy();
+    expect(screen.queryByText('confirmado')).toBeNull();
+  });
+
+  it('etapa do funil reflete a pré-reserva, não "Agendamento Confirmado"', () => {
+    render(<ConversationContextSidebar contact={contactWithPendingReservation} agentStatus="active" />);
+    expect(screen.getByText('Pré-reserva — aguardando comprovante')).toBeTruthy();
+    expect(screen.queryByText('Agendamento Confirmado')).toBeNull();
+  });
+});

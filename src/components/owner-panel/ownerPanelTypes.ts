@@ -60,6 +60,7 @@ export interface ContactProfileData {
     date: string;
     time: string;
     title: string;
-    status: 'scheduled' | 'passed' | 'cancelled';
+    /** 'pending_payment' = pré-reserva sem evento real na agenda ainda, aguardando aprovação de comprovante — nunca deve ser exibido como "confirmado". */
+    status: 'scheduled' | 'passed' | 'cancelled' | 'pending_payment';
   }>;
 }
