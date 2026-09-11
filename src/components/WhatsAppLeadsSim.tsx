@@ -270,24 +270,55 @@ interface WhatsAppLeadsSimProps {
 const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => void }> = ({ messageId, onOpen }) => {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  // TASK-0392 (achado real: "as imagens não estão carregando", reproduzido
+  // só no celular — desktop abria a MESMA mensagem normalmente): sem
+  // acesso a devtools do aparelho, "Imagem indisponível" sozinho não dava
+  // pra distinguir 404 (nada salvo) de falha de rede/timeout específica
+  // daquele dispositivo. Guarda o motivo real (status HTTP ou a mensagem
+  // do erro) pra aparecer na própria interface — e um botão de tentar de
+  // novo, já que várias causas plausíveis (rede instável, timeout) são
+  // transitórias e não precisam de recarregar a página inteira.
+  const [failReason, setFailReason] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
+    setFailed(false);
+    setFailReason(null);
     apiFetch(`/api/media/${encodeURIComponent(messageId)}`)
-      .then((r) => (r.ok ? r.blob() : null))
+      .then((r) => {
+        if (r.ok) return r.blob();
+        if (!cancelled) setFailReason(`HTTP ${r.status}`);
+        return null;
+      })
       .then((blob) => {
         if (cancelled) return;
         if (!blob) { setFailed(true); return; }
         objectUrl = URL.createObjectURL(blob);
         setUrl(objectUrl);
       })
-      .catch(() => { if (!cancelled) setFailed(true); });
+      .catch((err) => {
+        if (cancelled) return;
+        setFailReason(err instanceof Error ? err.message : String(err));
+        setFailed(true);
+      });
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [messageId]);
+  }, [messageId, retryToken]);
 
   if (failed) {
-    return <div className="w-full h-20 bg-slate-800 rounded-lg flex items-center justify-center text-slate-500 text-[10px]">Imagem indisponível</div>;
+    return (
+      <div className="w-full min-h-[5rem] bg-slate-800 rounded-lg flex flex-col items-center justify-center gap-1 text-slate-500 text-[10px] p-2">
+        <span>Imagem indisponível{failReason ? ` (${failReason})` : ''}</span>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setRetryToken((t) => t + 1); }}
+          className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    );
   }
   if (!url) {
     return <div className="w-full h-36 bg-slate-800 rounded-lg animate-pulse flex items-center justify-center text-slate-500 text-[10px]">Carregando imagem...</div>;
