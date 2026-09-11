@@ -3427,7 +3427,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // pra um tenant que atende só em espanhol (Paraguai), isso saía errado
   // toda vez. Agora reaproveita o mesmo pipeline de IA do botão "Gerar
   // sugestão" (POST /api/ai/reply-from-hint) com uma instrução específica
-  // de retomada, em vez de um texto fixo sem contexto — mas TASK-0384
+  // de retomada, em vez de um texto fixo sem contexto — mas TASK-0385
   // (achado real, pedido direto): esse pipeline mandava as últimas 24
   // mensagens + a Base de Conhecimento inteira (catálogo, preços, FAQ)
   // pra gerar uma mensagem que é só um "oi, ainda está aí" genérico, nunca
@@ -3701,7 +3701,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const handleGenerateReplyFromHint = async (hint: string): Promise<HintReplyResult> => {
     if (!selectedLead) return { reply: '', error: 'Nenhum lead selecionado.' };
     try {
-      // TASK-0384 (achado real, pedido direto): "Sugerir mensagem de
+      // TASK-0385 (achado real, pedido direto): "Sugerir mensagem de
       // retomada" é uma mensagem de reengajamento genérica ("oi, ainda
       // está aí"), sempre revisada manualmente antes de enviar — não
       // precisa da Base de Conhecimento inteira (catálogo/preços/FAQ) nem

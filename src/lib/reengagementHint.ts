@@ -8,7 +8,7 @@
  * `handleGenerateReplyFromHint` (WhatsAppLeadsSim.tsx) precisa comparar o
  * hint recebido contra este valor exato pra saber quando pode pedir o
  * caminho mais leve (sem Base de Conhecimento, histórico bem menor) — ver
- * TASK-0384: essa mensagem é só um "oi, ainda está aí" genérico, revisado
+ * TASK-0385: essa mensagem é só um "oi, ainda está aí" genérico, revisado
  * manualmente antes de qualquer envio, sem necessidade real de preço/
  * catálogo/histórico longo pra ser gerada corretamente.
  */

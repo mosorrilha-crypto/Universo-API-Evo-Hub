@@ -74,7 +74,7 @@ const HINT_SUGGESTIONS: Array<{ label: string; hint: string }> = [
     // usado por handleDraftReengagementMessage (WhatsAppLeadsSim.tsx), pra
     // gerar a mesma mensagem independente de qual caminho disparou — e pra
     // handleGenerateReplyFromHint reconhecer este hint exato e pedir o
-    // caminho mais leve em tokens ao servidor (TASK-0384).
+    // caminho mais leve em tokens ao servidor (TASK-0385).
     label: 'Sugerir mensagem de retomada',
     hint: REENGAGEMENT_HINT,
   },

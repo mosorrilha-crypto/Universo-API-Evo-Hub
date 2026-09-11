@@ -73,7 +73,7 @@ import { HISTORY_WINDOW_SIZE } from '../services/autoReply';
 const ANALYSIS_HISTORY_WINDOW_SIZE = 80;
 
 /**
- * TASK-0384 (achado real, pedido direto): janela de histórico usada só
+ * TASK-0385 (achado real, pedido direto): janela de histórico usada só
  * quando `/api/ai/reply-from-hint` recebe `lightweight: true` (hoje, só o
  * hint fixo de retomada de contato após 24h de silêncio — ver
  * REENGAGEMENT_HINT em src/lib/reengagementHint.ts). Uma mensagem de
@@ -320,7 +320,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
         return res.status(400).json({ success: false, error: 'Campo "hint" (sua sugestão) é obrigatório.' });
       }
 
-      // TASK-0384 (achado real, pedido direto): o cliente (Ficha IA e o card
+      // TASK-0385 (achado real, pedido direto): o cliente (Ficha IA e o card
       // "mais de 24h sem responder") marca `lightweight: true` só pro hint
       // fixo de retomada de contato — uma mensagem de reengajamento
       // genérica ("oi, ainda está aí"), sempre revisada manualmente antes

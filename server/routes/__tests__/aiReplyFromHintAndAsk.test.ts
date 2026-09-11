@@ -171,12 +171,12 @@ describe('POST /api/ai/reply-from-hint', () => {
     expect(lastPrompt.value).not.toContain('"sender":"lead"');
   });
 
-  // TASK-0384 (achado real, pedido direto): "Sugerir mensagem de retomada"
+  // TASK-0385 (achado real, pedido direto): "Sugerir mensagem de retomada"
   // é uma mensagem de reengajamento genérica, sempre revisada manualmente
   // antes de enviar — mandar a Base de Conhecimento inteira + 24 mensagens
   // de histórico pra gerar isso é gasto de tokens sem necessidade real.
   // `lightweight: true` corta os dois pra um caminho bem mais barato.
-  describe('lightweight (TASK-0384)', () => {
+  describe('lightweight (TASK-0385)', () => {
     const bigKnowledgeBase = {
       companyName: 'Estúdio Teste',
       products: [{ name: 'PRODUTO-SECRETO-CATALOGO', price: 'Gs 999.999' } as any],
