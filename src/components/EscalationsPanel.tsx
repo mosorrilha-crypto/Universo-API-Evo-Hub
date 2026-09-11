@@ -184,7 +184,15 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                       <span className="inline-flex items-center gap-1 text-slate-500"><Clock className="h-3 w-3" /> Criado {timeAgo(e.createdAt)}</span>
                       {isPending && e.dueAt && <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-semibold ${isOverdue ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : 'border-slate-700 bg-slate-950 text-slate-300'}`}><AlertTriangle className="h-3 w-3" /> SLA {formatRemaining(e.dueAt)}</span>}
                       {isPending && e.serviceWindowExpiresAt && <span title="Janela de atendimento do WhatsApp" className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 ${e.withinServiceWindow ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/25 bg-amber-500/10 text-amber-200'}`}><TimerReset className="h-3 w-3" /> Janela {formatRemaining(e.serviceWindowExpiresAt, 'fechada')}</span>}
-                      {e.assignedOperatorId ? <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-200"><UserRoundCheck className="h-3 w-3" /> Responsável atribuído</span> : isPending ? <span className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-400"><UserRoundCheck className="h-3 w-3" /> Sem responsável</span> : null}
+                      {/* Achado real (print anotado, dono do produto): o pill de status
+                          já mostra "Sem responsável" pro status 'open' (ver `statusLabel`
+                          acima) — repetir o mesmo texto aqui embaixo, no mesmo card, é
+                          redundância pura. Só vale mostrar este segundo selo quando ele
+                          diz algo que o pill não diz: responsável atribuído (positivo,
+                          qualquer status) ou "sem responsável" num status pendente que
+                          NÃO seja 'open' (ex.: 'awaiting_customer' já teve orientação
+                          enviada mas nunca foi assumido por ninguém). */}
+                      {e.assignedOperatorId ? <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-200"><UserRoundCheck className="h-3 w-3" /> Responsável atribuído</span> : isPending && e.status !== 'open' ? <span className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-400"><UserRoundCheck className="h-3 w-3" /> Sem responsável</span> : null}
                       <span className="inline-flex items-center gap-1 text-slate-500"><Phone className="h-3 w-3" /> {e.phone}</span>
                       <span className="inline-flex items-center gap-1 text-slate-500"><Globe2 className="h-3 w-3" /> {e.country}</span>
                     </div>

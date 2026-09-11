@@ -322,8 +322,8 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-slate-200 truncate">{appt.time} - {appt.title}</p>
-                  <span className={`text-[10px] ${appt.status === 'passed' ? 'text-slate-500' : 'text-emerald-400 font-medium'}`}>
-                    {appt.status === 'passed' ? 'já passou' : 'confirmado'}
+                  <span className={`text-[10px] ${appt.status === 'passed' ? 'text-slate-500' : appt.status === 'pending_payment' ? 'text-amber-400 font-medium' : 'text-emerald-400 font-medium'}`}>
+                    {appt.status === 'passed' ? 'já passou' : appt.status === 'pending_payment' ? 'pré-reserva — aguardando comprovante' : 'confirmado'}
                   </span>
                 </div>
               </div>
