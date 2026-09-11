@@ -45,6 +45,14 @@ jobs:
         id: image
         run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      # Achado real (primeira execução de verdade, TASK-0390 já mesclada):
+      # "Cache export is not supported for the docker driver" — o builder
+      # padrão dos runners do GitHub usa o driver "docker", que não sabe
+      # exportar cache (cache-to: type=gha abaixo). setup-buildx-action cria
+      # um builder com o driver "docker-container", que suporta.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
