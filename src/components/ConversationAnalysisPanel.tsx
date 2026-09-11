@@ -150,6 +150,27 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   const [hintReplyResult, setHintReplyResult] = React.useState<HintReplyResult | null>(null);
   const [hintReplyCopied, setHintReplyCopied] = React.useState(false);
   const [showHintComposer, setShowHintComposer] = React.useState(false);
+  // TASK-0338 (pedido direto): as sugestões da IA (rascunho recomendado e
+  // rascunho com orientação) só apareciam como texto fixo — pra editar era
+  // preciso primeiro clicar "Levar para revisão no compositor" e só então
+  // mexer no texto. Agora o próprio texto exibido aqui já é editável antes
+  // disso; os dois estados abaixo guardam a EDIÇÃO local, sincronizada com
+  // o texto original toda vez que uma resposta nova chega (nova análise ou
+  // novo resultado de hint) — sem isso, editar uma sugestão e depois gerar
+  // outra deixaria a edição antiga "grudada" por cima da resposta nova.
+  const [analysisReplyDraft, setAnalysisReplyDraft] = React.useState('');
+  const [hintReplyDraft, setHintReplyDraftText] = React.useState('');
+  // TASK-0338 (achado real, print do celular): a tradução usava um
+  // <details>/<summary> nativo do HTML pra esconder/mostrar — o marcador
+  // (▼/▶) e até o próprio comportamento de abrir têm suporte inconsistente
+  // entre navegadores/WebViews mobile (o mesmo tipo de inconsistência já
+  // visto com `dvh`/safe-area no Atendimento, TASK-0337), então em pelo
+  // menos um aparelho a tradução simplesmente não aparecia. Trocado por um
+  // toggle controlado em React (mesmo padrão já usado por `showContext`
+  // neste arquivo), que não depende de nenhum comportamento nativo do
+  // navegador.
+  const [showAnalysisTranslation, setShowAnalysisTranslation] = React.useState(false);
+  const [showHintTranslation, setShowHintTranslation] = React.useState(false);
   const [showContext, setShowContext] = React.useState(false);
   const [showCapiSection, setShowCapiSection] = React.useState(false);
   const [showAskAiSection, setShowAskAiSection] = React.useState(false);
@@ -164,6 +185,16 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   const actionObjective = analysis?.actionObjective || analysis?.recommendedNextAction || 'Defina a próxima ação com base na última mensagem da cliente.';
   const actionReason = analysis?.actionRationale || analysis?.extractedCRMData?.decisionCriteria || 'Use o histórico para responder ao que a cliente realmente precisa agora.';
   const actionGuardrail = analysis?.actionGuardrail || 'Não prometa horário, pagamento, desconto, resultado ou informação que não esteja confirmada.';
+
+  React.useEffect(() => {
+    setAnalysisReplyDraft(analysis?.suggestedSmartReply || '');
+    setShowAnalysisTranslation(false);
+  }, [analysis?.suggestedSmartReply]);
+
+  React.useEffect(() => {
+    setHintReplyDraftText(hintReplyResult?.reply || '');
+    setShowHintTranslation(false);
+  }, [hintReplyResult?.reply]);
 
   const handleCopyReply = (reply: string, source: 'analysis' | 'hint') => {
     navigator.clipboard.writeText(reply);
@@ -359,18 +390,35 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-3 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Rascunho recomendado</span>
-              <button type="button" onClick={() => handleCopyReply(analysis!.suggestedSmartReply, 'analysis')} className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">
+              <button type="button" onClick={() => handleCopyReply(analysisReplyDraft, 'analysis')} className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">
                 <Copy className="h-3 w-3" /> {copied ? 'Copiado' : 'Copiar'}
               </button>
             </div>
-            <p className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-900/80 p-2.5 text-xs leading-relaxed text-slate-100">{analysis!.suggestedSmartReply}</p>
+            {/* TASK-0338 (pedido direto): texto editável direto aqui — antes
+                era só leitura, precisava clicar "Levar para revisão no
+                compositor" pra poder ajustar qualquer palavra. */}
+            <AutoResizeTextarea
+              value={analysisReplyDraft}
+              onChange={(event) => setAnalysisReplyDraft(event.target.value)}
+              minRows={2}
+              className="w-full whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-900/80 p-2.5 text-xs leading-relaxed text-slate-100 focus:border-emerald-500 focus:outline-none"
+            />
             {analysis!.suggestedSmartReplyTranslation && (
-              <details className="rounded-lg border border-blue-500/20 bg-blue-950/20 px-2.5 py-2">
-                <summary className="cursor-pointer text-[10px] font-bold text-blue-300">Ver tradução para revisão interna</summary>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-blue-100">{analysis!.suggestedSmartReplyTranslation}</p>
-              </details>
+              <div className="rounded-lg border border-blue-500/20 bg-blue-950/20 px-2.5 py-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAnalysisTranslation((value) => !value)}
+                  className="flex w-full items-center justify-between text-left text-[10px] font-bold text-blue-300 cursor-pointer"
+                >
+                  <span>Ver tradução para revisão interna</span>
+                  {showAnalysisTranslation ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                </button>
+                {showAnalysisTranslation && (
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-blue-100">{analysis!.suggestedSmartReplyTranslation}</p>
+                )}
+              </div>
             )}
-            {renderReplyActions(analysis!.suggestedSmartReply, 'analysis')}
+            {renderReplyActions(analysisReplyDraft, 'analysis')}
           </div>
         )}
 
@@ -414,18 +462,32 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
           <div className="rounded-xl border border-sky-500/25 bg-sky-950/15 p-3 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-sky-300">Rascunho com orientação</span>
-              <button type="button" onClick={() => handleCopyReply(hintReplyResult.reply, 'hint')} className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">
+              <button type="button" onClick={() => handleCopyReply(hintReplyDraft, 'hint')} className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">
                 <Copy className="h-3 w-3" /> {hintReplyCopied ? 'Copiado' : 'Copiar'}
               </button>
             </div>
-            <p className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-900/80 p-2.5 text-xs leading-relaxed text-slate-100">{hintReplyResult.reply}</p>
+            <AutoResizeTextarea
+              value={hintReplyDraft}
+              onChange={(event) => setHintReplyDraftText(event.target.value)}
+              minRows={2}
+              className="w-full whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-900/80 p-2.5 text-xs leading-relaxed text-slate-100 focus:border-sky-500 focus:outline-none"
+            />
             {hintReplyResult.translation && (
-              <details className="rounded-lg border border-blue-500/20 bg-blue-950/20 px-2.5 py-2">
-                <summary className="cursor-pointer text-[10px] font-bold text-blue-300">Ver tradução para revisão interna</summary>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-blue-100">{hintReplyResult.translation}</p>
-              </details>
+              <div className="rounded-lg border border-blue-500/20 bg-blue-950/20 px-2.5 py-2">
+                <button
+                  type="button"
+                  onClick={() => setShowHintTranslation((value) => !value)}
+                  className="flex w-full items-center justify-between text-left text-[10px] font-bold text-blue-300 cursor-pointer"
+                >
+                  <span>Ver tradução para revisão interna</span>
+                  {showHintTranslation ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                </button>
+                {showHintTranslation && (
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-blue-100">{hintReplyResult.translation}</p>
+                )}
+              </div>
             )}
-            {renderReplyActions(hintReplyResult.reply, 'hint')}
+            {renderReplyActions(hintReplyDraft, 'hint')}
           </div>
         )}
       </section>
