@@ -2344,7 +2344,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // (dica gerada pelo Gemini a partir da imagem, ver paymentReceiptAnalysis.ts)
   // continua exibida aqui, só como informação extra pro operador decidir
   // mais rápido lá no card.
-  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string; paymentReceiptHint?: string; heldUntil?: string } | null>(null);
+  const [paymentAppointment, setPaymentAppointment] = useState<{ eventId?: string; summary: string; startIso: string; paymentStatus?: string; paymentReceiptHint?: string; heldUntil?: string } | null>(null);
 
   // Issue #182 — antes disso, um agendamento fechado fora da IA (WhatsApp
   // pessoal, telefone, presencial) era invisível pro sistema inteiro: sem
@@ -3372,11 +3372,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setPaymentProofDraft({ messageId: msg.id, leadName: selectedLead.name, leadPhone: selectedLead.phone, extraction });
   };
 
-  // Duas saídas: com "Vincular a este agendamento" marcado, confirma o
-  // pagamento de verdade pelo mesmo caminho sensível já usado no painel de
-  // Escalonamentos (cria o evento real no Calendar, usa o valor da IA como
-  // valor REAL em vez do preço do catálogo); sem vínculo, cria só um
-  // lançamento financeiro avulso — nunca toca payment_status/appointments.
+  // TASK-0389 (achado real, print: "quando eu marco este comprovante não
+  // consigo lincar com um agendamento realizado"): "Vincular a este
+  // agendamento" tem duas saídas de verdade agora, escolhidas pelo estado
+  // do agendamento rastreado, nunca pelo operador:
+  // (1) agendamento AINDA aguardando aprovação (awaiting_payment/
+  //     pending_verification) — comportamento original, intocado: confirma
+  //     o pagamento de verdade pelo mesmo caminho sensível do painel de
+  //     Escalonamentos (cria o evento real no Calendar quando falta,
+  //     usa o valor da IA como valor REAL);
+  // (2) agendamento em qualquer OUTRO estado (já verificado/confirmado, ou
+  //     um agendamento manual recém-registrado por "Registrar agora") —
+  //     esse ciclo já fechou, então só ANEXA um snapshot do agendamento
+  //     (resumo/data/eventId) ao lançamento avulso, sem re-executar
+  //     verify-payment (evitaria sobrescrever o valor de uma cobrança já
+  //     resolvida com o valor deste comprovante novo, que pode ser de um
+  //     serviço adicional/outra visita).
+  // Sem nenhum agendamento rastreado, comportamento de sempre: lançamento
+  // avulso sem vínculo nenhum.
   const savePaymentProofTransaction = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!paymentProofDraft) return;
@@ -3385,9 +3398,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const description = String(form.get('description') || '').trim();
     const linkToAppointment = form.get('linkToAppointment') === 'on';
     if (!description || !Number.isFinite(amount) || amount <= 0) return;
+    const appointmentAwaitingGate = paymentAppointment?.paymentStatus === 'awaiting_payment' || paymentAppointment?.paymentStatus === 'pending_verification';
     setSubmittingPaymentProof(true);
     try {
-      if (linkToAppointment && paymentAppointment) {
+      if (linkToAppointment && paymentAppointment && appointmentAwaitingGate) {
         const res = await apiFetch(`/api/conversations/${encodeURIComponent(paymentProofDraft.leadPhone)}/verify-payment`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3404,6 +3418,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           leadPhone: paymentProofDraft.leadPhone,
           productName: description,
           amount,
+          ...(linkToAppointment && paymentAppointment ? {
+            linkedAppointmentEventId: paymentAppointment.eventId,
+            linkedAppointmentSummary: paymentAppointment.summary,
+            linkedAppointmentStartIso: paymentAppointment.startIso,
+          } : {}),
           paymentMethod: String(form.get('paymentMethod')) as PaymentMethod,
           status: String(form.get('status') || 'pago') as PaymentStatus,
           date: new Date().toISOString(),
@@ -6832,9 +6851,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       {/* TASK-0284: modal de lançamento financeiro a partir de um comprovante
           marcado no chat — mesmo componente do Financeiro, pré-preenchido
           pela IA quando disponível. Cliente travado no contato da conversa
-          (sem seletor de CRM); oferece vincular a um agendamento pendente
-          quando existir (paymentAppointment + acesso à Agenda). */}
-      {paymentProofDraft && (
+          (sem seletor de CRM).
+          TASK-0389 (achado real, "não consigo lincar com um agendamento
+          realizado"): antes só oferecia vincular quando havia um
+          agendamento ainda aguardando aprovação — agora oferece pra
+          QUALQUER agendamento rastreado (paymentAppointment + acesso à
+          Agenda), e some enquanto o ManualAppointmentModal (aberto por
+          "Registrar agora" abaixo) está no ar, pra não empilhar dois
+          modais — reaparece sozinho ao fechar (paymentProofDraft nunca é
+          tocado nesse meio-tempo). */}
+      {paymentProofDraft && !isManualAppointmentModalOpen && (
         <TransactionDialog
           kind="income"
           leads={[]}
@@ -6852,12 +6878,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             paymentMethod: paymentProofDraft.extraction?.method ?? undefined,
           }}
           linkableAppointment={
-            paymentAppointment &&
-            !!onGoToAgenda &&
-            (paymentAppointment.paymentStatus === 'awaiting_payment' || paymentAppointment.paymentStatus === 'pending_verification')
-              ? { summary: paymentAppointment.summary, startIso: paymentAppointment.startIso }
+            paymentAppointment && !!onGoToAgenda
+              ? { eventId: paymentAppointment.eventId, summary: paymentAppointment.summary, startIso: paymentAppointment.startIso }
               : null
           }
+          onRegisterAppointment={!!onGoToAgenda ? () => setIsManualAppointmentModalOpen(true) : undefined}
         />
       )}
 

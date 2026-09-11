@@ -100,7 +100,7 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
   }));
 
   router.post('/api/financial/transactions', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType, categoryId, accountId, notes, sourceRef } = req.body || {};
+    const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType, categoryId, accountId, notes, sourceRef, linkedAppointmentEventId, linkedAppointmentSummary, linkedAppointmentStartIso } = req.body || {};
 
     if (typeof id !== 'string' || !id.trim()) return res.status(400).json({ error: 'id é obrigatório.' });
     if (typeof leadId !== 'string' || !leadId.trim()) return res.status(400).json({ error: 'leadId é obrigatório.' });
@@ -136,6 +136,12 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
         accountId: typeof accountId === 'string' && accountId ? accountId : undefined,
         notes: typeof notes === 'string' && notes.trim() ? notes.trim() : undefined,
         sourceRef: typeof sourceRef === 'string' && sourceRef.trim() ? sourceRef.trim() : undefined,
+        // TASK-0389: snapshot opcional do agendamento vinculado manualmente
+        // (ex: comprovante marcado no chat pra um agendamento já
+        // realizado) — sempre os 3 juntos ou nenhum, nunca uma FK.
+        linkedAppointmentEventId: typeof linkedAppointmentEventId === 'string' && linkedAppointmentEventId.trim() ? linkedAppointmentEventId.trim() : undefined,
+        linkedAppointmentSummary: typeof linkedAppointmentSummary === 'string' && linkedAppointmentSummary.trim() ? linkedAppointmentSummary.trim() : undefined,
+        linkedAppointmentStartIso: typeof linkedAppointmentStartIso === 'string' && linkedAppointmentStartIso.trim() ? linkedAppointmentStartIso.trim() : undefined,
       });
       res.json({ transaction });
     } catch (error) {

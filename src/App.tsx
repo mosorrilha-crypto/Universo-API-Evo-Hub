@@ -1396,6 +1396,9 @@ export const App: React.FC = () => {
           paymentLinkUrl: newTx.paymentLinkUrl,
           entryType: newTx.entryType,
           sourceRef: newTx.sourceRef,
+          linkedAppointmentEventId: newTx.linkedAppointmentEventId,
+          linkedAppointmentSummary: newTx.linkedAppointmentSummary,
+          linkedAppointmentStartIso: newTx.linkedAppointmentStartIso,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

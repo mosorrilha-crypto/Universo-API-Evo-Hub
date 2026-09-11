@@ -306,6 +306,41 @@ describe('POST /api/financial/transactions', () => {
     expect(data.transaction.sourceRef).toBe('chat-image:msg-123');
   });
 
+  // TASK-0389: comprovante marcado no chat vinculado a um agendamento JÁ
+  // resolvido (fora do ciclo curto que verify-payment cobre) — snapshot,
+  // não uma FK, deliberadamente separado de sourceRef.
+  it('aceita e persiste o snapshot do agendamento vinculado', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'tx-vinculada-1',
+        leadId: 'chat-image',
+        leadName: 'Raquel',
+        leadPhone: '595981749001',
+        productName: 'Comprovante recebido — BNF',
+        amount: 200000,
+        paymentMethod: 'Transferência Bancária',
+        status: 'pago',
+        date: NOW,
+        entryType: 'income',
+        linkedAppointmentEventId: 'evt-realizado-1',
+        linkedAppointmentSummary: 'Corte + Escova',
+        linkedAppointmentStartIso: '2026-09-05T14:00:00',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.transaction.linkedAppointmentEventId).toBe('evt-realizado-1');
+    expect(data.transaction.linkedAppointmentSummary).toBe('Corte + Escova');
+    expect(data.transaction.linkedAppointmentStartIso).toBe('2026-09-05T14:00:00');
+
+    const listRes = await fetch(`${baseUrl}/api/financial/transactions`);
+    const listData = await listRes.json();
+    const persisted = listData.transactions.find((t: any) => t.id === 'tx-vinculada-1');
+    expect(persisted.linkedAppointmentEventId).toBe('evt-realizado-1');
+  });
+
   // Nota: o fake Supabase (fakeSupabase.ts) não simula a constraint única
   // (tenant_id, source_ref) do Postgres real — o caso de duplicidade
   // (isDuplicateSourceRefError → 409) é coberto isoladamente em

@@ -31,6 +31,19 @@ export interface FinancialTransactionRecord {
   categoryId?: string;
   accountId?: string;
   notes?: string;
+  /**
+   * TASK-0389 — snapshot do agendamento vinculado manualmente (ex: um
+   * comprovante marcado no chat pra um agendamento JÁ realizado, fora do
+   * ciclo curto de aprovação que `sourceRef: "apt:<eventId>"` cobre).
+   * Deliberadamente separado de `sourceRef` (que tem índice único por
+   * tenant) — nunca compete por esse valor nem participa da deduplicação
+   * do verify-payment. É um snapshot, não uma FK: `appointments` guarda só
+   * a linha "atual" por telefone, então um id sozinho se perderia assim
+   * que o contato tivesse um agendamento novo.
+   */
+  linkedAppointmentEventId?: string;
+  linkedAppointmentSummary?: string;
+  linkedAppointmentStartIso?: string;
 }
 
 type FinancialTransactionRow = {
@@ -52,10 +65,13 @@ type FinancialTransactionRow = {
   category_id: string | null;
   account_id: string | null;
   notes: string | null;
+  linked_appointment_event_id: string | null;
+  linked_appointment_summary: string | null;
+  linked_appointment_start_iso: string | null;
 };
 
 const FINANCIAL_TRANSACTION_COLUMNS =
-  'id, lead_id, lead_name, lead_phone, product_name, amount, payment_method, status, date, operator_name, channel, pix_qr_code, payment_link_url, source_ref, entry_type, category_id, account_id, notes';
+  'id, lead_id, lead_name, lead_phone, product_name, amount, payment_method, status, date, operator_name, channel, pix_qr_code, payment_link_url, source_ref, entry_type, category_id, account_id, notes, linked_appointment_event_id, linked_appointment_summary, linked_appointment_start_iso';
 
 function toFinancialTransactionRecord(row: FinancialTransactionRow): FinancialTransactionRecord {
   return {
@@ -77,6 +93,9 @@ function toFinancialTransactionRecord(row: FinancialTransactionRow): FinancialTr
     categoryId: row.category_id ?? undefined,
     accountId: row.account_id ?? undefined,
     notes: row.notes ?? undefined,
+    linkedAppointmentEventId: row.linked_appointment_event_id ?? undefined,
+    linkedAppointmentSummary: row.linked_appointment_summary ?? undefined,
+    linkedAppointmentStartIso: row.linked_appointment_start_iso ?? undefined,
   };
 }
 
@@ -111,6 +130,9 @@ export interface CreateFinancialTransactionInput {
   categoryId?: string;
   accountId?: string;
   notes?: string;
+  linkedAppointmentEventId?: string;
+  linkedAppointmentSummary?: string;
+  linkedAppointmentStartIso?: string;
 }
 
 /** true quando o erro é a constraint única (tenant_id, source_ref) da migration 0037 — sinal de que essa transação já foi criada antes (reentrega/retry), nunca um erro real. Quem chama pra criação automática (ver conversations.ts verify-payment) deve tratar isso como sucesso silencioso, não propagar. */
@@ -150,6 +172,9 @@ export async function createFinancialTransaction(
       category_id: input.categoryId,
       account_id: input.accountId,
       notes: input.notes,
+      linked_appointment_event_id: input.linkedAppointmentEventId,
+      linked_appointment_summary: input.linkedAppointmentSummary,
+      linked_appointment_start_iso: input.linkedAppointmentStartIso,
     })
     .select(FINANCIAL_TRANSACTION_COLUMNS)
     .single();
