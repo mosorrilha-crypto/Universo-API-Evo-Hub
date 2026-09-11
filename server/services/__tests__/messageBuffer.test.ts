@@ -157,3 +157,67 @@ describe('startBufferRecoverySweeper', () => {
     expect(rows).toHaveLength(1); // continua lá, ninguém mexeu
   });
 });
+
+describe('TASK-0388 — corrida entre o timer local e o sweeper de recuperação', () => {
+  it('achado real em produção (texto e mídia duplicados pro cliente): sweeper não reprocessa a mesma rajada enquanto o delete da marca persistida do flush local ainda está em andamento', async () => {
+    vi.useFakeTimers();
+    try {
+      // Simula um round-trip lento pro Supabase no delete de
+      // `pending_message_buffers` (rede lenta, cold start) — a mesma janela
+      // onde o bug real acontecia: `doFlush` já tinha tirado a chave do Map
+      // de acumulação, mas o sweeper (intervalo PRÓPRIO, independente deste
+      // timer) ainda encontrava a marca no banco e disparava a MESMA rajada
+      // de novo.
+      const originalFrom = supabase.from.bind(supabase);
+      vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+        const builder = originalFrom(table);
+        if (table !== 'pending_message_buffers') return builder;
+        return {
+          ...builder,
+          delete: () => {
+            const qb: any = builder.delete();
+            const originalThen = qb.then.bind(qb);
+            const gate = new Promise<void>((resolve) => setTimeout(resolve, 20_050));
+            qb.then = (resolve: any, reject: any) => gate.then(() => originalThen(resolve, reject));
+            return qb;
+          },
+        };
+      });
+
+      const onFlushLocal = vi.fn();
+      bufferIncomingText('595987777777', 'Cliente', 'oi', 'msg-1', TENANT_A, onFlushLocal);
+
+      const onFlushSweep = vi.fn();
+      startBufferRecoverySweeper(() => (combinedText) => onFlushSweep(combinedText));
+
+      await vi.advanceTimersByTimeAsync(10); // deixa a marca persistir de verdade (fire-and-forget)
+
+      // t=10000: o timer local de silêncio dispara — doFlush começa, marca
+      // `flushing` e fica preso nos ~20s do delete simulado acima.
+      await vi.advanceTimersByTimeAsync(9_990);
+      expect(onFlushLocal).not.toHaveBeenCalled();
+
+      // t=15010: primeiro tick do sweeper (intervalo de 15s) — no código
+      // antigo, a chave já tinha sumido do Map aqui e o sweeper duplicava.
+      await vi.advanceTimersByTimeAsync(5_010);
+      expect(onFlushSweep).not.toHaveBeenCalled();
+
+      // t=30010: segundo tick do sweeper — o delete simulado ainda não
+      // terminou (só em t=30050), continua bloqueado.
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(onFlushSweep).not.toHaveBeenCalled();
+
+      // t=30110: o delete real termina (t=30050) — o flush local conclui.
+      await vi.advanceTimersByTimeAsync(100);
+      expect(onFlushLocal).toHaveBeenCalledTimes(1);
+      expect(onFlushLocal).toHaveBeenCalledWith('oi', 'Cliente', 'msg-1', 1, TENANT_A, 'msg-1');
+
+      // t=45110: mais um tick do sweeper, agora com a marca já removida de
+      // verdade — nenhum reprocessamento tardio.
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(onFlushSweep).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
