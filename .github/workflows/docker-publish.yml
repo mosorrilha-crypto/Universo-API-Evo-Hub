@@ -1,0 +1,58 @@
+name: Build & publish Docker image
+
+# Só builda/publica depois que o workflow "CI" (lint/test/build/dependency
+# review) passar de verdade no mesmo commit de `main` — nunca publica uma
+# imagem sem essa validação, e nunca duplica lint/test aqui. `workflow_run`
+# (não `push`) é o jeito certo de expressar essa dependência entre dois
+# workflows do GitHub Actions.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # GHCR (como qualquer registro Docker) exige nome de imagem em
+      # minúsculas — `github.repository` preserva a caixa original
+      # ("mosorrilha-crypto/Universo-API-Evo-Hub"), o que quebraria o push
+      # sem essa conversão.
+      - name: Nome da imagem em minúsculas
+        id: image
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        # NOTA: as outras actions deste repo (ver ci.yml/codeql.yml) são
+        # pinadas por SHA completo — não consegui confirmar o SHA exato
+        # destas duas nesta sessão (repositório fora do escopo de GitHub
+        # liberado aqui). Usando a tag de versão major oficial da Docker
+        # Inc. (publisher verificado) por enquanto; troque pelo SHA exato
+        # (ver a página de Releases de cada action) quando revisar este PR,
+        # mesmo padrão das demais.
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ steps.image.outputs.name }}:latest
+            ghcr.io/${{ steps.image.outputs.name }}:${{ github.event.workflow_run.head_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
