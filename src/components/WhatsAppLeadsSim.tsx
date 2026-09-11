@@ -3,6 +3,7 @@ import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullCo
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getTenantOverride } from '../lib/apiClient';
 import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
+import { REENGAGEMENT_HINT } from '../lib/reengagementHint';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
 import { ContactContextPanel, type OperatorMemoryEditPayload } from './ContactContextPanel';
@@ -3425,15 +3426,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // relação com o assunto da conversa nem com o idioma real do cliente —
   // pra um tenant que atende só em espanhol (Paraguai), isso saía errado
   // toda vez. Agora reaproveita o mesmo pipeline de IA do botão "Gerar
-  // sugestão" (POST /api/ai/reply-from-hint, já usa histórico + KB e
-  // responde no idioma detectado do lead) com uma instrução específica de
-  // retomada, em vez de um texto fixo sem contexto.
+  // sugestão" (POST /api/ai/reply-from-hint) com uma instrução específica
+  // de retomada, em vez de um texto fixo sem contexto — mas TASK-0385
+  // (achado real, pedido direto): esse pipeline mandava as últimas 24
+  // mensagens + a Base de Conhecimento inteira (catálogo, preços, FAQ)
+  // pra gerar uma mensagem que é só um "oi, ainda está aí" genérico, nunca
+  // enviada sem revisão manual — gasto de tokens sem necessidade real.
+  // `handleGenerateReplyFromHint` reconhece este hint exato (REENGAGEMENT_HINT)
+  // e usa um caminho mais leve no servidor (ver server/routes/ai.ts).
   const handleDraftReengagementMessage = async (lead: LeadInfo) => {
     setIsGeneratingReengagement(true);
     try {
-      const result = await handleGenerateReplyFromHint(
-        'O cliente ficou mais de 24h sem responder. Escreva uma mensagem curta e natural de retomada de contato, reconhecendo com leveza o tempo que passou, sem soar robótico nem desesperado, e sem repetir informação que já foi dada nesta conversa.'
-      );
+      const result = await handleGenerateReplyFromHint(REENGAGEMENT_HINT);
       if (result.error || !result.reply.trim()) {
         setErrorMsg(result.error || 'Não foi possível gerar a mensagem de retomada agora.');
         return;
@@ -3697,6 +3701,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const handleGenerateReplyFromHint = async (hint: string): Promise<HintReplyResult> => {
     if (!selectedLead) return { reply: '', error: 'Nenhum lead selecionado.' };
     try {
+      // TASK-0385 (achado real, pedido direto): "Sugerir mensagem de
+      // retomada" é uma mensagem de reengajamento genérica ("oi, ainda
+      // está aí"), sempre revisada manualmente antes de enviar — não
+      // precisa da Base de Conhecimento inteira (catálogo/preços/FAQ) nem
+      // de muitas mensagens de histórico pra ser gerada bem, diferente das
+      // outras sugestões (preço, agendamento etc.) que realmente dependem
+      // disso. `lightweight` avisa o servidor pra usar um caminho bem mais
+      // barato em tokens só pra este hint específico (ver server/routes/ai.ts).
+      const isReengagementHint = hint === REENGAGEMENT_HINT;
       const response = await apiFetch('/api/ai/reply-from-hint', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3709,6 +3722,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           messages: selectedLead.messages || [],
           agentKnowledgeBase: knowledgeBase,
           hint,
+          lightweight: isReengagementHint,
         }),
       });
       const data = await response.json();

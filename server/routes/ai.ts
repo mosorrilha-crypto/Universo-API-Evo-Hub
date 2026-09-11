@@ -72,6 +72,18 @@ import { HISTORY_WINDOW_SIZE } from '../services/autoReply';
  */
 const ANALYSIS_HISTORY_WINDOW_SIZE = 80;
 
+/**
+ * TASK-0385 (achado real, pedido direto): janela de histórico usada só
+ * quando `/api/ai/reply-from-hint` recebe `lightweight: true` (hoje, só o
+ * hint fixo de retomada de contato após 24h de silêncio — ver
+ * REENGAGEMENT_HINT em src/lib/reengagementHint.ts). Uma mensagem de
+ * reengajamento genérica só precisa das últimas mensagens pra saber o
+ * idioma e não repetir o que acabou de ser dito — bem menor que
+ * HISTORY_WINDOW_SIZE (24), usado pelas outras sugestões da Ficha IA que
+ * realmente dependem de mais contexto (preço, agendamento etc.).
+ */
+const REENGAGEMENT_HISTORY_WINDOW_SIZE = 4;
+
 interface AiRouterDeps {
   config: ServerConfig;
   authenticateToken: RequestHandler;
@@ -303,10 +315,26 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
    */
   router.post('/api/ai/reply-from-hint', authenticateToken, rateLimiter, async (req, res) => {
     try {
-      const { leadInfo, messages, agentKnowledgeBase, hint } = req.body || {};
+      const { leadInfo, messages, agentKnowledgeBase, hint, lightweight } = req.body || {};
       if (typeof hint !== 'string' || !hint.trim()) {
         return res.status(400).json({ success: false, error: 'Campo "hint" (sua sugestão) é obrigatório.' });
       }
+
+      // TASK-0385 (achado real, pedido direto): o cliente (Ficha IA e o card
+      // "mais de 24h sem responder") marca `lightweight: true` só pro hint
+      // fixo de retomada de contato — uma mensagem de reengajamento
+      // genérica ("oi, ainda está aí"), sempre revisada manualmente antes
+      // de enviar, que não precisa da Base de Conhecimento inteira
+      // (catálogo/preços/FAQ, que pode chegar a milhares de tokens) nem de
+      // 24 mensagens de histórico pra sair bem — só o suficiente pra saber
+      // o idioma e não repetir o que acabou de ser dito. As outras 5
+      // sugestões da Ficha IA (preço, agendamento etc.) continuam usando o
+      // caminho completo, porque essas sim dependem do catálogo/histórico
+      // pra responder com precisão. Decisão do servidor, não confia em o
+      // cliente ter de fato omitido `messages`/`agentKnowledgeBase`.
+      const isLightweight = lightweight === true;
+      const historyWindowSize = isLightweight ? REENGAGEMENT_HISTORY_WINDOW_SIZE : HISTORY_WINDOW_SIZE;
+      const knowledgeBaseForPrompt = isLightweight ? null : agentKnowledgeBase || null;
 
       const prompt = `Você é um atendente de vendas humano respondendo no WhatsApp em nome de um negócio real.
 Um operador humano te deu a seguinte instrução sobre o que responder ao lead a seguir — ela é a fonte principal do que escrever, não uma sugestão opcional:
@@ -327,8 +355,8 @@ Responda estritamente em formato JSON:
 
 Dados do Lead: ${JSON.stringify(leadInfo)}
 Histórico cronológico de Mensagens (as mais antigas podem ter sido omitidas; a numeração recomeça em 1, não é a posição real na conversa completa):
-${buildChronologicalConversationContext(messages, HISTORY_WINDOW_SIZE)}
-Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)}
+${buildChronologicalConversationContext(messages, historyWindowSize)}
+Base de Conhecimento: ${formatKnowledgeBaseForPrompt(knowledgeBaseForPrompt)}
 `;
 
       if (groqApiKey) {
