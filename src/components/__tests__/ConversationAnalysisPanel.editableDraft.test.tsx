@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * TASK-0338 (pedido direto, prints do celular):
+ * TASK-0383 (pedido direto, prints do celular):
  * 1. A tradução usava um <details>/<summary> nativo do HTML — suporte
  *    inconsistente entre navegadores/WebViews mobile fazia a tradução não
  *    aparecer em pelo menos um aparelho. Trocado por um toggle controlado

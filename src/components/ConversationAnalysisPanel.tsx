@@ -150,7 +150,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   const [hintReplyResult, setHintReplyResult] = React.useState<HintReplyResult | null>(null);
   const [hintReplyCopied, setHintReplyCopied] = React.useState(false);
   const [showHintComposer, setShowHintComposer] = React.useState(false);
-  // TASK-0338 (pedido direto): as sugestões da IA (rascunho recomendado e
+  // TASK-0383 (pedido direto): as sugestões da IA (rascunho recomendado e
   // rascunho com orientação) só apareciam como texto fixo — pra editar era
   // preciso primeiro clicar "Levar para revisão no compositor" e só então
   // mexer no texto. Agora o próprio texto exibido aqui já é editável antes
@@ -160,7 +160,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   // outra deixaria a edição antiga "grudada" por cima da resposta nova.
   const [analysisReplyDraft, setAnalysisReplyDraft] = React.useState('');
   const [hintReplyDraft, setHintReplyDraftText] = React.useState('');
-  // TASK-0338 (achado real, print do celular): a tradução usava um
+  // TASK-0383 (achado real, print do celular): a tradução usava um
   // <details>/<summary> nativo do HTML pra esconder/mostrar — o marcador
   // (▼/▶) e até o próprio comportamento de abrir têm suporte inconsistente
   // entre navegadores/WebViews mobile (o mesmo tipo de inconsistência já
@@ -394,7 +394,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
                 <Copy className="h-3 w-3" /> {copied ? 'Copiado' : 'Copiar'}
               </button>
             </div>
-            {/* TASK-0338 (pedido direto): texto editável direto aqui — antes
+            {/* TASK-0383 (pedido direto): texto editável direto aqui — antes
                 era só leitura, precisava clicar "Levar para revisão no
                 compositor" pra poder ajustar qualquer palavra. */}
             <AutoResizeTextarea
