@@ -94,6 +94,10 @@ export interface FinancialTransaction {
   categoryId?: string;
   accountId?: string;
   notes?: string;
+  /** TASK-0389: snapshot do agendamento vinculado manualmente (ex: um comprovante marcado no chat pra um agendamento já realizado) — sempre os 3 juntos ou nenhum. Não é uma FK: `appointments` guarda só a linha "atual" por telefone. */
+  linkedAppointmentEventId?: string;
+  linkedAppointmentSummary?: string;
+  linkedAppointmentStartIso?: string;
 }
 
 /** Despesa fixa (aluguel, assinatura...) cadastrada uma vez — o job diário gera a FinancialTransaction correspondente sozinho todo mês no dia de vencimento (dayOfMonth). Ver server/services/recurringExpenseJob.ts. */

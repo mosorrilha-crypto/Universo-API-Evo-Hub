@@ -32,10 +32,17 @@ interface TransactionDialogProps {
   /** Quando presente, substitui o seletor "Cliente do CRM" por um texto fixo — usado quando o cliente já é conhecido (ex: contato da conversa de onde veio o comprovante), evitando o operador trocar de cliente no dropdown e o submit ignorar essa escolha. */
   lockedLead?: { name: string; phone: string };
   /** Quando presente, mostra um checkbox (marcado por padrão) oferecendo vincular o lançamento a um agendamento existente em vez de criar um registro avulso. */
-  linkableAppointment?: { summary: string; startIso: string } | null;
+  linkableAppointment?: { eventId?: string; summary: string; startIso: string } | null;
+  /**
+   * TASK-0389: quando presente (só o caso de comprovante marcado no chat,
+   * `lockedLead`) e não há `linkableAppointment`, mostra um atalho
+   * "registrar agendamento agora" — fecha o ciclo pra quando o contato
+   * ainda não tem nenhum agendamento rastreado no sistema.
+   */
+  onRegisterAppointment?: () => void;
 }
 
-export function TransactionDialog({ kind, leads, currency, isSpanish, onClose, onSubmit, submitting, initialValues, lockedLead, linkableAppointment }: TransactionDialogProps) {
+export function TransactionDialog({ kind, leads, currency, isSpanish, onClose, onSubmit, submitting, initialValues, lockedLead, linkableAppointment, onRegisterAppointment }: TransactionDialogProps) {
   const isExpense = kind === 'expense';
   const paymentLabel = (method: PaymentMethod) => isSpanish ? ({ 'Transferência Bancária': 'Transferencia bancaria', 'Cartão de Crédito': 'Tarjeta de crédito', 'Boleto Bancário': 'Boleta bancaria', 'Link WhatsApp': 'Enlace de WhatsApp', PIX: 'PIX' }[method] || method) : method;
   return <DialogShell title={isExpense ? (isSpanish ? 'Registrar gasto' : 'Registrar despesa') : (isSpanish ? 'Registrar ingreso adicional' : 'Registrar receita avulsa')} description={isExpense ? (isSpanish ? 'Registrá una salida operativa que no provino de un agendamiento.' : 'Controle uma saída operacional que não veio de um agendamento.') : (isSpanish ? 'Registrá un ingreso externo sin duplicar los cobros de la agenda.' : 'Registre uma receita externa sem duplicar cobranças da agenda.')} onClose={onClose}>
@@ -82,6 +89,14 @@ export function TransactionDialog({ kind, leads, currency, isSpanish, onClose, o
             {' '}{isSpanish ? 'el' : 'em'} {new Date(linkableAppointment.startIso).toLocaleString(isSpanish ? 'es-PY' : 'pt-BR')}
           </span>
         </label>
+      )}
+      {!linkableAppointment && lockedLead && onRegisterAppointment && (
+        <div className="flex items-center justify-between gap-2.5 rounded-xl border border-dashed border-slate-700 bg-slate-950/40 px-3.5 py-3 text-xs text-slate-400">
+          <span>{isSpanish ? 'Ningún turno rastreado para este contacto.' : 'Nenhum agendamento rastreado para este contato.'}</span>
+          <button type="button" onClick={onRegisterAppointment} className="shrink-0 font-bold text-emerald-300 hover:text-emerald-200">
+            {isSpanish ? 'Registrar ahora' : 'Registrar agora'}
+          </button>
+        </div>
       )}
       <button type="submit" disabled={submitting} className={`w-full rounded-xl py-3 text-xs font-black transition-opacity disabled:opacity-50 ${isExpense ? 'bg-rose-300 text-rose-950' : 'bg-emerald-400 text-slate-950'}`}>
         {submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : isExpense ? (isSpanish ? 'Registrar gasto' : 'Registrar despesa') : (isSpanish ? 'Registrar ingreso' : 'Registrar receita')}
