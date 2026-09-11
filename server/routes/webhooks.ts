@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
-import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
+import { markProcessedIfNew, unmarkProcessed, dedupeKeyFor } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
@@ -494,7 +494,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
     let enqueued = 0;
     const nowLabel = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     for (const msg of parsedMessages) {
-      if (!(await markProcessedIfNew(msg.messageId))) {
+      // Escopado por canal/instância (ver comentário em dedupeKeyFor) — o
+      // messageId cru da Evolution API não é garantido único entre
+      // instâncias/tenants diferentes, só a Meta Cloud API garante isso.
+      const dedupeKey = dedupeKeyFor(msg);
+      if (!(await markProcessedIfNew(dedupeKey))) {
         console.log(`↩️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} já processada, ignorando reentrega.`);
         continue;
       }
@@ -737,7 +741,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           }
         );
       } catch (err: any) {
-        await unmarkProcessed(msg.messageId);
+        await unmarkProcessed(dedupeKey);
         console.error(`❌ [Webhook ${msg.provider}] Falha ao processar mensagem ${msg.messageId} de ${msg.from} — desmarcada pra reentrega tentar de novo:`, err.message);
       }
     }
