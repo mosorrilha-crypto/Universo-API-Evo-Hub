@@ -2,6 +2,7 @@ import React from 'react';
 import { FullConversationAnalysis, type ContactAgentContext } from '../types';
 import { ContactContextPanel, type OperatorMemoryEditPayload } from './ContactContextPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
+import { REENGAGEMENT_HINT } from '../lib/reengagementHint';
 import {
   AlertCircle,
   AlertTriangle,
@@ -69,10 +70,13 @@ const HINT_SUGGESTIONS: Array<{ label: string; hint: string }> = [
     // aparecia no card de aviso "mais de 24h sem responder" (fechado
     // quando a janela de 24h ainda está aberta) — o operador pediu acesso
     // a ela a qualquer momento, não só quando o card aparece. Mesmo texto
+    // (REENGAGEMENT_HINT, agora compartilhado em src/lib/reengagementHint.ts)
     // usado por handleDraftReengagementMessage (WhatsAppLeadsSim.tsx), pra
-    // gerar a mesma mensagem independente de qual caminho disparou.
+    // gerar a mesma mensagem independente de qual caminho disparou — e pra
+    // handleGenerateReplyFromHint reconhecer este hint exato e pedir o
+    // caminho mais leve em tokens ao servidor (TASK-0384).
     label: 'Sugerir mensagem de retomada',
-    hint: 'O cliente ficou mais de 24h sem responder. Escreva uma mensagem curta e natural de retomada de contato, reconhecendo com leveza o tempo que passou, sem soar robótico nem desesperado, e sem repetir informação que já foi dada nesta conversa.',
+    hint: REENGAGEMENT_HINT,
   },
   {
     label: 'Responder a última dúvida',

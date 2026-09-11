@@ -170,6 +170,81 @@ describe('POST /api/ai/reply-from-hint', () => {
     expect(lastPrompt.value).toContain('2. ATENDIMENTO: Gs 550.000');
     expect(lastPrompt.value).not.toContain('"sender":"lead"');
   });
+
+  // TASK-0384 (achado real, pedido direto): "Sugerir mensagem de retomada"
+  // é uma mensagem de reengajamento genérica, sempre revisada manualmente
+  // antes de enviar — mandar a Base de Conhecimento inteira + 24 mensagens
+  // de histórico pra gerar isso é gasto de tokens sem necessidade real.
+  // `lightweight: true` corta os dois pra um caminho bem mais barato.
+  describe('lightweight (TASK-0384)', () => {
+    const bigKnowledgeBase = {
+      companyName: 'Estúdio Teste',
+      products: [{ name: 'PRODUTO-SECRETO-CATALOGO', price: 'Gs 999.999' } as any],
+    } as any;
+    // Textos sem prefixo em comum entre si (ex: "msg-1" seria substring de
+    // "msg-10"), pra `toContain`/`not.toContain` não darem falso positivo.
+    const manyMessages = Array.from({ length: 10 }, (_, i) => ({
+      sender: i % 2 === 0 ? 'lead' : 'agent',
+      text: i === 0 ? 'MENSAGEM-BEM-ANTIGA-DEVE-SUMIR' : `mensagem-de-preenchimento-${i}`,
+    }));
+    manyMessages[manyMessages.length - 1] = { sender: 'lead', text: 'MENSAGEM-RECENTE-DEVE-FICAR' };
+
+    it('omite a Base de Conhecimento do prompt quando lightweight=true', async () => {
+      mockResponse.shouldFail = false;
+      mockResponse.text = JSON.stringify({ reply: 'ok', detectedLanguage: 'Português', translation: '' });
+
+      await fetch(`${baseUrl}/api/ai/reply-from-hint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadInfo: { name: 'Cliente Teste' },
+          messages: [],
+          agentKnowledgeBase: bigKnowledgeBase,
+          hint: 'retomada genérica',
+          lightweight: true,
+        }),
+      });
+
+      expect(lastPrompt.value).not.toContain('PRODUTO-SECRETO-CATALOGO');
+    });
+
+    it('inclui a Base de Conhecimento normalmente quando lightweight não é informado', async () => {
+      mockResponse.shouldFail = false;
+      mockResponse.text = JSON.stringify({ reply: 'ok', detectedLanguage: 'Português', translation: '' });
+
+      await fetch(`${baseUrl}/api/ai/reply-from-hint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadInfo: { name: 'Cliente Teste' },
+          messages: [],
+          agentKnowledgeBase: bigKnowledgeBase,
+          hint: 'reforça o preço',
+        }),
+      });
+
+      expect(lastPrompt.value).toContain('PRODUTO-SECRETO-CATALOGO');
+    });
+
+    it('corta o histórico pras últimas mensagens quando lightweight=true, em vez das 24 de sempre', async () => {
+      mockResponse.shouldFail = false;
+      mockResponse.text = JSON.stringify({ reply: 'ok', detectedLanguage: 'Português', translation: '' });
+
+      await fetch(`${baseUrl}/api/ai/reply-from-hint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadInfo: { name: 'Cliente Teste' },
+          messages: manyMessages,
+          hint: 'retomada genérica',
+          lightweight: true,
+        }),
+      });
+
+      expect(lastPrompt.value).not.toContain('MENSAGEM-BEM-ANTIGA-DEVE-SUMIR');
+      expect(lastPrompt.value).toContain('MENSAGEM-RECENTE-DEVE-FICAR');
+    });
+  });
 });
 
 describe('POST /api/ai/ask', () => {
