@@ -56,6 +56,21 @@ interface PendingBuffer {
 
 const buffers = new Map<string, PendingBuffer>();
 
+// Achado real em produção (mensagens/mídia duplicadas pro cliente, tenant
+// Monique): `doFlush` removia a chave de `buffers` de forma síncrona, ANTES
+// de esperar `deletePersistedBuffer` (round-trip real pro Supabase)
+// terminar. O sweeper de recuperação roda num intervalo PRÓPRIO
+// (SWEEP_INTERVAL_MS), independente deste timer, e sua única proteção
+// contra concorrência era checar `buffers.has(key)` — com a chave já
+// removida do Map ANTES do delete no banco ter sido confirmado, uma
+// varredura que caísse bem nessa janela (rede lenta, cold start do
+// Supabase) encontrava a marca ainda persistida (`flush_at` já passado) e a
+// chave já ausente do Map, disparando a MESMA rajada de novo — reenviando
+// texto e qualquer mídia (ex.: catálogo) uma segunda vez pro cliente. Este
+// Set marca as chaves cujo `doFlush` já começou mas o delete persistido
+// ainda não terminou; o sweeper passa a checar as duas fontes.
+const flushing = new Set<string>();
+
 // Achado real ao adicionar persistência: a chave era só `phone`, sem
 // tenant_id — o mesmo número de telefone falando com dois tenants
 // diferentes da plataforma (cenário real e possível) colidia num único
@@ -68,7 +83,13 @@ function bufferKey(tenantId: string, phone: string): string {
 }
 
 async function doFlush(key: string, phone: string, buffer: PendingBuffer, onFlush: FlushCallback) {
+  // Remove já da Map de acumulação (uma mensagem nova que chegue agora deve
+  // abrir um buffer novo, nunca se juntar a este que já está sendo
+  // processado) — mas marca em `flushing` até o delete persistido terminar,
+  // pra manter o sweeper bloqueado durante esse round-trip (ver comentário
+  // acima de `flushing`).
   buffers.delete(key);
+  flushing.add(key);
   // A marca persistida precisa ser removida ANTES de iniciar o processamento.
   // Assim um sweeper de recuperação em outra instância não reenvia a mesma
   // pergunta enquanto esta resposta já está sendo gerada.
@@ -76,6 +97,8 @@ async function doFlush(key: string, phone: string, buffer: PendingBuffer, onFlus
     await deletePersistedBuffer(buffer.resolvedTenant.tenantId, phone);
   } catch (err: any) {
     console.warn(`⚠️  [Buffer de rajada] Falha ao remover marca persistida pra ${phone}:`, err.message);
+  } finally {
+    flushing.delete(key);
   }
   onFlush(buffer.texts.join('\n'), buffer.contactName, buffer.lastMessageId, buffer.texts.length, buffer.resolvedTenant, buffer.firstMessageId);
 }
@@ -149,7 +172,11 @@ export function startBufferRecoverySweeper(onFlush: (phone: string) => FlushCall
       if (error || !data) return;
       for (const row of data as any[]) {
         const key = bufferKey(row.tenant_id, row.phone);
-        if (buffers.has(key)) continue; // já em andamento nesta mesma instância, não duplica
+        // já em andamento nesta mesma instância, não duplica — `flushing`
+        // cobre o round-trip do delete persistido de um `doFlush` já
+        // iniciado (ver comentário acima de `flushing`), não só o Map de
+        // acumulação.
+        if (buffers.has(key) || flushing.has(key)) continue;
         await runWithTenantDbContext({ tenantId: row.tenant_id, source: 'job' }, async () => {
           await deletePersistedBuffer(row.tenant_id, row.phone);
           const texts: string[] = Array.isArray(row.texts) ? row.texts : [];
