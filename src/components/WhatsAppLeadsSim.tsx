@@ -3979,12 +3979,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               ícone em círculo pra virar a 4ª pill desta mesma seção.
               TASK-0348 (pedido direto, print anotado): "Gatilhos" — que
               vivia numa fileira própria só quando "Anúncios" estava ligado —
-              virou o badge desta MESMA pill, sempre visível quando há
-              mensagem pendente de revisão (independe do toggle estar ligado
-              ou não). O corpo da pill continua ligando/desligando "somente
-              anúncios" (`handleToggleAdsOnly`); o badge é um botão à parte
-              (não aninhado — <button> dentro de <button> é HTML inválido)
-              que abre o modal de gatilhos. */}
+              virou o badge desta MESMA pill. O corpo da pill continua
+              ligando/desligando "somente anúncios" (`handleToggleAdsOnly`);
+              o badge é um botão à parte (não aninhado — <button> dentro de
+              <button> é HTML inválido) que abre o modal de gatilhos.
+
+              Achado real (bug reportado, 11/09/2026, print anotado): a
+              condição era `adTriggerMessages.length > 0`, então o botão só
+              existia depois de já haver algum gatilho cadastrado — quem
+              ativava "Anúncios" pela primeira vez (nenhum gatilho ainda)
+              não tinha NENHUM jeito de cadastrar o primeiro pelo celular. A
+              versão desktop desta mesma engrenagem (mais abaixo nesta
+              função) sempre usou `adsOnly` como condição, não a contagem —
+              alinhado aqui: aparece sempre que "Anúncios" está ligado,
+              mostrando a contagem como badge só quando já existe alguma. */}
           <div className={`flex flex-1 items-stretch overflow-hidden rounded-lg transition-colors ${adsOnly ? 'bg-emerald-500/20' : 'bg-slate-950/50'}`}>
             <button
               type="button"
@@ -3996,14 +4004,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             >
               {isSpanish ? 'Anuncios' : 'Anúncios'}
             </button>
-            {adTriggerMessages.length > 0 && (
+            {adsOnly && (
               <button
                 type="button"
                 onClick={openAdTriggersModal}
-                title={isSpanish ? 'Ver gatillos de anuncio pendientes' : 'Ver gatilhos de anúncio pendentes'}
-                className="flex shrink-0 items-center justify-center bg-red-500 px-1.5 text-[10px] font-bold text-white transition-colors hover:bg-red-400"
+                title={
+                  adTriggerMessages.length > 0
+                    ? (isSpanish ? 'Ver gatillos de anuncio configurados' : 'Ver gatilhos de anúncio configurados')
+                    : (isSpanish ? 'Configurar gatillos de anuncio' : 'Configurar gatilhos de anúncio')
+                }
+                className={`flex shrink-0 items-center justify-center px-1.5 text-[10px] font-bold text-white transition-colors ${
+                  adTriggerMessages.length > 0 ? 'bg-red-500 hover:bg-red-400' : 'bg-slate-700 hover:bg-slate-600'
+                }`}
               >
-                {adTriggerMessages.length}
+                {adTriggerMessages.length > 0 ? adTriggerMessages.length : <Settings2 className="h-3 w-3" />}
               </button>
             )}
           </div>
