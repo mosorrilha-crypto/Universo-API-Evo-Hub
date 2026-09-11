@@ -22,6 +22,7 @@ import { emptyKnowledgeBase } from './lib/emptyKnowledgeBase';
 import { TenantActivationChecklist } from './components/TenantActivationChecklist';
 import { evaluateTenantActivation } from './lib/tenantActivation';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
+import { LazyTabErrorBoundary } from './components/LazyTabErrorBoundary';
 // TASK-0376 (pedido direto, "o carregamento das páginas pode ficar mais
 // rápido"): o bundle inicial do frontend passava de 1,9MB porque toda aba —
 // mesmo as que um operador comum nunca abre (Empresas, Qualidade, Logs do
@@ -1663,7 +1664,7 @@ export const App: React.FC = () => {
         : activeTab === 'agenda' ? ' pb-24 lg:pb-8'
         : ''
       }`}>
-        
+        <LazyTabErrorBoundary>
         {/* Toast Alert */}
         {toastMsg && (
           <div className="app-toast fixed right-3 top-3 z-50 flex items-center gap-2 rounded-xl border border-emerald-400 bg-emerald-600 px-3 py-2 text-xs font-bold text-slate-950 shadow-xl animate-fade-in sm:right-4 sm:top-4">
@@ -2046,7 +2047,7 @@ export const App: React.FC = () => {
             </Suspense>
           </OperationsModuleFrame>
         )}
-
+        </LazyTabErrorBoundary>
       </main>
 
       {/* Login / Switch Profile Modal */}
