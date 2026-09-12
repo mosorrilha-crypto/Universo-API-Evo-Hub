@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { QrCode, X, CheckCircle2, RefreshCw, KeyRound } from 'lucide-react';
+import { QrCode, X, CheckCircle2, RefreshCw, KeyRound, Unlink } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 
 /**
@@ -32,6 +32,7 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string; alreadyConne
   const [connectionState, setConnectionState] = useState<'idle' | 'waiting' | 'connected'>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isRecreating, setIsRecreating] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
   // Alternativa ao QR — conectar digitando o número no celular (WhatsApp >
   // Aparelhos conectados > Conectar com número de telefone), sem precisar
   // escanear nada. `phoneInput` é o que o operador digita nesta tela;
@@ -146,6 +147,33 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string; alreadyConne
     }
   };
 
+  // TASK-0397 (pedido direto: "tem que ter esse botão se um tenant quiser
+  // desconectar") — diferente de "Recriar instância do zero" (apaga e cria
+  // outra, sempre exige escanear QR de novo): isso só desloga a sessão
+  // atual do WhatsApp (mesmo `/instance/logout` que "recriar" já chama por
+  // trás), preservando a instância cadastrada — o operador pode reconectar
+  // com o MESMO número depois, ou com um número diferente, pelo fluxo de QR
+  // Code que já existe. Pedido depois de um achado real: o mesmo número
+  // pessoal conectado em dois tenants ao mesmo tempo duplicava toda
+  // mensagem recebida (uma via cada instância).
+  const handleDisconnect = async () => {
+    if (!window.confirm('Isso vai desconectar o WhatsApp deste tenant agora — mensagens de clientes param de chegar até reconectar (com o mesmo número ou outro). Continuar?')) return;
+    setIsDisconnecting(true);
+    setErrorMsg(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/disconnect`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setConnectionState('idle');
+      setQrCodeBase64(null);
+      setPairingCode(null);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao desconectar.');
+    } finally {
+      setIsDisconnecting(false);
+    }
+  };
+
   return (
     <>
       <button
@@ -185,9 +213,17 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string; alreadyConne
                 <p className="text-xs text-slate-400">O número já pode receber e enviar mensagens de novo.</p>
                 <button
                   type="button"
+                  onClick={handleDisconnect}
+                  disabled={isDisconnecting}
+                  className="text-xs text-amber-300 hover:text-amber-200 flex items-center gap-1.5 mx-auto disabled:opacity-50 pt-2"
+                >
+                  <Unlink className={`w-3 h-3 ${isDisconnecting ? 'animate-pulse' : ''}`} /> {isDisconnecting ? 'Desconectando...' : 'Desconectar este número'}
+                </button>
+                <button
+                  type="button"
                   onClick={handleRecreateInstance}
                   disabled={isRecreating}
-                  className="text-xs text-red-300 hover:text-red-200 flex items-center gap-1.5 mx-auto disabled:opacity-50 pt-2"
+                  className="text-xs text-red-300 hover:text-red-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3 h-3 ${isRecreating ? 'animate-spin' : ''}`} /> {isRecreating ? 'Recriando...' : 'Mensagens não chegam mesmo conectado? Recriar instância do zero'}
                 </button>
