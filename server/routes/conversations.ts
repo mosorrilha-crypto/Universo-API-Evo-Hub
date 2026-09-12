@@ -41,7 +41,11 @@ import { upsertCrmLeadState } from '../services/crmStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleAccess';
 import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLogsModuleAccess';
-import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours, getTenantAlertSettings, setTenantAlertSettings, validateAdminAlertPhone, validateAlertPreferences } from '../services/tenantProfileStore';
+import {
+  getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours,
+  getTenantAlertSettings, setTenantAlertSettings, validateAdminAlertPhone, validateAlertPreferences,
+  getTenantCustomerNotificationPreferences, setTenantCustomerNotificationPreferences, validateCustomerNotificationPreferences,
+} from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
 import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, resolveKnowledgeBaseImageBinary, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
@@ -1926,6 +1930,25 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
     await setTenantAlertSettings(tenantOf(req), { adminAlertPhone, preferences });
     res.json(await getTenantAlertSettings(tenantOf(req)));
+  }));
+
+  // TASK-0399 (12/09/2026): mensagens automáticas pro CLIENTE FINAL (não pro
+  // dono do tenant, isso é /api/alert-settings acima) — lembrete de
+  // agendamento, retomada de conversa parada e reengajamento automático do
+  // funil, hoje configuráveis por tenant (server/services/tenantProfileStore.ts).
+  // Rota separada de /api/alert-settings de propósito: contrato bem
+  // diferente (objetos aninhados com números/horário, não só booleano).
+  router.get('/api/customer-notification-settings', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ preferences: await getTenantCustomerNotificationPreferences(tenantOf(req)) });
+  }));
+
+  router.post('/api/customer-notification-settings', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { preferences } = req.body || {};
+    if (!validateCustomerNotificationPreferences(preferences)) {
+      return res.status(400).json({ error: 'Campo "preferences" inválido — confira os tipos/faixas de cada campo (horários "HH:mm", números dentro da faixa permitida).' });
+    }
+    await setTenantCustomerNotificationPreferences(tenantOf(req), preferences);
+    res.json({ preferences: await getTenantCustomerNotificationPreferences(tenantOf(req)) });
   }));
 
   // Catálogo público (contato + opt-in) — até aqui só dava pra configurar

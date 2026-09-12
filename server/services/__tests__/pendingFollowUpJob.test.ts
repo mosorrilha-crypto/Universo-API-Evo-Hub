@@ -27,8 +27,12 @@ vi.mock('../conversationStore', () => ({
 vi.mock('../agentStatus', () => ({
   isAgentPaused: vi.fn().mockResolvedValue(false),
 }));
+const DEFAULT_FUNNEL_AUTO_FOLLOW_UP = { enabled: true, delayHours: 2.5, businessHoursStart: 7, businessHoursEnd: 19 };
+const getTenantCustomerNotificationPreferences = vi.fn().mockResolvedValue({ funnelAutoFollowUp: DEFAULT_FUNNEL_AUTO_FOLLOW_UP });
 vi.mock('../tenantProfileStore', () => ({
   getTenantReminderLanguage: vi.fn().mockResolvedValue('es'),
+  getTenantCustomerNotificationPreferences: (...args: any[]) => getTenantCustomerNotificationPreferences(...args),
+  funnelAutoFollowUpDelayMs: (prefs: { delayHours: number }) => prefs.delayHours * 60 * 60 * 1000,
 }));
 vi.mock('../replySafetyGate', () => ({
   reviewAutoReplyBeforeSend: vi.fn().mockResolvedValue({ approved: true, source: 'gemini-reviewer', severity: 'low', reason: 'ok' }),
@@ -229,5 +233,50 @@ describe('pendingFollowUpJob — reengajamento automático (customer_reply)', ()
 
     expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
     expect(await listEscalations(TENANT_A)).toHaveLength(1);
+  });
+});
+
+/**
+ * TASK-0399 (12/09/2026): `funnelAutoFollowUp` (migration 0089) — liga/desliga
+ * geral, janela de horário e atraso, hoje configuráveis por tenant. O
+ * default reproduz exatamente os antigos `AUTO_FOLLOWUP_START_HOUR/_END_HOUR`
+ * (7-19) e `CUSTOMER_REPLY_FOLLOWUP_MS` (2.5h) — já cobertos pelos testes
+ * acima, que usam o mock default (`DEFAULT_FUNNEL_AUTO_FOLLOW_UP`).
+ */
+describe('pendingFollowUpJob — preferência funnelAutoFollowUp (TASK-0399)', () => {
+  it('enabled = false: nem tenta gerar mensagem — escala direto sem chamar a IA', async () => {
+    getTenantCustomerNotificationPreferences.mockResolvedValueOnce({ funnelAutoFollowUp: { ...DEFAULT_FUNNEL_AUTO_FOLLOW_UP, enabled: false } });
+    const ai = fakeAi();
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T17:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    expect(ai.models.generateContent).not.toHaveBeenCalled();
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(await listEscalations(TENANT_A)).toHaveLength(1);
+  });
+
+  it('businessHoursStart/End customizados: um horário que o default 7-19h permitiria fica fora da janela customizada', async () => {
+    // 2026-08-15T18:00:00Z = 15:00 em America/Asuncion (dentro do default 7-19h, fora de uma janela customizada 8-14h).
+    getTenantCustomerNotificationPreferences.mockResolvedValueOnce({ funnelAutoFollowUp: { ...DEFAULT_FUNNEL_AUTO_FOLLOW_UP, businessHoursStart: 8, businessHoursEnd: 14 } });
+    const ai = fakeAi();
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T17:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(await listEscalations(TENANT_A)).toHaveLength(0); // 'wait', não escala ainda
+  });
+
+  it('delayHours customizado empurra o novo due_at pela quantidade certa, não pelo default de 2.5h', async () => {
+    getTenantCustomerNotificationPreferences.mockResolvedValueOnce({ funnelAutoFollowUp: { ...DEFAULT_FUNNEL_AUTO_FOLLOW_UP, delayHours: 5 } });
+    const ai = fakeAi();
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T17:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    const [pending] = await listPendingFollowUps(TENANT_A);
+    const pushedMs = new Date(pending.dueAt).getTime() - new Date('2026-08-15T18:00:00Z').getTime();
+    expect(pushedMs).toBe(5 * 60 * 60 * 1000);
   });
 });

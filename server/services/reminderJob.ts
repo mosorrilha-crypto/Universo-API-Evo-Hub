@@ -16,7 +16,13 @@ import { wasReminderSent, markReminderSent, type ReminderType } from './reminder
 import { sendWhatsAppTemplateMessage } from './metaSend';
 import { sendEvolutionTextMessage } from './evolutionSend';
 import { resolveCredentialsForTenant } from './tenantResolver';
-import { getTenantReminderLanguage, type ReminderLanguage } from './tenantProfileStore';
+import {
+  getTenantReminderLanguage,
+  getTenantCustomerNotificationPreferences,
+  DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES,
+  type ReminderLanguage,
+  type AppointmentReminderPreferences,
+} from './tenantProfileStore';
 import { recordOutgoingMessage } from './conversationStore';
 import { startPeriodicJob } from './periodicJob';
 
@@ -110,12 +116,20 @@ export async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void
 
   for (const tenantId of tenantIds) {
     await runWithTenantDbContext({ tenantId, source: 'job' }, async () => {
+      // TASK-0399: tenant pode desligar lembrete de agendamento inteiro —
+      // checa ANTES de chamar o Google Calendar, pra não gastar a chamada à
+      // toa quando o tenant nem quer o recurso. `.catch` (mesma cautela já
+      // usada pra idioma logo abaixo): falha ao buscar a preferência nunca
+      // deve travar o lembrete pro tenant, só cair no default (tudo ligado).
+      const notificationPrefs = await getTenantCustomerNotificationPreferences(tenantId).catch(() => DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES);
+      if (!notificationPrefs.appointmentReminders.enabled) return;
+
       const channel = await resolveCredentialsForTenant(
         tenantId,
         { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
         { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
       );
-      await checkAndSendRemindersForTenant(tenantId, cfg, channel);
+      await checkAndSendRemindersForTenant(tenantId, cfg, channel, notificationPrefs.appointmentReminders);
     });
   }
 }
@@ -135,7 +149,8 @@ async function checkAndSendRemindersForTenant(
     evolutionInstanceName?: string;
     evolutionApiUrl?: string;
     evolutionApiKey?: string;
-  }
+  },
+  reminderPrefs: AppointmentReminderPreferences
 ): Promise<void> {
   const today = todayDatePartsInTz();
   const tomorrow = addDays(today, 1);
@@ -172,11 +187,15 @@ async function checkAndSendRemindersForTenant(
   // agendamento. Decisão do dono do produto: só manda o lembrete da véspera
   // pra quem agendou com 72h+ de antecedência (compromisso "fresco" não
   // precisa de reforço na véspera, só a confirmação da manhã do dia).
-  const DIA_ANTERIOR_MIN_LEAD_HOURS = 72;
-  // Horários fixos por tipo de lembrete (decisão do dono do produto,
-  // 27/08/2026) — substituem o corte por horário de abertura do tenant, que
-  // servia só pra evitar o lembrete de madrugada.
-  const EARLIEST_HHMM_BY_TYPE: Record<ReminderType, string> = { dia_anterior: '08:30', mesmo_dia: '07:30' };
+  // TASK-0399: valores agora vêm da preferência por tenant
+  // (customer_notification_preferences.appointmentReminders) — os defaults
+  // reproduzem exatamente essas mesmas constantes (72h/08:30/07:30), então
+  // nenhum tenant existente muda de comportamento sem mexer na tela.
+  const DIA_ANTERIOR_MIN_LEAD_HOURS = reminderPrefs.diaAnteriorMinLeadHours;
+  const EARLIEST_HHMM_BY_TYPE: Record<ReminderType, string> = {
+    dia_anterior: reminderPrefs.diaAnteriorEarliestTime,
+    mesmo_dia: reminderPrefs.mesmoDiaEarliestTime,
+  };
   const { hora: nowHHmm } = dateAndTimeInTz(new Date());
   const language: ReminderLanguage = await getTenantReminderLanguage(tenantId).catch(() => 'es' as ReminderLanguage);
 
@@ -189,6 +208,8 @@ async function checkAndSendRemindersForTenant(
     if (eventDateKey === tomorrowKey) type = 'dia_anterior';
     else if (eventDateKey === todayKey) type = 'mesmo_dia';
     if (!type) continue;
+    if (type === 'dia_anterior' && !reminderPrefs.diaAnteriorEnabled) continue;
+    if (type === 'mesmo_dia' && !reminderPrefs.mesmoDiaEnabled) continue;
     if (nowHHmm < EARLIEST_HHMM_BY_TYPE[type]) continue; // fora do horário definido pra este tipo — tenta de novo no próximo tick
     if (type === 'dia_anterior') {
       const leadHours = (new Date(event.startIso).getTime() - new Date(appt.createdAt).getTime()) / (60 * 60 * 1000);

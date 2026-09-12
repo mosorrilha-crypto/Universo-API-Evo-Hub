@@ -6,22 +6,24 @@ import { apiFetch } from '../lib/apiClient';
  * Painel de "Notificações" — pedido direto (12/09/2026, achado real: alerta
  * de um tenant chegando no número de outro, porque `admin_alert_phone` só
  * dava pra configurar via SQL direto no Supabase, sem nenhuma tela). Cobre
- * os 3 alertas que hoje mandam WhatsApp de verdade pro número escolhido —
- * agente pausado sem resposta, conexão do WhatsApp caiu, erro real no
- * sistema (GET/POST /api/alert-settings, server/services/tenantProfileStore.ts).
+ * os 5 alertas administrativos do sistema (GET/POST /api/alert-settings,
+ * server/services/tenantProfileStore.ts).
  *
- * Escalonamento e pagamento pendente NÃO aparecem aqui de propósito: desde
- * a TASK-0298 (05/09/2026) esses dois já são só notificação push pro painel
- * (PWA), sem nenhum número de telefone envolvido — decisão explícita do
- * dono do produto pra não misturar alerta interno com as conversas reais de
- * cliente no WhatsApp pessoal dele. A caixa de aviso abaixo explica isso pra
- * quem chegar aqui esperando configurar esses dois também.
+ * Escalonamento e pagamento pendente (TASK-0399, 12/09/2026) vêm com o
+ * WhatsApp DESLIGADO por padrão: até a TASK-0298 (05/09/2026) esses dois
+ * mandavam WhatsApp incondicionalmente, e foi removido porque um tenant
+ * reclamou de receber alerta misturado com as conversas reais dos próprios
+ * clientes. Virou escolha por tenant — "são modelos de negócio diferentes,
+ * necessidades diferentes" — em vez de comportamento fixo pra todo mundo. O
+ * push pro painel continua sempre ligado pros 5, independente disso.
  */
 
 interface AlertPreferences {
   agent_paused: boolean;
   evolution_disconnected: boolean;
   system_error: boolean;
+  escalation: boolean;
+  payment_pending: boolean;
 }
 
 interface AlertSettingsResponse {
@@ -45,12 +47,22 @@ const ALERT_TYPE_META: Array<{ key: keyof AlertPreferences; label: string; descr
     label: 'Erro real no sistema',
     description: 'Um erro técnico inesperado aconteceu na plataforma (não é específico da sua empresa).',
   },
+  {
+    key: 'escalation',
+    label: 'Escalonamento (IA pede ajuda humana)',
+    description: 'A IA identificou algo que precisa de decisão humana — reclamação, pedido incomum, situação sensível. Sempre chega como notificação no painel; aqui você escolhe se também quer no WhatsApp.',
+  },
+  {
+    key: 'payment_pending',
+    label: 'Pagamento pendente de verificação',
+    description: 'Um cliente enviou comprovante de pagamento e está esperando confirmação há um tempo. Sempre chega como notificação no painel; aqui você escolhe se também quer no WhatsApp.',
+  },
 ];
 
 export function AlertSettingsPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [phoneDraft, setPhoneDraft] = useState('');
-  const [preferences, setPreferences] = useState<AlertPreferences>({ agent_paused: true, evolution_disconnected: true, system_error: true });
+  const [preferences, setPreferences] = useState<AlertPreferences>({ agent_paused: true, evolution_disconnected: true, system_error: true, escalation: false, payment_pending: false });
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -154,7 +166,7 @@ export function AlertSettingsPanel() {
       <div className="flex items-start gap-2 rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-[11px] text-sky-100/90">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
         <span>
-          <span className="font-bold">Escalonamentos</span> (quando a IA pede ajuda humana) e <span className="font-bold">pagamento pendente</span> não aparecem aqui — esses avisos chegam só como notificação no painel (ative em Configurações → Notificações push), nunca por WhatsApp, pra não misturar aviso interno com as conversas reais dos seus clientes.
+          A notificação no painel (PWA) sempre acontece pros 5 alertas acima, independente destes toggles — eles controlam só o envio adicional por WhatsApp. Desligar um alerta aqui nunca esconde nada dentro do próprio painel.
         </span>
       </div>
 

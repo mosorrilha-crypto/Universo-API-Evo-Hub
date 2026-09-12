@@ -2044,6 +2044,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       </div>
 
+      {/*
+        Pergunta real do dono do produto (12/09/2026): com os chips inline
+        (ver comentários perto de "Voz da marca"/"Preços e políticas" mais
+        abaixo) já indicando de qual documento um campo é, essa grade não
+        ficou redundante? Investigado e decidido: NÃO — os chips hoje só
+        cobrem 2 dos 8 tipos (brand_voice, pricing_policies); pra outros 6
+        (business_profile, service_catalog, opening_hours, faq,
+        human_handoff_rules, media_assets) esta grade é o ÚNICO lugar que
+        mostra status de publicação/rascunho. Mantida como está.
+      */}
       {usesPublishedKnowledgeBase && (
         <section id="knowledge-base-document-list" className="scroll-mt-28 rounded-2xl border border-cyan-400/25 bg-[radial-gradient(circle_at_92%_0%,rgba(34,211,238,0.14),transparent_38%),#0f172a] p-4 shadow-md">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
