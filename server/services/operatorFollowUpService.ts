@@ -24,6 +24,7 @@ import { logEscalation, markOperatorGuidanceConsumed, reviewerEscalationSourceKe
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
 import { buildChronologicalConversationContext } from './conversationReplyGuard';
 import { HISTORY_WINDOW_SIZE } from './autoReply';
+import { getTenantCustomerNotificationPreferences, DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES } from './tenantProfileStore';
 
 const CUSTOMER_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -98,7 +99,7 @@ export interface FollowUpDeps {
 export type FollowUpOutcome =
   | { sent: true; viaTemplate: false; message: string }
   | { sent: true; viaTemplate: true }
-  | { sent: false; reason: string };
+  | { sent: false; reason: string; skippedByPreference?: true };
 
 /**
  * Chamado assim que o operador submete a orientação (server/routes/conversations.ts,
@@ -117,6 +118,17 @@ export async function sendOperatorGuidedFollowUp(
   const window = await getCustomerServiceWindowStatus(tenantId, escalation.phone);
 
   if (!window.withinWindow) {
+    // TASK-0399: tenant pode desligar o convite proativo de reativação —
+    // a orientação do operador (`escalation.operatorReply`, já persistida
+    // por submitOperatorReply ANTES desta função rodar) nunca se perde: a
+    // próxima mensagem do cliente já consome essa orientação via
+    // getPendingOperatorGuidance (webhooks.ts), igual acontece hoje quando
+    // o template É enviado. Desligar só evita o envio proativo do template
+    // enquanto o cliente estiver fora da janela de 24h.
+    const notificationPrefs = await getTenantCustomerNotificationPreferences(tenantId).catch(() => DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES);
+    if (!notificationPrefs.abandonedConversationReactivation.enabled) {
+      return { sent: false, reason: 'Reativação automática desligada em Configurações — a orientação continua salva e será usada assim que o cliente responder.', skippedByPreference: true };
+    }
     if (!deps.metaPhoneNumberId || !deps.metaAccessToken) {
       return { sent: false, reason: 'Credenciais do WhatsApp ausentes — não foi possível mandar o template de reengajamento.' };
     }

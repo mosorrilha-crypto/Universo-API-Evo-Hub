@@ -35,7 +35,14 @@ import { runWithTenantDbContext } from './tenantDbContext';
 import { getConversation, recordOutgoingMessage } from './conversationStore';
 import { isAgentPaused } from './agentStatus';
 import { getCustomerServiceWindowStatus } from './operatorFollowUpService';
-import { getTenantReminderLanguage, type ReminderLanguage } from './tenantProfileStore';
+import {
+  getTenantReminderLanguage,
+  getTenantCustomerNotificationPreferences,
+  funnelAutoFollowUpDelayMs,
+  DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES,
+  type ReminderLanguage,
+  type FunnelAutoFollowUpPreferences,
+} from './tenantProfileStore';
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
 import { resolveCredentialsForTenant } from './tenantResolver';
 import { sendWhatsAppTextMessage } from './metaSend';
@@ -43,11 +50,15 @@ import { sendEvolutionTextMessage } from './evolutionSend';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 const BUSINESS_TIMEZONE = 'America/Asuncion';
-/** Mesmo valor de CUSTOMER_REPLY_FOLLOWUP_MS em webhooks.ts — reaproveitado aqui pra empurrar o due_at depois do envio automático (dá a mesma janela de novo pra escalar se o cliente continuar calado). */
-const CUSTOMER_REPLY_FOLLOWUP_MS = 2.5 * 60 * 60 * 1000;
-/** Janela em que a IA pode reengajar sozinha (pedido real, 10/09/2026) — fora disso só escala, nunca manda mensagem de madrugada/tarde da noite. */
-const AUTO_FOLLOWUP_START_HOUR = 7;
-const AUTO_FOLLOWUP_END_HOUR = 19;
+/**
+ * TASK-0399 (12/09/2026): o prazo (era `CUSTOMER_REPLY_FOLLOWUP_MS` fixo em
+ * 2.5h) e a janela de horário (eram `AUTO_FOLLOWUP_START_HOUR`/`_END_HOUR`
+ * fixos em 7-19) agora vêm de `customer_notification_preferences.funnelAutoFollowUp`
+ * por tenant (migration 0089) — o default reproduz exatamente esses mesmos
+ * valores. `server/routes/webhooks.ts` usa a MESMA preferência ao criar a
+ * pendência inicial (`funnelAutoFollowUpDelayMs`), senão o prazo inicial e o
+ * prazo recalculado aqui divergiriam assim que um tenant customizasse o valor.
+ */
 
 function reasonForAlert(p: PendingFollowUp): string {
   if (p.kind === 'owner_review') {
@@ -59,12 +70,12 @@ function reasonForAlert(p: PendingFollowUp): string {
   return `Ofereceu horário/opção e o cliente sumiu sem responder (${p.reason}) — esfriou, pode precisar de um empurrãozinho.`;
 }
 
-/** true se `now` cai entre 7h-19h no fuso do negócio — janela em que a IA pode mandar reengajamento automático. */
-function isWithinAutoFollowUpHours(now: Date): boolean {
+/** true se `now` cai dentro da janela [start, end) no fuso do negócio — janela em que a IA pode mandar reengajamento automático. */
+function isWithinAutoFollowUpHours(now: Date, startHour: number, endHour: number): boolean {
   const hour = Number(
     new Intl.DateTimeFormat('en-US', { timeZone: BUSINESS_TIMEZONE, hour: '2-digit', hour12: false }).format(now)
   );
-  return hour >= AUTO_FOLLOWUP_START_HOUR && hour < AUTO_FOLLOWUP_END_HOUR;
+  return hour >= startHour && hour < endHour;
 }
 
 async function draftAutomaticFollowUpMessage(ai: GoogleGenAI, reason: string, contactName: string | undefined, language: ReminderLanguage): Promise<string> {
@@ -103,7 +114,15 @@ type AutomaticFollowUpResult = 'sent' | 'escalate' | 'wait';
  *   fechada, cliente pausado/bloqueado, revisor de segurança bloqueou, ou
  *   falha de envio) — o chamador escala pro operador, exatamente como antes.
  */
-async function tryAutomaticFollowUp(tenantId: string, p: PendingFollowUp, deps: PendingFollowUpJobDeps): Promise<AutomaticFollowUpResult> {
+async function tryAutomaticFollowUp(
+  tenantId: string,
+  p: PendingFollowUp,
+  deps: PendingFollowUpJobDeps,
+  followUpPrefs: FunnelAutoFollowUpPreferences,
+  language: ReminderLanguage
+): Promise<AutomaticFollowUpResult> {
+  if (!followUpPrefs.enabled) return 'escalate'; // tenant desligou o reengajamento automático — reaproveita o fallback que já existia
+
   const ai = deps.getAi?.();
   if (!ai) return 'escalate';
 
@@ -116,9 +135,8 @@ async function tryAutomaticFollowUp(tenantId: string, p: PendingFollowUp, deps: 
   const window = await getCustomerServiceWindowStatus(tenantId, p.phone);
   if (!window.withinWindow) return 'escalate'; // fora da janela de 24h da Meta — texto livre não é permitido, cai pro escalonamento normal
 
-  if (!isWithinAutoFollowUpHours(new Date())) return 'wait'; // fora de 7h-19h — espera o próximo tick dentro da janela de 24h
+  if (!isWithinAutoFollowUpHours(new Date(), followUpPrefs.businessHoursStart, followUpPrefs.businessHoursEnd)) return 'wait'; // fora da janela configurada — espera o próximo tick dentro da janela de 24h
 
-  const language = await getTenantReminderLanguage(tenantId).catch(() => 'es' as ReminderLanguage);
   let message: string;
   try {
     message = await draftAutomaticFollowUpMessage(ai, p.reason, p.contactName, language);
@@ -162,7 +180,7 @@ async function tryAutomaticFollowUp(tenantId: string, p: PendingFollowUp, deps: 
     { type: 'text', text: message, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) },
     'ai'
   );
-  await markAutoFollowUpSent(tenantId, p.id, new Date(Date.now() + CUSTOMER_REPLY_FOLLOWUP_MS).toISOString());
+  await markAutoFollowUpSent(tenantId, p.id, new Date(Date.now() + funnelAutoFollowUpDelayMs(followUpPrefs)).toISOString());
   console.log(`🤝 [Reengajamento automático] tenant=${tenantId} reengajou ${p.phone} sozinha (motivo: ${p.reason}).`);
   return 'sent';
 }
@@ -176,14 +194,24 @@ async function checkPendingFollowUpsForTenant(tenantId: string, nowIso: string, 
     return;
   }
 
+  // TASK-0399: busca UMA vez por tenant por tick (não por item pendente) —
+  // corrige de quebra um N+1 real que já existia aqui (getTenantReminderLanguage
+  // rodava dentro de tryAutomaticFollowUp, ou seja, uma vez por item).
+  const [followUpPrefs, language] = await Promise.all([
+    getTenantCustomerNotificationPreferences(tenantId)
+      .then((prefs) => prefs.funnelAutoFollowUp)
+      .catch(() => DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES.funnelAutoFollowUp),
+    getTenantReminderLanguage(tenantId).catch(() => 'es' as ReminderLanguage),
+  ]);
+
   for (const p of pending) {
     if (p.dueAt > nowIso) continue; // ainda não venceu
 
     try {
       if (p.kind === 'customer_reply' && !p.autoFollowUpSentAt) {
-        const result = await tryAutomaticFollowUp(tenantId, p, deps);
+        const result = await tryAutomaticFollowUp(tenantId, p, deps, followUpPrefs, language);
         if (result === 'sent') continue; // due_at foi empurrado pra frente, só escala se continuar em silêncio
-        if (result === 'wait') continue; // fora de 7h-19h — tenta de novo no próximo tick, sem escalar ainda
+        if (result === 'wait') continue; // fora da janela configurada — tenta de novo no próximo tick, sem escalar ainda
       }
       await logEscalation(tenantId, p.phone, p.contactName, reasonForAlert(p), undefined, p.kind);
       await markFollowUpAlerted(tenantId, p.id);

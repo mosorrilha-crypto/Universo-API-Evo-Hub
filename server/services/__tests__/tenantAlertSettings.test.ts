@@ -27,16 +27,25 @@ beforeEach(() => {
 });
 
 describe('getTenantAlertSettings', () => {
-  it('tenant que nunca configurou nada: telefone null, preferências default (tudo true)', async () => {
+  it('tenant que nunca configurou nada: telefone null, preferências default (escalation/payment_pending desligados, resto ligado)', async () => {
     const settings = await getTenantAlertSettings(TENANT_A);
     expect(settings.adminAlertPhone).toBeNull();
     expect(settings.preferences).toEqual(DEFAULT_ALERT_PREFERENCES);
+    expect(settings.preferences.escalation).toBe(false);
+    expect(settings.preferences.payment_pending).toBe(false);
   });
 
-  it('preferências parciais salvas: chaves ausentes voltam com o default (true)', async () => {
+  it('preferências parciais salvas: chaves ausentes voltam com o default', async () => {
     await setTenantAlertSettings(TENANT_A, { preferences: { evolution_disconnected: false } });
     const settings = await getTenantAlertSettings(TENANT_A);
-    expect(settings.preferences).toEqual({ agent_paused: true, evolution_disconnected: false, system_error: true });
+    expect(settings.preferences).toEqual({ agent_paused: true, evolution_disconnected: false, system_error: true, escalation: false, payment_pending: false });
+  });
+
+  it('tenant pode ligar escalation/payment_pending explicitamente (default false não é travado)', async () => {
+    await setTenantAlertSettings(TENANT_A, { preferences: { escalation: true, payment_pending: true } });
+    const settings = await getTenantAlertSettings(TENANT_A);
+    expect(settings.preferences.escalation).toBe(true);
+    expect(settings.preferences.payment_pending).toBe(true);
   });
 });
 
@@ -65,7 +74,7 @@ describe('setTenantAlertSettings', () => {
     await setTenantAlertSettings(TENANT_A, { preferences: { agent_paused: false } });
     await setTenantAlertSettings(TENANT_A, { preferences: { system_error: false } });
     const settings = await getTenantAlertSettings(TENANT_A);
-    expect(settings.preferences).toEqual({ agent_paused: false, evolution_disconnected: true, system_error: false });
+    expect(settings.preferences).toEqual({ agent_paused: false, evolution_disconnected: true, system_error: false, escalation: false, payment_pending: false });
   });
 });
 
@@ -87,6 +96,9 @@ describe('validateAdminAlertPhone', () => {
 describe('validateAlertPreferences', () => {
   it('aceita objeto parcial com chaves conhecidas e valores booleanos', () => {
     expect(validateAlertPreferences({ agent_paused: false })).toBe(true);
+  });
+  it('aceita as chaves novas escalation/payment_pending (TASK-0399)', () => {
+    expect(validateAlertPreferences({ escalation: true, payment_pending: false })).toBe(true);
   });
   it('rejeita chave desconhecida', () => {
     expect(validateAlertPreferences({ chave_inventada: true })).toBe(false);

@@ -236,7 +236,7 @@ async function updateAlertStatus(tenantId: string, id: string, status: 'sent' | 
 }
 
 function dispatchEscalationAlert(tenantId: string, escalation: Escalation): void {
-  notifyEscalationCreated(tenantId, { phone: escalation.phone, contactName: escalation.contactName, reason: escalation.reason })
+  notifyEscalationCreated(tenantId, { phone: escalation.phone, contactName: escalation.contactName, reason: escalation.reason, kind: escalation.kind })
     .then(() => updateAlertStatus(tenantId, escalation.id, 'sent'))
     .catch(async (err) => {
       console.warn(`⚠️ [Alerta de escalonamento] tenant=${tenantId} falha ao notificar:`, (err as Error).message);

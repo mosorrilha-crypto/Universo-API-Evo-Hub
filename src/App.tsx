@@ -39,7 +39,7 @@ const CrmWorkspace = lazy(() => import('./components/CrmWorkspace').then((m) => 
 const EscalationsPanel = lazy(() => import('./components/EscalationsPanel').then((m) => ({ default: m.EscalationsPanel })));
 const SystemLogsPanel = lazy(() => import('./components/SystemLogsPanel').then((m) => ({ default: m.SystemLogsPanel })));
 const BroadcastAdminPanel = lazy(() => import('./components/BroadcastAdminPanel').then((m) => ({ default: m.BroadcastAdminPanel })));
-const AlertSettingsPanel = lazy(() => import('./components/AlertSettingsPanel').then((m) => ({ default: m.AlertSettingsPanel })));
+const NotificationsSettingsPanel = lazy(() => import('./components/NotificationsSettingsPanel').then((m) => ({ default: m.NotificationsSettingsPanel })));
 const AgendaWorkspace = lazy(() => import('./components/AgendaWorkspace').then((m) => ({ default: m.AgendaWorkspace })));
 const FinancialWorkspace = lazy(() => import('./components/FinancialWorkspace').then((m) => ({ default: m.FinancialWorkspace })));
 const AdAttributionCAPI = lazy(() => import('./components/AdAttributionCAPI').then((m) => ({ default: m.AdAttributionCAPI })));
@@ -2022,9 +2022,9 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'alerts' && canSeeAlerts && (
-          <OperationsModuleFrame title="Notificações" eyebrow="Alertas operacionais" description="Escolha o número que recebe alertas de WhatsApp da própria plataforma (agente pausado, conexão caiu, erro de sistema) e quais deles chegar." accent="blue" compact>
+          <OperationsModuleFrame title="Notificações" eyebrow="Painel de comando" description="Escolha quais alertas chegam pro seu WhatsApp e quais mensagens automáticas a plataforma manda pros seus clientes — o quê, quando e se quer enviar." accent="blue" compact>
             <Suspense fallback={<TabLoadingFallback />}>
-              <AlertSettingsPanel />
+              <NotificationsSettingsPanel />
             </Suspense>
           </OperationsModuleFrame>
         )}

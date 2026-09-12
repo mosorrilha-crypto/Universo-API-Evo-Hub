@@ -27,9 +27,10 @@ vi.mock('../replySafetyGate', () => ({
 }));
 
 import { recordOutgoingMessage } from '../conversationStore';
-import { sendWhatsAppTextMessage } from '../metaSend';
+import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage } from '../metaSend';
 import { reviewAutoReplyBeforeSend } from '../replySafetyGate';
-import { sendOperatorGuidedFollowUp } from '../operatorFollowUpService';
+import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../operatorFollowUpService';
+import { getPendingOperatorGuidance, submitOperatorReply } from '../escalationStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const PHONE = '556798038466';
@@ -177,5 +178,61 @@ describe('sendOperatorGuidedFollowUp — retomada guiada bloqueada pelo revisor'
     const sentPrompt = generateContent.mock.calls[0][0].contents[0].text as string;
     expect(sentPrompt).toContain('1. CLIENTE: Eu só posso depois das 18:00');
     expect(sentPrompt).toContain('2. ATENDIMENTO: Vou verificar e te aviso');
+  });
+});
+
+/**
+ * TASK-0399 (12/09/2026): reativação automática fora da janela de 24h
+ * (`abandonedConversationReactivation`, migration 0089) ganhou liga/desliga
+ * por tenant. Cobre: default (tenant sem preferência salva) continua
+ * mandando o template, exatamente como antes desta tarefa; desligado pula o
+ * template SEM perder a orientação do operador — a próxima mensagem do
+ * cliente ainda consome a mesma orientação via getPendingOperatorGuidance.
+ */
+describe('sendOperatorGuidedFollowUp — preferência de reativação fora da janela de 24h', () => {
+  async function seedEscalationOutsideWindow() {
+    const conversationStoreMock = await import('../conversationStore');
+    (conversationStoreMock.getConversation as any).mockResolvedValue({
+      messages: [{ sender: 'lead', text: 'oi', timestamp: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString() }], // 30h atrás — fora da janela de 24h
+    });
+    return logEscalation(TENANT_A, PHONE, 'Lucas', 'Cliente sumiu', 'oi', 'general');
+  }
+
+  it('regressão: sem preferência salva, continua mandando o template de reativação (comportamento de antes desta tarefa)', async () => {
+    const seeded = await seedEscalationOutsideWindow();
+    const withGuidance = await submitOperatorReply(TENANT_A, seeded.id, 'Avisa que ainda temos horário essa semana');
+
+    const outcome = await sendOperatorGuidedFollowUp(TENANT_A, withGuidance!, {
+      ai: null,
+      metaAccessToken: 'token',
+      metaPhoneNumberId: 'phone-id',
+      tenantName: 'Monique',
+    });
+
+    expect(outcome).toEqual({ sent: true, viaTemplate: true });
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('desligado (abandonedConversationReactivation.enabled = false): não manda o template, mas a orientação do operador continua disponível pro próximo contato do cliente', async () => {
+    initDb(createFakeSupabase({
+      tenants: [{ id: TENANT_A, name: 'Monique', customer_notification_preferences: { abandonedConversationReactivation: { enabled: false } } }],
+    }));
+    const seeded = await seedEscalationOutsideWindow();
+    const withGuidance = await submitOperatorReply(TENANT_A, seeded.id, 'Avisa que ainda temos horário essa semana');
+
+    const outcome = await sendOperatorGuidedFollowUp(TENANT_A, withGuidance!, {
+      ai: null,
+      metaAccessToken: 'token',
+      metaPhoneNumberId: 'phone-id',
+      tenantName: 'Monique',
+    });
+
+    expect(outcome.sent).toBe(false);
+    expect((outcome as any).skippedByPreference).toBe(true);
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
+
+    // A orientação nunca se perde: getPendingOperatorGuidance ainda a encontra.
+    const pending = await getPendingOperatorGuidance(TENANT_A, PHONE);
+    expect(pending?.operatorReply).toBe('Avisa que ainda temos horário essa semana');
   });
 });

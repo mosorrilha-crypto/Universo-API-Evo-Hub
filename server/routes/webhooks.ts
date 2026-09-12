@@ -16,7 +16,7 @@ import { isAgentPaused } from '../services/agentStatus';
 import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { transcribeAudio, isRealTranscriptionSource } from '../services/geminiTranscription';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
-import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
+import { getTenantSegment, getTenantBusinessHours, getTenantCustomerNotificationPreferences, funnelAutoFollowUpDelayMs, DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, bookingConfirmationEscalationSourceKey } from '../services/escalationStore';
@@ -39,7 +39,6 @@ import type { CalendarConfig } from '../services/googleCalendar';
 // Acompanhamento de funil (pedido real, 15/08/2026 — server/services/pendingFollowUpJob.ts).
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 const DEFAULT_CLOSE_TIME = '20:00';
-const CUSTOMER_REPLY_FOLLOWUP_MS = 2.5 * 60 * 60 * 1000;
 
 /** Fim do dia útil de hoje (horário de fechamento cadastrado pro dia da semana atual, ou 20h se o tenant não configurou) — quando um "aguardando avaliação" vence e escala pro operador. */
 async function endOfBusinessDayIso(tenantId: string): Promise<string> {
@@ -429,7 +428,14 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           await markPendingFollowUp(tenantId, phone, contactName, 'owner_review', result.pendingOwnerReview, await endOfBusinessDayIso(tenantId));
         }
         if (result.awaitingCustomerChoice) {
-          await markPendingFollowUp(tenantId, phone, contactName, 'customer_reply', result.awaitingCustomerChoice, new Date(Date.now() + CUSTOMER_REPLY_FOLLOWUP_MS).toISOString());
+          // TASK-0399: mesma preferência (customer_notification_preferences.funnelAutoFollowUp,
+          // migration 0089) que pendingFollowUpJob.ts usa pra recalcular o
+          // prazo depois de tentar reengajar — se divergissem, o prazo
+          // inicial e o "segunda chance" ficariam incoerentes assim que um
+          // tenant customizasse o valor. Default reproduz os 2.5h fixos de
+          // antes desta tarefa.
+          const { funnelAutoFollowUp } = await getTenantCustomerNotificationPreferences(tenantId).catch(() => DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES);
+          await markPendingFollowUp(tenantId, phone, contactName, 'customer_reply', result.awaitingCustomerChoice, new Date(Date.now() + funnelAutoFollowUpDelayMs(funnelAutoFollowUp)).toISOString());
         }
         // TASK-0185 — backup em Google Sheets (fire-and-forget, nunca atrasa
         // nem derruba o envio real acima). "Agendou?" consulta o agendamento
