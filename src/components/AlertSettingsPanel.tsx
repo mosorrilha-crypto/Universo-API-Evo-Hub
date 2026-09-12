@@ -16,6 +16,10 @@ import { apiFetch } from '../lib/apiClient';
  * clientes. Virou escolha por tenant — "são modelos de negócio diferentes,
  * necessidades diferentes" — em vez de comportamento fixo pra todo mundo. O
  * push pro painel continua sempre ligado pros 5, independente disso.
+ *
+ * Pedido direto (12/09/2026, mesmo dia): "deixa as orientações ainda mais
+ * didáticas... como ensinar uma criança de 5 anos" — textos reescritos com
+ * exemplo concreto por item, em vez de descrição técnica curta.
  */
 
 interface AlertPreferences {
@@ -35,27 +39,27 @@ const ALERT_TYPE_META: Array<{ key: keyof AlertPreferences; label: string; descr
   {
     key: 'agent_paused',
     label: 'Agente pausado sem resposta',
-    description: 'A IA está pausada há um tempo e um cliente mandou mensagem sem ninguém responder.',
+    description: 'Exemplo: você pausou a IA pra atender um cliente pessoalmente, esqueceu de ligar de novo, e chegou mensagem de OUTRO cliente sem ninguém responder. A plataforma te avisa que tem gente esperando.',
   },
   {
     key: 'evolution_disconnected',
     label: 'Conexão do WhatsApp caiu',
-    description: 'A sessão do WhatsApp (QR Code) desconectou — mensagens de clientes podem não estar chegando.',
+    description: 'Exemplo: o celular ficou sem internet ou a sessão do WhatsApp (aquele QR Code que você escaneou) expirou. Enquanto isso, as mensagens dos clientes não chegam na plataforma — precisa escanear o QR Code de novo pra voltar a funcionar.',
   },
   {
     key: 'system_error',
     label: 'Erro real no sistema',
-    description: 'Um erro técnico inesperado aconteceu na plataforma (não é específico da sua empresa).',
+    description: 'Alguma coisa quebrou dentro da plataforma (não tem nada a ver com o seu WhatsApp nem com um cliente específico) e a equipe técnica precisa saber pra consertar.',
   },
   {
     key: 'escalation',
     label: 'Escalonamento (IA pede ajuda humana)',
-    description: 'A IA identificou algo que precisa de decisão humana — reclamação, pedido incomum, situação sensível. Sempre chega como notificação no painel; aqui você escolhe se também quer no WhatsApp.',
+    description: 'Exemplo: um cliente reclamou, pediu algo fora do comum, ou a IA não teve certeza do que responder e preferiu chamar alguém. Isso SEMPRE aparece na tela de Escalonamentos, com ou sem este botão ligado — aqui você só escolhe se quer ganhar um aviso extra no WhatsApp também.',
   },
   {
     key: 'payment_pending',
     label: 'Pagamento pendente de verificação',
-    description: 'Um cliente enviou comprovante de pagamento e está esperando confirmação há um tempo. Sempre chega como notificação no painel; aqui você escolhe se também quer no WhatsApp.',
+    description: 'Exemplo: um cliente mandou a foto do comprovante de pagamento e está esperando você confirmar há um tempo. Isso SEMPRE aparece na tela de Escalonamentos, com ou sem este botão ligado — aqui você só escolhe se quer ganhar um aviso extra no WhatsApp também.',
   },
 ];
 
@@ -124,12 +128,12 @@ export function AlertSettingsPanel() {
         <div className="flex items-center gap-2">
           <span className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-1.5 text-amber-300"><BellRing className="h-4 w-4" /></span>
           <div>
-            <h2 className="text-sm font-bold text-white">Número que recebe os alertas</h2>
-            <p className="text-[11px] text-slate-400">Um alerta é uma mensagem de WhatsApp da própria plataforma pra você — nunca do cliente.</p>
+            <h2 className="text-sm font-bold text-white">Qual número de WhatsApp recebe os alertas</h2>
+            <p className="text-[11px] text-slate-400">Pense assim: quando algo importante acontece na plataforma, ela manda uma mensagem PRA VOCÊ avisando — igual um lembrete de um amigo. Essa mensagem nunca é de um cliente, é sempre da própria plataforma.</p>
           </div>
         </div>
         <div>
-          <label htmlFor="alert-phone" className="mb-1 block text-xs font-semibold text-slate-300">Telefone (com código do país)</label>
+          <label htmlFor="alert-phone" className="mb-1 block text-xs font-semibold text-slate-300">Telefone (com o código do país na frente)</label>
           <input
             id="alert-phone"
             type="tel"
@@ -139,12 +143,15 @@ export function AlertSettingsPanel() {
             placeholder="Ex.: 595991234567"
             className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-500 focus:outline-none"
           />
-          <p className="mt-1 text-[10px] text-slate-500">Deixe em branco para não receber nenhum alerta por WhatsApp.</p>
+          <p className="mt-1 text-[10px] text-slate-500">Coloque o código do país antes do número (ex.: 595 pro Paraguai), sem espaço, sem "+" e sem traço. Se deixar em branco, você simplesmente não recebe nenhum desses avisos no WhatsApp — mas eles continuam aparecendo normalmente dentro da plataforma.</p>
         </div>
       </div>
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 space-y-3">
-        <h2 className="text-sm font-bold text-white">Quais alertas você quer receber nesse número</h2>
+        <div>
+          <h2 className="text-sm font-bold text-white">Escolha quais desses avisos você quer no WhatsApp</h2>
+          <p className="text-[11px] text-slate-400">Marcado = você recebe esse aviso no número acima. Desmarcado = esse aviso só fica dentro da plataforma, não vai pro seu WhatsApp.</p>
+        </div>
         <div className="space-y-2">
           {ALERT_TYPE_META.map(({ key, label, description }) => (
             <label key={key} className="flex items-start justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3 cursor-pointer hover:border-slate-700">
@@ -166,7 +173,7 @@ export function AlertSettingsPanel() {
       <div className="flex items-start gap-2 rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-[11px] text-sky-100/90">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
         <span>
-          A notificação no painel (PWA) sempre acontece pros 5 alertas acima, independente destes toggles — eles controlam só o envio adicional por WhatsApp. Desligar um alerta aqui nunca esconde nada dentro do próprio painel.
+          <span className="font-bold">Importante pra entender:</span> os 5 avisos acima SEMPRE aparecem dentro da plataforma, não importa o que você marcar aqui. Esses botões só decidem se, ALÉM disso, você também quer receber uma mensagem no seu WhatsApp. Ou seja: desmarcar um item aqui nunca faz você perder o aviso — só faz você não ganhar a mensagem extra no celular.
         </span>
       </div>
 
