@@ -27,18 +27,17 @@ já está ativo e configurado 100% via painel, sem nenhuma edição de código.
 - [x] **Decisão arquitetural de zero-hardcode por segmento está documentada e majoritariamente
       cumprida.** `docs/AGENTE-VERTICAL-ARQUITETURA.md` (14/08/2026): nenhuma regra de negócio
       deve viver em código, só Camada 1 (Prompt Global, saas_admin) ou Camada 3 (KB do tenant).
-- [ ] **Dois prompts ainda hardcoded pra "negócio de estética/micropigmentação", rodando pra
-      qualquer tenant.** `server/services/autoReply.ts:1241` (classificação de consulta de
-      agenda via Groq) e `:1686` (prompt da ferramenta de agendamento) — violam a decisão de
-      14/08 acima. Não quebra a mecânica (duração ainda vem do catálogo certo), mas é
-      inconsistência de conteúdo que pode confundir o modelo pra qualquer tenant que não seja de
-      estética. **Fix pequeno e independente, oferecido e ainda não confirmado pelo dono do
-      produto** (genericizar as duas strings, sem mudar lógica/schema/tools).
-- [ ] **Critério de aceite do próprio doc de arquitetura** ("um segundo tenant de outro segmento
+- [x] **Os 2 prompts hardcoded pra "negócio de estética/micropigmentação" foram genericizados.**
+      `server/services/autoReply.ts:1241` (classificação de consulta de agenda via Groq) e `:1686`
+      (prompt da ferramenta de agendamento) violavam a decisão de 14/08 acima, rodando pra
+      qualquer tenant. **Corrigido em TASK-0406 (PR #776, mesclada 12/09/2026)** — mudança
+      puramente textual, sem alteração de lógica/schema/tools.
+- [x] **Critério de aceite do próprio doc de arquitetura** ("um segundo tenant de outro segmento
       consegue ser configurado só cadastrando dado — zero edição de código/prompt",
-      `docs/AGENTE-VERTICAL-ARQUITETURA.md` seção 8) segue formalmente desmarcado — a evidência
-      real (Dr. Daniel funcionando) mostra que está ~95% cumprido; o item acima é a exceção
-      concreta que falta corrigir pra poder marcar como feito.
+      `docs/AGENTE-VERTICAL-ARQUITETURA.md` seção 8) — a única exceção concreta conhecida (item
+      acima) foi corrigida; não há mais nenhum hardcode de vertical identificado no código.
+      Falta apenas marcar formalmente o checkbox na seção 8 daquele documento (não feito aqui —
+      esse arquivo tem seu próprio processo de atualização, fora do escopo deste checklist).
 
 ## 2. Onboarding self-service
 
@@ -50,17 +49,25 @@ já está ativo e configurado 100% via painel, sem nenhuma edição de código.
       tipos tenham uma versão `published` — não checa se o conteúdo em si é útil. Achado real: o
       Dr. Daniel tem 3 dos 8 documentos publicados com dado **vazio** (`opening_hours: {}`,
       `human_handoff_rules: {}`, `faq.faqs: []`) — o agente roda "com KB completa" segundo o
-      sistema, mas sem saber o horário de funcionamento nem ter nenhuma regra de handoff
-      configurada. É exatamente o tipo de risco que vira reclamação de cliente novo.
+      sistema, mas sem saber o horário de funcionamento nem ter perguntas frequentes cadastradas
+      (`human_handoff_rules` é um caso à parte — ver item abaixo). É exatamente o tipo de risco
+      que vira reclamação de cliente novo pros dois campos que o tenant de fato pode preencher.
       **Em correção pelo estudo de UX complementar** (Saúde da Base + findings acionáveis,
       reaproveitando `src/lib/knowledgeBaseAudit.ts`) — não é trabalho desta sessão.
-- [ ] **Gap remanescente que a reformulação de UX sozinha não resolve:** `auditKnowledgeBase()`
-      já detecta 2 dos 3 campos vazios acima (`operation-hours` quando `businessHours` está
-      vazio, `context-faq-empty` quando `faqs.length === 0`), mas **não tem nenhum finding pra
-      `human_handoff_rules` vazio** — mesmo depois da UX terminar, esse campo continuaria
-      passando despercebido, porque a UX só pode mostrar o que o motor de auditoria calcula.
-      Fix pequeno e independente, ainda não confirmado (adicionar 1 finding, mesmo padrão dos
-      demais, + teste).
+- [ ] **`human_handoff_rules` vazio não é um gap de auditoria — é decisão de produto em aberto.**
+      Correção de um achado anterior deste documento: a caracterização original ("falta um
+      finding de completude, mesmo padrão dos demais, ~3 linhas") estava errada. Investigado em
+      TASK-0406 antes de implementar: `human_handoff_rules` **não tem nenhum campo editável no
+      frontend** (não está em `VISUAL_KNOWLEDGE_BASE_DOCUMENT_TYPES`,
+      `src/lib/knowledgeBaseVisualDocuments.ts:9-16`) nem validação de conteúdo no backend
+      (`server/services/knowledgeBaseStore.ts:572-574` trata esse tipo com um `case` vazio) —
+      é sempre `data: {}`, **para todos os tenants**, não uma lacuna específica do Dr. Daniel.
+      `src/components/KnowledgeBaseDocumentation.tsx:108-111` já documenta isso como reservado
+      pra versão futura. Um finding de "vazio" nesse campo dispararia sempre, pra 100% dos
+      tenants, sem nada que o operador possa preencher pra resolver — ruído, não sinal. Item
+      real em aberto: decidir **se e quando** vale a pena desenhar campos estruturados de
+      encaminhamento humano (o que também tornaria o card "Encaminhamento humano" da navegação
+      da KB, hoje sem destino real, finalmente apontar pra algo) — não uma correção de bug.
 
 ## 3. Custo e escala por tenant
 
