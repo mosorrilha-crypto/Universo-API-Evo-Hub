@@ -2599,6 +2599,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       ai: getAi?.() ?? null,
       metaAccessToken,
       metaPhoneNumberId,
+      evolutionApiUrl,
+      evolutionApiKey,
+      evolutionInstanceName,
       tenantName: tenant?.name || 'nosso time',
     });
     res.json({ escalation, outcome });
@@ -2656,6 +2659,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       ai: getAi?.() ?? null,
       metaAccessToken,
       metaPhoneNumberId,
+      evolutionApiUrl,
+      evolutionApiKey,
+      evolutionInstanceName,
       tenantName: tenant?.name || 'nosso time',
     });
     res.json({ appointment, escalation, outcome, calendarReleased });

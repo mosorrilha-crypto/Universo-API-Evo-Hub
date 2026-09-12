@@ -11,6 +11,11 @@
  * (America/Asuncion). Sem `ai`/credenciais nos deps (todos os testes
  * antigos acima, que chamam checkPendingFollowUps() sem argumento), o
  * comportamento continua idêntico a antes: escala direto.
+ *
+ * ★ 12/09/2026 (TASK-0400) — a janela de 24h só se aplica de verdade pro
+ * canal Meta (ver describe "canal Evolution" no fim deste arquivo); antes
+ * dessa correção, o canal Evolution (usado pelos tenants reais hoje) tinha
+ * o mesmo bloqueio incorretamente.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { initDb } from '../db';
@@ -50,6 +55,7 @@ vi.mock('../evolutionSend', () => ({
 import { getConversation, recordOutgoingMessage } from '../conversationStore';
 import { isAgentPaused } from '../agentStatus';
 import { sendWhatsAppTextMessage } from '../metaSend';
+import { sendEvolutionTextMessage } from '../evolutionSend';
 import { resolveCredentialsForTenant } from '../tenantResolver';
 import { checkPendingFollowUps } from '../pendingFollowUpJob';
 
@@ -278,5 +284,31 @@ describe('pendingFollowUpJob — preferência funnelAutoFollowUp (TASK-0399)', (
     const [pending] = await listPendingFollowUps(TENANT_A);
     const pushedMs = new Date(pending.dueAt).getTime() - new Date('2026-08-15T18:00:00Z').getTime();
     expect(pushedMs).toBe(5 * 60 * 60 * 1000);
+  });
+});
+
+/**
+ * TASK-0400 (12/09/2026, achado real: os tenants reais hoje, Daniel e
+ * Monique, usam Evolution, não Meta): antes desta correção, a checagem de
+ * "janela de 24h" rodava ANTES de saber o canal do tenant — um tenant
+ * Evolution com o cliente calado há mais de 24h escalava sem necessidade,
+ * mesmo podendo responder texto livre a qualquer momento nesse canal (a
+ * janela de 24h é uma regra específica da Meta Cloud API).
+ */
+describe('pendingFollowUpJob — canal Evolution não tem janela de 24h (TASK-0400)', () => {
+  it('cliente calado há mais de 24h no canal Evolution: ainda assim tenta o reengajamento automático, não escala direto', async () => {
+    (resolveCredentialsForTenant as any).mockResolvedValueOnce({
+      provider: 'evolution', evolutionInstanceName: 'inst-daniel', evolutionApiUrl: 'https://evo.example.com', evolutionApiKey: 'evo-key',
+    });
+    (getConversation as any).mockResolvedValue({ messages: [{ sender: 'lead', text: 'oi', timestamp: '2026-08-10T12:00:00Z' }] }); // > 24h antes do tick abaixo
+    const ai = fakeAi();
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T17:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, evolutionApiUrl: 'shared', evolutionApiKey: 'shared', evolutionInstanceName: 'shared' });
+
+    expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendEvolutionTextMessage).toHaveBeenCalledWith('inst-daniel', 'https://evo.example.com', 'evo-key', '595981111111', expect.any(String));
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(await listEscalations(TENANT_A)).toHaveLength(0); // não escalou — tentou reengajar
   });
 });

@@ -196,9 +196,10 @@ export function CustomerNotificationSettingsPanel() {
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 space-y-3">
         <h2 className="text-sm font-bold text-white">Retomada de conversa parada</h2>
-        <p className="text-[11px] text-slate-400"><span className="font-bold">Exemplo:</span> um cliente escreveu, ninguém respondeu na hora, e quando um atendente finalmente orienta a IA já se passou mais de 24h desde a última mensagem dele. Regra do próprio WhatsApp: depois de 24h, a plataforma não pode mais escrever livremente pro cliente — só pode mandar um convite-modelo, já pré-aprovado, pedindo pra ele responder. É esse convite que este botão liga/desliga.</p>
+        <p className="text-[11px] text-slate-400"><span className="font-bold">Exemplo:</span> um cliente escreveu, ninguém respondeu na hora, e quando um atendente finalmente orienta a IA já se passou mais de 24h desde a última mensagem dele.</p>
+        <p className="text-[11px] text-slate-400"><span className="font-bold">Isso só se aplica se seu WhatsApp usa a API oficial da Meta:</span> nesse caso, depois de 24h a plataforma não pode mais escrever livremente pro cliente — só pode mandar um convite-modelo, já pré-aprovado, pedindo pra ele responder. É esse convite que este botão liga/desliga. <span className="font-bold">Se o seu WhatsApp está conectado por QR Code (Evolution)</span>, essa regra não existe — a resposta guiada pelo atendente sai na hora, sempre, sem depender deste botão.</p>
         <label className="flex items-start justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3 cursor-pointer hover:border-slate-700">
-          <span className="text-xs font-semibold text-slate-200">Mandar esse convite automático</span>
+          <span className="text-xs font-semibold text-slate-200">Mandar esse convite automático (só no canal Meta)</span>
           <input
             type="checkbox"
             checked={prefs.abandonedConversationReactivation.enabled}
@@ -208,8 +209,8 @@ export function CustomerNotificationSettingsPanel() {
         </label>
         <p className="text-[10px] text-slate-500">
           {prefs.abandonedConversationReactivation.enabled
-            ? 'Com isso ligado, o cliente recebe o convite assim que o atendente orienta a IA fora da janela de 24h.'
-            : 'Desligado, mas fica tranquilo: a orientação do atendente NUNCA se perde. Ela fica guardada e é usada automaticamente assim que o cliente escrever de novo por conta própria — só não sai esse convite extra enquanto ele não escrever.'}
+            ? 'Com isso ligado (canal Meta), o cliente recebe o convite assim que o atendente orienta a IA fora da janela de 24h.'
+            : 'Desligado (canal Meta), mas fica tranquilo: a orientação do atendente NUNCA se perde. Ela fica guardada e é usada automaticamente assim que o cliente escrever de novo por conta própria — só não sai esse convite extra enquanto ele não escrever.'}
         </p>
       </div>
 
