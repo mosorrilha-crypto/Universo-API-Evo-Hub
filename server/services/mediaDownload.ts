@@ -17,6 +17,35 @@ export interface DownloadedAudio {
 // transcrição de áudio de todo mundo, não só do tenant afetado.
 const MEDIA_DOWNLOAD_TIMEOUT_MS = 20_000;
 
+// TASK-0398 (achado real em produção, 12/09/2026: imagem de lead chegando
+// na conversa mas com "Imagem indisponível (HTTP 404)" no painel, apesar da
+// mensagem em si ter sido recebida normalmente). O download roda em
+// paralelo ao processamento do webhook, logo depois do evento chegar — a
+// própria instância (Evolution) ou a Meta às vezes ainda não terminaram de
+// disponibilizar a mídia no instante exato da primeira tentativa. Como o
+// download já é fire-and-forget (nunca bloqueia a mensagem em si) e a falha
+// já fica visível pro operador na conversa (botão "Tentar novamente" da
+// TASK-0392), não há necessidade de log durável aqui — só de tentar de novo
+// automaticamente antes de desistir. Mesmo padrão de `withGeminiRetry`
+// (server/gemini.ts): poucas tentativas, backoff curto.
+const MEDIA_DOWNLOAD_RETRY_BACKOFF_MS = [1_000, 3_000];
+
+export async function withMediaDownloadRetry<T>(download: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= MEDIA_DOWNLOAD_RETRY_BACKOFF_MS.length; attempt++) {
+    try {
+      return await download();
+    } catch (err) {
+      lastErr = err;
+      const backoffMs = MEDIA_DOWNLOAD_RETRY_BACKOFF_MS[attempt];
+      if (backoffMs === undefined) break;
+      console.warn(`⚠️  [Download de mídia] Falhou (tentativa ${attempt + 1}/${MEDIA_DOWNLOAD_RETRY_BACKOFF_MS.length + 1}), tentando de novo em ${backoffMs}ms:`, (err as Error)?.message || err);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Meta Cloud API: primeiro resolve a URL temporária e assinada da mídia
  * (GET /{media-id}), depois baixa o binário dessa URL com o mesmo token.

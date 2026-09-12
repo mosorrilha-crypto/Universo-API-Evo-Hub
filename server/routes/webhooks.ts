@@ -20,7 +20,7 @@ import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProf
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, bookingConfirmationEscalationSourceKey } from '../services/escalationStore';
-import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
+import { downloadMetaMedia, downloadEvolutionMedia, withMediaDownloadRetry } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { consumePendingEcho } from '../services/outboundEchoTracker';
 import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
@@ -552,11 +552,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
                 const placeholderText = msg.type === 'audio' ? '🎤 Áudio enviado' : '📷 Imagem enviada';
                 await recordOutgoingMessage(tenantId, msg.from, { type: msg.type, text: placeholderText, timestamp: nowLabel }, 'operator', undefined, undefined, msg.messageId);
                 const isAudio = msg.type === 'audio';
-                downloadEvolutionMedia(
-                  { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
-                  resolvedTenant.evolutionInstanceName,
-                  resolvedTenant.evolutionApiUrl,
-                  resolvedTenant.evolutionApiKey
+                withMediaDownloadRetry(() =>
+                  downloadEvolutionMedia(
+                    { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
+                    resolvedTenant.evolutionInstanceName,
+                    resolvedTenant.evolutionApiUrl,
+                    resolvedTenant.evolutionApiKey
+                  )
                 )
                   .then(async (downloaded) => {
                     await saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType);
@@ -645,14 +647,17 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // continua salva pro painel exibir, igual antes) e ainda dá pra
           // reusar os mesmos bytes pra análise de comprovante sem duplicar o
           // download.
-          const downloadPromise = msg.metaImage
-            ? downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
+          const metaImage = msg.metaImage;
+          const downloadPromise = metaImage
+            ? withMediaDownloadRetry(() => downloadMetaMedia(metaImage.mediaId, resolvedTenant.metaAccessToken))
             : msg.evolutionImage
-            ? downloadEvolutionMedia(
-                { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
-                resolvedTenant.evolutionInstanceName,
-                resolvedTenant.evolutionApiUrl,
-                resolvedTenant.evolutionApiKey
+            ? withMediaDownloadRetry(() =>
+                downloadEvolutionMedia(
+                  { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
+                  resolvedTenant.evolutionInstanceName,
+                  resolvedTenant.evolutionApiUrl,
+                  resolvedTenant.evolutionApiKey
+                )
               )
             : null;
           if (downloadPromise) {
