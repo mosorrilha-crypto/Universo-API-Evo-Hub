@@ -262,10 +262,21 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       .eq('tenant_id', tenantOf(req))
       .eq('id', req.params.messageId)
       .maybeSingle();
-    if (!message) return res.status(404).json({ error: 'Imagem não encontrada.' });
+    // TASK-0403 (achado real: imagem confirmada salva no R2 — abria normal
+    // no desktop — continuava "indisponível" no celular mesmo minutos
+    // depois e mesmo com o auto-retry da TASK-0401 rodando): esta rota
+    // nunca dizia explicitamente que um 404 não deve ser guardado em cache.
+    // Sem um `Cache-Control` no caminho de erro, um proxy transparente de
+    // operadora de celular (comum em redes móveis da região, mais agressivo
+    // que o proxy de qualquer rede wi-fi/desktop) pode reter esse 404 e
+    // devolvê-lo de novo pras tentativas seguintes com a MESMA URL, mesmo
+    // depois da mídia já estar disponível de verdade no servidor — nenhuma
+    // tentativa nova do cliente chega a bater no servidor de fato. Marca os
+    // dois casos de 404 como nunca-cacheáveis antes de responder.
+    if (!message) { res.setHeader('Cache-Control', 'no-store'); return res.status(404).json({ error: 'Imagem não encontrada.' }); }
 
     const media = await getMediaImage(supabaseUrl, supabaseKey, req.params.messageId);
-    if (!media) return res.status(404).json({ error: 'Imagem não encontrada.' });
+    if (!media) { res.setHeader('Cache-Control', 'no-store'); return res.status(404).json({ error: 'Imagem não encontrada.' }); }
     res.setHeader('Content-Type', media.contentType);
     // Imagens e comprovantes são gravados sob um messageId estável. Cache
     // privado reduz reaberturas repetidas sem tornar o comprovante público.
