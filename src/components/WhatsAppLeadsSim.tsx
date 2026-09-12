@@ -284,11 +284,33 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
   const [failReason, setFailReason] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
 
+  // TASK-0401 (achado real: imagens de lead confirmadas salvas no R2 — no
+  // desktop abriam normalmente — mas continuavam "indisponíveis" no celular
+  // mesmo depois de clicar "Tentar novamente"): a mensagem aparece na
+  // conversa quase instantaneamente (via SSE), enquanto o download real
+  // (buscar da Evolution/Meta + subir pro R2, TASK-0398) roda em paralelo e
+  // pode levar mais alguns segundos — às vezes mais do que o operador espera
+  // antes de tentar de novo manualmente uma única vez. `retryToken` também
+  // dobra de auto-retry aqui: enquanto ele estiver dentro do tamanho de
+  // `AUTO_RETRY_DELAYS_MS`, uma falha reagenda a tentativa sozinha (mostrando
+  // só "Carregando imagem...", sem expor o estado de falha); só depois de
+  // esgotar essas tentativas automáticas (~29s no total) é que aparece o
+  // botão manual — que ainda existe pra qualquer atraso maior que isso.
+  const AUTO_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000];
+
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
+    let autoRetryTimer: ReturnType<typeof setTimeout> | undefined;
     setFailed(false);
     setFailReason(null);
+    const scheduleRetryOrGiveUp = () => {
+      if (retryToken < AUTO_RETRY_DELAYS_MS.length) {
+        autoRetryTimer = setTimeout(() => { if (!cancelled) setRetryToken((t) => t + 1); }, AUTO_RETRY_DELAYS_MS[retryToken]);
+      } else {
+        setFailed(true);
+      }
+    };
     apiFetch(`/api/media/${encodeURIComponent(messageId)}`)
       .then((r) => {
         if (r.ok) return r.blob();
@@ -297,16 +319,16 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
       })
       .then((blob) => {
         if (cancelled) return;
-        if (!blob) { setFailed(true); return; }
+        if (!blob) { scheduleRetryOrGiveUp(); return; }
         objectUrl = URL.createObjectURL(blob);
         setUrl(objectUrl);
       })
       .catch((err) => {
         if (cancelled) return;
         setFailReason(err instanceof Error ? err.message : String(err));
-        setFailed(true);
+        scheduleRetryOrGiveUp();
       });
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); if (autoRetryTimer) clearTimeout(autoRetryTimer); };
   }, [messageId, retryToken]);
 
   if (failed) {
