@@ -1238,7 +1238,7 @@ async function classifyAgendamentoConsultaViaGroq(
   existing: TrackedAppointment | null,
   durationsList: string
 ): Promise<AgendamentoConsultaClassification | undefined> {
-  const prompt = `Classifique a mensagem de um cliente de um negócio de estética/micropigmentação numa destas categorias, SEM decidir nada além da classificação:
+  const prompt = `Classifique a mensagem de um cliente deste negócio numa destas categorias, SEM decidir nada além da classificação:
 
 - "consulta_semana": o cliente só quer saber quais horários/dias estão livres essa semana (ex: "que horários vocês têm?", "tem vaga essa semana?"), sem pedir pra criar/remarcar/cancelar nada agora.
 - "consulta_horario_especifico": o cliente pergunta se UM horário específico (dia+hora) está livre, só pra saber, sem confirmar que quer reservar agora.
@@ -1683,7 +1683,7 @@ async function runAgendamentoTools(
     }
   }
 
-  const prompt = `Você controla a agenda real de um negócio de estética/micropigmentação através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
+  const prompt = `Você controla a agenda real deste negócio através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
 
 Data e hora ATUAL (fuso ${BUSINESS_TIMEZONE}): ${naive} (${weekday}).
 ${businessHoursStatus}
