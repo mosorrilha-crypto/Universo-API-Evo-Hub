@@ -2604,6 +2604,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             time: ev.time || '12:00',
             title: ev.title || 'Consulta',
             status: 'scheduled' as const,
+            eventId: ev.id,
+            startIso: ev.startIso,
+            endIso: ev.endIso,
           }))
       : [];
     const paymentStartMs = paymentAppointment ? new Date(paymentAppointment.startIso).getTime() : null;
@@ -5117,25 +5120,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       único controle de análise sob demanda evita gasto de
                       token duplicado por engano. */}
 
-                  {/* Cadastrar agendamento manual (issue #182, agendamento
-                      fechado fora da IA — WhatsApp pessoal, telefone,
-                      presencial). Morava numa barra sempre visível acima da
-                      lista de conversas (achado real: ficava redundante ao
-                      lado do widget de Agenda) — junta com as outras ações
-                      da conversa aberta aqui no cabeçalho. Só aparece quando
-                      este contato ainda não tem nenhum agendamento
-                      rastreado, senão a checagem do backend recusaria com
-                      409 (o operador já vê o card do agendamento ativo). */}
-                  {(selectedLead as any)?.isReal && !paymentAppointment && (
-                    <button
-                      onClick={() => setIsManualAppointmentModalOpen(true)}
-                      className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
-                      title="Cadastrar agendamento manual (combinado fora do WhatsApp)"
-                    >
-                      <CalendarPlus className="w-[18px] h-[18px]" />
-                    </button>
-                  )}
-
                   {/* Gerar Contrato (pedido real, 15/08/2026) — modelo fixo
                       da Clic Piscinas, ver CLIC_PISCINAS_TENANT_ID acima. */}
                   {(selectedLead as any)?.isReal && activeTenant?.id === CLIC_PISCINAS_TENANT_ID && (
@@ -5144,51 +5128,35 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Gerar contrato"
                     >
-                      <FileText className="w-[18px] h-[18px]" />
+                      <FileText className="w-5 h-5" />
                     </button>
                   )}
 
-                  {/* Ficha IA — só no mobile, onde a coluna 3 fica hidden (ver
-                      PR #70). Único acesso à Ficha IA no mobile desde que a
-                      TASK-0167 removeu o item redundante da barra inferior
-                      (só fazia sentido dentro de uma conversa já aberta,
-                      nunca na lista). Ícone trocado de `Info` genérico pra
-                      `IdCard` — mesmo critério da TASK-0164 (representa uma
-                      ficha de verdade). */}
+                  {/* Ficha do Cliente — só no mobile, onde a coluna 3 fica
+                      hidden (ver PR #70). Único acesso à ficha no mobile
+                      desde que a TASK-0167 removeu o item redundante da
+                      barra inferior (só fazia sentido dentro de uma conversa
+                      já aberta, nunca na lista). Ícone trocado de `Info`
+                      genérico pra `IdCard` — mesmo critério da TASK-0164
+                      (representa uma ficha de verdade).
+
+                      TASK-0404 (pedido direto, print anotado): antes este
+                      botão convivia com DOIS ícones de calendário idênticos
+                      fazendo coisas diferentes (cadastrar agendamento manual
+                      e abrir a Agenda completa) — removidos daqui (o
+                      cadastro manual mudou pra dentro do bloco Agendamentos
+                      da própria Ficha do Contato; a Agenda completa já tem
+                      acesso próprio na barra inferior). Este vira o ÚNICO
+                      botão do cabeçalho, sempre abrindo direto na aba "Ficha
+                      do Contato" (nunca mais "Análise IA" por padrão) —
+                      quem quiser a Ficha IA troca de aba lá dentro. */}
                   <button
-                    onClick={() => setMobileAnalysisOpen(true)}
+                    onClick={() => { setRightPanelTab('profile'); setMobileAnalysisOpen(true); }}
                     className="atendimento-analysis-trigger lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
-                    title="Ver Ficha IA"
+                    title="Ficha do Cliente"
                   >
-                    <IdCard className="w-[18px] h-[18px]" />
+                    <IdCard className="w-6 h-6" />
                   </button>
-
-                  {/* TASK-0269/TASK-0273 (pedido direto, print da conversa
-                      da Gisse: "preciso ajustar o agendamento dela mas não
-                      tenho a agenda disponível na conversa aberta coloca um
-                      icon ao lado do botão da ia") — atalho pra Agenda
-                      completa. Achado real (TASK-0273, mesmo print do
-                      "círculo vermelho" apontando pro espaço vazio no
-                      cabeçalho desktop): a suposição original de que "o
-                      desktop já tem acesso via CalendarPlus" estava errada
-                      — aquele botão (logo abaixo) só aparece quando o
-                      contato AINDA NÃO tem agendamento (`!paymentAppointment`),
-                      exatamente o oposto do caso em que o operador mais
-                      precisa gerenciar/reagendar (contato JÁ agendado). Por
-                      isso ficou `lg:hidden` (só mobile) até aqui — agora
-                      visível em qualquer largura, ao lado do IdCard, mesmo
-                      grupo de ícones exclusivos da conversa aberta. Só
-                      aparece se App.tsx passar a prop (usuário logado tem
-                      permissão pra ver a Agenda). */}
-                  {onGoToAgenda && (
-                    <button
-                      onClick={onGoToAgenda}
-                      className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
-                      title="Abrir a Agenda completa"
-                    >
-                      <CalendarPlus className="w-[18px] h-[18px]" />
-                    </button>
-                  )}
 
                   {/* Transferir pro WhatsApp pessoal do operador — abre um
                       link wa.me com o telefone deste lead numa aba nova, pro
@@ -5201,24 +5169,26 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Transferir pro WhatsApp pessoal do operador"
                   >
-                    <Phone className="w-[18px] h-[18px]" />
+                    <Phone className="w-5 h-5" />
                   </button>
 
                   {/* TASK-0212 (pedido direto, 01/09/2026, print comparando
-                      com o WhatsApp Web): a Ficha IA só faz sentido com uma
-                      conversa aberta, mas o botão "Abrir ficha" vivia numa
-                      barra de ferramentas genérica, sempre visível mesmo
-                      sem nenhum lead selecionado. Mudou pra cá, junto dos
-                      outros ícones que já são exclusivos da conversa aberta
-                      — mesma posição no mobile (IdCard) e no desktop agora,
-                      em vez de dois lugares diferentes pra abrir a mesma
-                      coisa. */}
+                      com o WhatsApp Web): o botão "Abrir ficha" vivia numa
+                      barra de ferramentas genérica, sempre visível mesmo sem
+                      nenhum lead selecionado. Mudou pra cá, junto dos outros
+                      ícones exclusivos da conversa aberta.
+
+                      TASK-0404 (pedido direto): mesma simplificação do botão
+                      mobile acima — sempre abre (ou fecha) a coluna direta
+                      na aba "Ficha do Contato", nunca mais em "Análise IA"
+                      por padrão. Ícone maior (era w-[18px], mesmo pedido de
+                      "os ícones estão muito pequenos"). */}
                   <button
-                    onClick={() => setShowRightPanel(!showRightPanel)}
+                    onClick={() => { if (!showRightPanel) setRightPanelTab('profile'); setShowRightPanel(!showRightPanel); }}
                     className={`hidden lg:flex p-2 rounded-lg transition-colors cursor-pointer ${showRightPanel ? 'text-emerald-400 bg-[#2a3942]' : 'text-slate-300 hover:bg-[#2a3942]'}`}
-                    title={showRightPanel ? 'Fechar Ficha IA' : 'Abrir Ficha IA'}
+                    title={showRightPanel ? 'Fechar Ficha do Cliente' : 'Ficha do Cliente'}
                   >
-                    {showRightPanel ? <PanelRightClose className="w-[18px] h-[18px]" /> : <PanelRightOpen className="w-[18px] h-[18px]" />}
+                    {showRightPanel ? <PanelRightClose className="w-5 h-5" /> : <PanelRightOpen className="w-5 h-5" />}
                   </button>
 
                   {/* TASK-0259 (pedido direto): a barra de etiquetas sempre
@@ -5241,7 +5211,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         className={`${isMobileVariant ? 'lg:hidden' : 'hidden lg:flex'} relative p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer`}
                         title={isSpanish ? 'Etiquetas' : 'Etiquetas'}
                       >
-                        <Tag className="w-[18px] h-[18px]" />
+                        <Tag className="w-5 h-5" />
                         {(selectedLead.conversationLabels || []).length > 0 && (
                           <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400" />
                         )}
@@ -5370,7 +5340,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title={t('moreOptions')}
                     >
-                      <MoreVertical className="w-[18px] h-[18px]" />
+                      <MoreVertical className="w-5 h-5" />
                     </button>
                     {isHeaderMenuOpen && (() => {
                       const isAiBlocked = !!(selectedLead as any).aiBlockedAt;
@@ -6733,6 +6703,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onToggleAgentStatus={() => selectedLead && handleUpdateConversationState(selectedLead.id, { aiBlocked: !selectedLead.aiBlockedAt })}
                 onClose={() => setShowRightPanel(false)}
                 onResyncAppointment={handleResyncAppointment}
+                onOpenManualAppointment={(selectedLead as any)?.isReal ? () => setIsManualAppointmentModalOpen(true) : undefined}
+                onRescheduleAppointment={handleRescheduleEvent}
                 journeyEvents={visibleContactJourney}
                 isJourneyLoading={isContactJourneyLoading}
                 onSaveMemory={handleSaveContactMemory}
@@ -6870,6 +6842,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onToggleAgentStatus={() => handleUpdateConversationState(selectedLead.id, { aiBlocked: !(selectedLead as any).aiBlockedAt })}
                 onClose={() => setMobileAnalysisOpen(false)}
                 onResyncAppointment={handleResyncAppointment}
+                onOpenManualAppointment={(selectedLead as any)?.isReal ? () => { setMobileAnalysisOpen(false); setIsManualAppointmentModalOpen(true); } : undefined}
+                onRescheduleAppointment={handleRescheduleEvent}
                 journeyEvents={visibleContactJourney}
                 isJourneyLoading={isContactJourneyLoading}
                 onSaveMemory={handleSaveContactMemory}
