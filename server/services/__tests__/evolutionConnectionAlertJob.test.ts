@@ -30,9 +30,9 @@ function minutesAgo(min: number): string {
 
 const fetchMock = vi.fn();
 
-async function seedTenant(overrides: { adminAlertPhone?: string } = {}) {
+async function seedTenant(overrides: { adminAlertPhone?: string; alertPreferences?: Record<string, boolean> } = {}) {
   const db = getDb();
-  await db.from('tenants').insert({ id: TENANT_A, name: 'Monique', admin_alert_phone: overrides.adminAlertPhone });
+  await db.from('tenants').insert({ id: TENANT_A, name: 'Monique', admin_alert_phone: overrides.adminAlertPhone, alert_preferences: overrides.alertPreferences });
 }
 
 async function seedCredential(overrides: Partial<{ lastState: string | null; disconnectedSince: string | null; alertSentAt: string | null }> = {}) {
@@ -121,6 +121,17 @@ describe('evolutionConnectionAlertJob', () => {
     expect(data?.disconnected_since).toBeNull();
     expect(data?.disconnected_alert_sent_at).toBeNull();
     expect(data?.last_connection_state).toBe('open');
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
+  });
+
+  it('tenant que desativou este alerta em Configurações (alert_preferences.evolution_disconnected = false) só manda push', async () => {
+    await seedTenant({ adminAlertPhone: '5567998038466', alertPreferences: { evolution_disconnected: false } });
+    await seedCredential({ lastState: 'close', disconnectedSince: minutesAgo(10) });
+    mockConnectionState('close');
+
+    await checkEvolutionConnectionsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
+
+    expect(sendPushToTenant).toHaveBeenCalledTimes(1);
     expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
   });
 

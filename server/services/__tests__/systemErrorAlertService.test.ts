@@ -62,6 +62,20 @@ describe('notifySystemError', () => {
     expect((sendWhatsAppTemplateMessage.mock.calls[0] as any[])[2]).toBe('595990001111');
   });
 
+  it('tenant que desativou este alerta em Configurações (alert_preferences.system_error = false) não recebe WhatsApp', async () => {
+    initDb(createFakeSupabase({
+      tenants: [
+        { id: TENANT_A, name: 'Monique', admin_alert_phone: '595990000000', alert_preferences: { system_error: false } },
+        { id: TENANT_B, name: 'Bella Vita', admin_alert_phone: '595990001111' },
+      ],
+    }));
+
+    await notifySystemError({ source: 'uncaughtException', message: 'erro qualquer' });
+
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    expect((sendWhatsAppTemplateMessage.mock.calls[0] as any[])[2]).toBe('595990001111');
+  });
+
   it('cooldown: uma segunda chamada logo em seguida não dispara alerta de novo', async () => {
     initDb(createFakeSupabase({ tenants: [{ id: TENANT_A, name: 'Monique', admin_alert_phone: '595990000000' }] }));
 

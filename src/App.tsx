@@ -39,6 +39,7 @@ const CrmWorkspace = lazy(() => import('./components/CrmWorkspace').then((m) => 
 const EscalationsPanel = lazy(() => import('./components/EscalationsPanel').then((m) => ({ default: m.EscalationsPanel })));
 const SystemLogsPanel = lazy(() => import('./components/SystemLogsPanel').then((m) => ({ default: m.SystemLogsPanel })));
 const BroadcastAdminPanel = lazy(() => import('./components/BroadcastAdminPanel').then((m) => ({ default: m.BroadcastAdminPanel })));
+const AlertSettingsPanel = lazy(() => import('./components/AlertSettingsPanel').then((m) => ({ default: m.AlertSettingsPanel })));
 const AgendaWorkspace = lazy(() => import('./components/AgendaWorkspace').then((m) => ({ default: m.AgendaWorkspace })));
 const FinancialWorkspace = lazy(() => import('./components/FinancialWorkspace').then((m) => ({ default: m.FinancialWorkspace })));
 const AdAttributionCAPI = lazy(() => import('./components/AdAttributionCAPI').then((m) => ({ default: m.AdAttributionCAPI })));
@@ -283,6 +284,11 @@ export const App: React.FC = () => {
   const canSeeSystemLogs = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.systemLogs);
   // Mesmo padrão de canSeeSystemLogs: TASK-0252, módulo opt-in por tenant.
   const canSeeBroadcast = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.broadcast);
+  // Notificações/alertas (número que recebe agente pausado/conexão caiu/erro
+  // de sistema via WhatsApp) — configuração operacional básica, não um
+  // recurso premium opt-in por tenant (diferente de growth/quality/etc.),
+  // então só depende do papel, igual business-hours.
+  const canSeeAlerts = canSeeAdminTools;
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
   // mais permissão pra ver a aba em que estava — cobre re-login com outro
@@ -314,10 +320,11 @@ export const App: React.FC = () => {
       (activeTab === 'catalog' && !canSeeCatalog) ||
       (activeTab === 'quality' && !canSeeQuality) ||
       (activeTab === 'system_logs' && !canSeeSystemLogs) ||
-      (activeTab === 'broadcast' && !canSeeBroadcast);
+      (activeTab === 'broadcast' && !canSeeBroadcast) ||
+      (activeTab === 'alerts' && !canSeeAlerts);
     if (blocked) handleSetActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, canSeeBroadcast, currentUser?.role, tenantCapabilitiesState.tenantId, activeTenant.id]);
+  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, canSeeBroadcast, canSeeAlerts, currentUser?.role, tenantCapabilitiesState.tenantId, activeTenant.id]);
 
   // A decisão vem do contrato self-scoped do tenant e falha fechada. O estado
   // carrega o tenant de origem, evitando que uma troca de empresa mostre por
@@ -1818,6 +1825,7 @@ export const App: React.FC = () => {
             canSeeQuality={canSeeQuality}
             canSeeSystemLogs={canSeeSystemLogs}
             canSeeBroadcast={canSeeBroadcast}
+            canSeeAlerts={canSeeAlerts}
             canSeeSaasMaster={canSeeSaasMaster}
             tenants={tenants}
             onSelectTenant={handleSelectTenant}
@@ -2009,6 +2017,14 @@ export const App: React.FC = () => {
           <OperationsModuleFrame title="Disparo em Massa" eyebrow="Marketing via WhatsApp" description="Campanhas de disparo com aquecimento guiado, deduplicação e integração com o Atendimento." accent="blue">
             <Suspense fallback={<TabLoadingFallback />}>
               <BroadcastAdminPanel tenantName={activeTenant?.name} />
+            </Suspense>
+          </OperationsModuleFrame>
+        )}
+
+        {activeTab === 'alerts' && canSeeAlerts && (
+          <OperationsModuleFrame title="Notificações" eyebrow="Alertas operacionais" description="Escolha o número que recebe alertas de WhatsApp da própria plataforma (agente pausado, conexão caiu, erro de sistema) e quais deles chegar." accent="blue" compact>
+            <Suspense fallback={<TabLoadingFallback />}>
+              <AlertSettingsPanel />
             </Suspense>
           </OperationsModuleFrame>
         )}

@@ -27,9 +27,9 @@ function minutesAgo(min: number): string {
   return new Date(NOW.getTime() - min * 60 * 1000).toISOString();
 }
 
-async function seedTenant(overrides: { adminAlertPhone?: string } = {}) {
+async function seedTenant(overrides: { adminAlertPhone?: string; alertPreferences?: Record<string, boolean> } = {}) {
   const db = getDb();
-  await db.from('tenants').insert({ id: TENANT_A, name: 'Monique', admin_alert_phone: overrides.adminAlertPhone });
+  await db.from('tenants').insert({ id: TENANT_A, name: 'Monique', admin_alert_phone: overrides.adminAlertPhone, alert_preferences: overrides.alertPreferences });
 }
 
 async function seedPausedSince(minutesAgoValue: number) {
@@ -127,6 +127,27 @@ describe('agentPausedAlertJob', () => {
     await seedConversationWithLastMessage('lead', 5);
 
     await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid', pauseThresholdMs: 5 * 60 * 1000 });
+
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('tenant que desativou este alerta em Configurações (alert_preferences.agent_paused = false) não manda WhatsApp', async () => {
+    await seedTenant({ adminAlertPhone: '5567998038466', alertPreferences: { agent_paused: false } });
+    await seedPausedSince(35);
+    await seedConversationWithLastMessage('lead', 20);
+
+    await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
+
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
+    expect(sendEvolutionTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('tenant com alert_preferences configurado mas sem a chave agent_paused ainda alerta (default true)', async () => {
+    await seedTenant({ adminAlertPhone: '5567998038466', alertPreferences: { evolution_disconnected: false } });
+    await seedPausedSince(35);
+    await seedConversationWithLastMessage('lead', 20);
+
+    await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
 
     expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
   });

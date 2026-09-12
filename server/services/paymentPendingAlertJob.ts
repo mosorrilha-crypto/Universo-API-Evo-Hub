@@ -8,10 +8,13 @@
  *
  * Nunca confirma/rejeita pagamento sozinho — só alerta, mesma cautela de
  * "quem decide é sempre um humano" já usada em preReservationFollowUpJob.ts.
- * Reusa logEscalation (escalationStore.ts), que já dispara o alerta push +
- * WhatsApp template pro admin_alert_phone do tenant automaticamente
- * (escalationAlertService.ts) — nenhum canal de alerta novo precisa ser
- * criado ou aprovado no Meta Business Manager pra isso funcionar.
+ * Reusa logEscalation (escalationStore.ts), que já dispara o alerta pro
+ * operador automaticamente (escalationAlertService.ts) — nenhum canal de
+ * alerta novo precisa ser criado. Correção (12/09/2026): este comentário
+ * dizia "push + WhatsApp template pro admin_alert_phone", desatualizado
+ * desde a TASK-0298 (05/09/2026) — escalationAlertService.ts hoje só manda
+ * push pro PWA do atendente, sem WhatsApp nenhum (removido de propósito,
+ * porque chegava misturado com as conversas reais do dono do tenant).
  *
  * Mesmo padrão de job periódico de preReservationFollowUpJob.ts (roda uma
  * vez + setInterval a cada 15min), iterando appointments com payment_status

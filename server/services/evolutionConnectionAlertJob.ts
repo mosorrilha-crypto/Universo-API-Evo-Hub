@@ -107,7 +107,7 @@ async function checkOneTenant(row: EvolutionCredentialRow, deps: EvolutionConnec
   if (row.disconnected_alert_sent_at && new Date(row.disconnected_alert_sent_at).getTime() >= disconnectedSinceMs) return; // já alertou por ESSE episódio
 
   const db = getDb();
-  const { data: tenant } = await db.from('tenants').select('name, admin_alert_phone').eq('id', row.tenant_id).maybeSingle();
+  const { data: tenant } = await db.from('tenants').select('name, admin_alert_phone, alert_preferences').eq('id', row.tenant_id).maybeSingle();
   const tenantName = tenant?.name || row.tenant_id;
   const disconnectedMinutes = Math.round((now - disconnectedSinceMs) / 60000);
 
@@ -119,8 +119,13 @@ async function checkOneTenant(row: EvolutionCredentialRow, deps: EvolutionConnec
   });
 
   const adminPhone = tenant?.admin_alert_phone;
-  if (!adminPhone) {
-    console.warn(`⚠️  [Alerta conexão WhatsApp] tenant=${row.tenant_id} sem admin_alert_phone configurado — sem alerta via WhatsApp (push, se configurado, ainda foi tentado acima).`);
+  const alertsDisabled = (tenant?.alert_preferences as Record<string, boolean> | null)?.evolution_disconnected === false;
+  if (!adminPhone || alertsDisabled) {
+    console.warn(
+      alertsDisabled
+        ? `🔕 [Alerta conexão WhatsApp] tenant=${row.tenant_id} desativou este alerta em Configurações — sem WhatsApp (push, se configurado, ainda foi tentado acima).`
+        : `⚠️  [Alerta conexão WhatsApp] tenant=${row.tenant_id} sem admin_alert_phone configurado — sem alerta via WhatsApp (push, se configurado, ainda foi tentado acima).`
+    );
     await updateCredentialRow(row.tenant_id, { last_connection_state: state, disconnected_alert_sent_at: new Date(now).toISOString() });
     return;
   }

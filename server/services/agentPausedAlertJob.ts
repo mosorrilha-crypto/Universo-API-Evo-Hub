@@ -132,7 +132,7 @@ async function alertForTenant(row: AgentStatusRow, deps: AgentPausedAlertJobDeps
   const db = getDb();
   const { data: tenant } = await db
     .from('tenants')
-    .select('name, admin_alert_phone')
+    .select('name, admin_alert_phone, alert_preferences')
     .eq('id', row.tenant_id)
     .maybeSingle();
 
@@ -149,10 +149,17 @@ async function alertForTenant(row: AgentStatusRow, deps: AgentPausedAlertJobDeps
     tag: `agent-paused-${row.tenant_id}`,
   });
 
-  // Canal 2: WhatsApp template pro admin_alert_phone (canal original).
+  // Canal 2: WhatsApp template pro admin_alert_phone (canal original) —
+  // condicionado à preferência do tenant (alert_preferences.agent_paused,
+  // migration 0087; ausente/null = default true, preserva o comportamento
+  // de antes da preferência existir).
   const adminPhone = tenant?.admin_alert_phone;
   if (!adminPhone) {
     console.warn(`⚠️  [Alerta agente pausado] tenant=${row.tenant_id} sem admin_alert_phone configurado — sem alerta via WhatsApp (push, se configurado, ainda foi tentado acima).`);
+    return;
+  }
+  if ((tenant?.alert_preferences as Record<string, boolean> | null)?.agent_paused === false) {
+    console.log(`🔕 [Alerta agente pausado] tenant=${row.tenant_id} desativou este alerta em Configurações — sem WhatsApp (push, se configurado, ainda foi tentado acima).`);
     return;
   }
 
