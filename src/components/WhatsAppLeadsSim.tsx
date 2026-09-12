@@ -6420,6 +6420,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <textarea
                       ref={composerTextareaRef}
                       rows={1}
+                      data-testid="message-composer"
                       placeholder={
                         senderRole === 'lead'
                           ? (isSpanish ? `Mensaje de ${selectedLead.name}...` : `Mensagem de ${selectedLead.name}...`)
