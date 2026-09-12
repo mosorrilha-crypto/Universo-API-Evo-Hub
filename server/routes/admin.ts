@@ -911,6 +911,60 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
     }
   }));
 
+  // TASK-0397 (pedido direto do dono do produto: "tem que ter esse botão se
+  // um tenant quiser desconectar"): até aqui só existiam "Reconectar/Gerar
+  // QR Code" (reconecta o MESMO número) e "Recriar instância do zero"
+  // (apaga e cria outra, sempre exige escanear QR de novo) — nenhuma opção
+  // pra só deslogar a sessão do WhatsApp sem perder o cadastro da instância.
+  // Achado real na mesma investigação: dois tenants (Monique e um tenant de
+  // teste do próprio dono do produto) tinham o MESMO número de celular
+  // pessoal conectado como dispositivo vinculado nos dois — toda mensagem
+  // desse número chegava duplicada (uma via cada instância), preenchendo os
+  // logs e competindo na deduplicação de webhook. Desconectar via logout
+  // (sem apagar) deixa o operador tirar um número de um tenant sem perder o
+  // histórico de configuração, podendo reconectar com um número diferente
+  // depois pelo fluxo de QR Code que já existe.
+  //
+  // `/instance/logout/:name` é o MESMO endpoint que "recriar" já chama como
+  // primeiro passo (best-effort, antes do delete) — aqui é o passo final,
+  // não um best-effort: se falhar de verdade (e não for só "já não existe"),
+  // o operador precisa saber, já que ele pediu essa ação deliberadamente.
+  router.post('/api/admin/tenants/:id/evolution-instance/disconnect', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = resolveEvolutionTenantId(req);
+    const { data: cred, error: credError } = await db()
+      .from('tenant_evolution_credentials')
+      .select('instance_name, api_url, api_key')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (credError) return res.status(500).json({ error: credError.message });
+    if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    cred.api_key = decryptSecret(cred.api_key);
+    assertValidHttpUrl(cred.api_url);
+
+    try {
+      const logoutRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/logout/${cred.instance_name}`, {
+        method: 'DELETE',
+        headers: { apikey: cred.api_key },
+        signal: AbortSignal.timeout(20000),
+      });
+      // 404 aqui significa que a instância já não existe/já está deslogada
+      // do lado da Evolution API — trata como sucesso (é exatamente o
+      // estado que o operador queria), não trava numa instância que pro
+      // nosso propósito já se foi (mesmo critério já usado em "recreate").
+      if (!logoutRes.ok && logoutRes.status !== 404) {
+        const data = await logoutRes.json().catch(() => ({}));
+        return res.status(502).json({ error: `Falha ao desconectar na Evolution API: HTTP ${logoutRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
+      }
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
+    }
+    // Não mexe manualmente em last_connection_state/disconnected_since — o
+    // job periódico (evolutionConnectionAlertJob.ts) já reconsulta o estado
+    // real na Evolution API a cada 5min e atualiza essas colunas sozinho,
+    // mesmo padrão que "recreate" (acima) já segue sem tocar nelas também.
+    res.json({ success: true });
+  }));
+
   // Recria a instância do zero (delete + create) — achado real em produção
   // (15/08/2026, Clic Piscinas): reconectar via QR Code (rota acima) NÃO
   // limpa o cache/estado interno do Baileys por contato (ex: mapeamento

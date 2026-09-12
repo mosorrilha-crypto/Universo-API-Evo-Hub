@@ -467,6 +467,91 @@ describe('POST /api/admin/tenants/:id/evolution-instance/recreate', () => {
   });
 });
 
+// TASK-0397 (pedido direto: "tem que ter esse botão se um tenant quiser
+// desconectar") — só desloga a sessão (logout), sem apagar/recriar a
+// instância, diferente de /recreate acima.
+describe('POST /api/admin/tenants/:id/evolution-instance/disconnect', () => {
+  it('desloga a instância com sucesso e não mexe no registro da credencial', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-atual' },
+    ];
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      calls.push(`${options?.method || 'GET'} ${urlStr}`);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`) {
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/disconnect`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    expect(calls).toEqual([`DELETE ${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`]);
+
+    // Credencial/instância continuam registradas — só a sessão foi encerrada.
+    const rows = supabase.__tables.tenant_evolution_credentials;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7' });
+  });
+
+  it('trata logout 404 (instância já deslogada/inexistente do lado da Evolution API) como sucesso', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-atual' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`) return { ok: false, status: 404, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/disconnect`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+  });
+
+  it('502 quando o logout falha de verdade (não é só 404)', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-atual' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`) return { ok: false, status: 500, json: async () => ({ error: 'boom' }) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/disconnect`, { method: 'POST' });
+    expect(res.status).toBe(502);
+  });
+
+  it('404 quando o tenant ainda não tem instância Evolution criada', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => (String(url).startsWith(baseUrl) ? realFetch(url, options) : { ok: true, json: async () => ({}) })) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/disconnect`, { method: 'POST' });
+    expect(res.status).toBe(404);
+  });
+
+  it('403 pra operator/manager — só admin+ consegue desconectar', async () => {
+    function fakeAuthenticateTokenAsOperator(req: any, _res: any, next: any) {
+      req.user = { id: 'op-comum', tenantId: TENANT_ID, role: 'operator' };
+      next();
+    }
+    global.fetch = vi.fn(async (url: any, options?: any) => (String(url).startsWith(baseUrl) ? realFetch(url, options) : { ok: true, json: async () => ({}) })) as any;
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsOperator));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/disconnect`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+});
+
 describe('GET /api/admin/tenants/:id/evolution-instance/status', () => {
   it('devolve connected=true quando o estado da instância é "open"', async () => {
     supabase.__tables.tenant_evolution_credentials = [
@@ -576,6 +661,23 @@ describe('escopo por tenant pra admin comum (não saas_admin)', () => {
 
     const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
     expect(res.status).toBe(403);
+  });
+
+  it('POST .../evolution-instance/disconnect com :id de OUTRO tenant na URL ainda assim desconecta o tenant do próprio JWT', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'minha-instancia', api_url: EVOLUTION_API_URL, api_key: 'minha-key' },
+      { tenant_id: OTHER_TENANT_ID, instance_name: 'instancia-de-outra-empresa', api_url: EVOLUTION_API_URL, api_key: 'outra-key' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      expect(urlStr).toBe(`${EVOLUTION_API_URL}/instance/logout/minha-instancia`);
+      return { ok: true, json: async () => ({}) } as any;
+    }) as any;
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${OTHER_TENANT_ID}/evolution-instance/disconnect`, { method: 'POST' });
+    expect(res.status).toBe(200);
   });
 });
 
