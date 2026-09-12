@@ -107,12 +107,13 @@ type AutomaticFollowUpResult = 'sent' | 'escalate' | 'wait';
  * Tenta reengajar automaticamente UMA vez. Devolve:
  * - 'sent': mandou a mensagem — o chamador NÃO escala agora (due_at já foi
  *   empurrado pra frente, só escala se o cliente continuar em silêncio).
- * - 'wait': só está fora da janela de 7h-19h agora — o chamador NÃO escala,
- *   deixa a pendência como está pro próximo tick dentro do horário (ainda
- *   dentro da janela de 24h da Meta).
- * - 'escalate': qualquer outro caso (sem IA/credencial, janela de 24h já
- *   fechada, cliente pausado/bloqueado, revisor de segurança bloqueou, ou
- *   falha de envio) — o chamador escala pro operador, exatamente como antes.
+ * - 'wait': só está fora da janela de horário configurada agora — o
+ *   chamador NÃO escala, deixa a pendência como está pro próximo tick
+ *   dentro do horário.
+ * - 'escalate': qualquer outro caso (sem IA/credencial, janela de 24h da
+ *   Meta já fechada — só se aplica pro canal Meta, ver TASK-0400 — cliente
+ *   pausado/bloqueado, revisor de segurança bloqueou, ou falha de envio) —
+ *   o chamador escala pro operador, exatamente como antes.
  */
 async function tryAutomaticFollowUp(
   tenantId: string,
@@ -132,8 +133,23 @@ async function tryAutomaticFollowUp(
   if (conversation?.aiBlockedAt) return 'escalate';
   if (conversation?.geoRestriction) return 'escalate';
 
-  const window = await getCustomerServiceWindowStatus(tenantId, p.phone);
-  if (!window.withinWindow) return 'escalate'; // fora da janela de 24h da Meta — texto livre não é permitido, cai pro escalonamento normal
+  // TASK-0400 (achado real: os tenants reais hoje, Daniel e Monique, usam
+  // Evolution, não Meta): a janela de 24h é uma regra específica da Meta
+  // Cloud API — resolve o canal PRIMEIRO e só aplica essa checagem quando
+  // o canal de fato é Meta, senão um tenant Evolution com o cliente calado
+  // há mais de 24h escalava sem necessidade, mesmo podendo responder texto
+  // livre a qualquer momento nesse canal.
+  const channel = await resolveCredentialsForTenant(
+    tenantId,
+    { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
+    { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
+  );
+  if (channel.provider === 'instagram') return 'escalate'; // Instagram não tem esse fluxo ainda
+
+  if (channel.provider === 'meta') {
+    const window = await getCustomerServiceWindowStatus(tenantId, p.phone);
+    if (!window.withinWindow) return 'escalate'; // fora da janela de 24h da Meta — texto livre não é permitido, cai pro escalonamento normal
+  }
 
   if (!isWithinAutoFollowUpHours(new Date(), followUpPrefs.businessHoursStart, followUpPrefs.businessHoursEnd)) return 'wait'; // fora da janela configurada — espera o próximo tick dentro da janela de 24h
 
@@ -155,19 +171,11 @@ async function tryAutomaticFollowUp(
     return 'escalate';
   }
 
-  const channel = await resolveCredentialsForTenant(
-    tenantId,
-    { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
-    { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
-  );
-
   try {
     if (channel.provider === 'evolution') {
       await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, p.phone, message);
-    } else if (channel.provider === 'meta') {
-      await sendWhatsAppTextMessage(channel.metaPhoneNumberId, channel.metaAccessToken, p.phone, message);
     } else {
-      return 'escalate'; // Instagram não tem esse fluxo ainda
+      await sendWhatsAppTextMessage(channel.metaPhoneNumberId, channel.metaAccessToken, p.phone, message);
     }
   } catch (error: any) {
     console.warn(`⚠️  [Reengajamento automático] tenant=${tenantId} falha ao enviar pra ${p.phone}: ${error?.message || error}`);

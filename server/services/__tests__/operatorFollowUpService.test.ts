@@ -22,14 +22,19 @@ vi.mock('../metaSend', () => ({
   sendWhatsAppTextMessage: vi.fn().mockResolvedValue(undefined),
   sendWhatsAppTemplateMessage: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('../evolutionSend', () => ({
+  sendEvolutionTextMessage: vi.fn().mockResolvedValue('wamid-evo'),
+}));
 vi.mock('../replySafetyGate', () => ({
   reviewAutoReplyBeforeSend: vi.fn(),
 }));
 
 import { recordOutgoingMessage } from '../conversationStore';
 import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage } from '../metaSend';
+import { sendEvolutionTextMessage } from '../evolutionSend';
 import { reviewAutoReplyBeforeSend } from '../replySafetyGate';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../operatorFollowUpService';
+import { getDb } from '../db';
 import { getPendingOperatorGuidance, submitOperatorReply } from '../escalationStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
@@ -234,5 +239,116 @@ describe('sendOperatorGuidedFollowUp — preferência de reativação fora da ja
     // A orientação nunca se perde: getPendingOperatorGuidance ainda a encontra.
     const pending = await getPendingOperatorGuidance(TENANT_A, PHONE);
     expect(pending?.operatorReply).toBe('Avisa que ainda temos horário essa semana');
+  });
+});
+
+/**
+ * TASK-0400 (12/09/2026, achado real reportado ao vivo — os dois tenants
+ * reais hoje, Daniel e Monique, usam Evolution, não Meta): antes desta
+ * correção, esta função SEMPRE tentava mandar pelas funções da Meta,
+ * mesmo pro canal Evolution — sem credencial Meta compartilhada
+ * configurada, `sendWhatsAppTextMessage`/`sendWhatsAppTemplateMessage`
+ * lançam erro ("META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes"), e a
+ * requisição inteira falhava mesmo com a orientação do operador já salva.
+ * A "janela de 24h" também é uma regra específica da Meta — não existe no
+ * Evolution (Baileys), então o "convite" via template nem deveria existir
+ * nesse canal: o texto livre baseado na orientação do operador deve sair
+ * na hora, sempre, independente de quanto tempo faz desde a última
+ * mensagem do cliente.
+ */
+describe('sendOperatorGuidedFollowUp — canal Evolution (TASK-0400)', () => {
+  async function seedEvolutionTenant() {
+    await getDb().from('tenant_evolution_credentials').insert({
+      tenant_id: TENANT_A,
+      instance_name: 'inst-daniel',
+      api_url: 'https://evo.example.com',
+      api_key: 'evo-key',
+    });
+  }
+
+  it('responde na hora pelo Evolution mesmo com a última mensagem do cliente há mais de 24h (sem conceito de janela nesse canal)', async () => {
+    initDb(createFakeSupabase());
+    await seedEvolutionTenant();
+    const seeded = await logEscalation(TENANT_A, PHONE, 'Cliente Teste', 'Cliente sumiu', 'oi', 'general');
+    const withGuidance = await submitOperatorReply(TENANT_A, seeded.id, 'Avisa que ainda temos horário essa semana');
+
+    const conversationStoreMock = await import('../conversationStore');
+    (conversationStoreMock.getConversation as any).mockResolvedValue({
+      messages: [{ sender: 'lead', text: 'oi', timestamp: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString() }], // 30h atrás
+    });
+    (reviewAutoReplyBeforeSend as any).mockResolvedValue({ approved: true, source: 'gemini-reviewer', severity: 'low', reason: 'ok' });
+    const ai = { models: { generateContent: vi.fn().mockResolvedValue({ text: 'Oi! Ainda temos horário essa semana.' }) } } as any;
+
+    const outcome = await sendOperatorGuidedFollowUp(TENANT_A, withGuidance!, {
+      ai,
+      metaAccessToken: 'token',
+      metaPhoneNumberId: 'phone-id',
+      evolutionApiUrl: 'https://shared.example.com',
+      evolutionApiKey: 'shared-key',
+      evolutionInstanceName: 'shared-instance',
+      tenantName: 'Daniel',
+    });
+
+    expect(outcome).toEqual({ sent: true, viaTemplate: false, message: 'Oi! Ainda temos horário essa semana.' });
+    expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendEvolutionTextMessage).toHaveBeenCalledWith('inst-daniel', 'https://evo.example.com', 'evo-key', PHONE, 'Oi! Ainda temos horário essa semana.');
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+
+    const updated = await getEscalation(TENANT_A, seeded.id);
+    expect(updated?.operatorReplyConsumedAt).toBeTruthy();
+    expect(updated?.resolved).toBe(true);
+  });
+
+  it('responde na hora pelo Evolution mesmo sem NENHUMA mensagem anterior do cliente (fora da "janela" por definição, mas Evolution não tem janela)', async () => {
+    initDb(createFakeSupabase());
+    await seedEvolutionTenant();
+    const seeded = await logEscalation(TENANT_A, PHONE, 'Cliente Teste', 'Cliente sumiu', undefined, 'general');
+    const withGuidance = await submitOperatorReply(TENANT_A, seeded.id, 'Avisa que ainda temos horário essa semana');
+
+    const conversationStoreMock = await import('../conversationStore');
+    (conversationStoreMock.getConversation as any).mockResolvedValue({ messages: [] });
+    (reviewAutoReplyBeforeSend as any).mockResolvedValue({ approved: true, source: 'gemini-reviewer', severity: 'low', reason: 'ok' });
+    const ai = { models: { generateContent: vi.fn().mockResolvedValue({ text: 'Oi! Ainda temos horário essa semana.' }) } } as any;
+
+    const outcome = await sendOperatorGuidedFollowUp(TENANT_A, withGuidance!, {
+      ai,
+      evolutionApiUrl: 'https://shared.example.com',
+      evolutionApiKey: 'shared-key',
+      evolutionInstanceName: 'shared-instance',
+      tenantName: 'Daniel',
+    });
+
+    expect(outcome.sent).toBe(true);
+    expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
+  });
+
+  it('desligar abandonedConversationReactivation NÃO afeta o canal Evolution — a resposta sai igual, essa preferência só vale pra Meta', async () => {
+    initDb(createFakeSupabase({
+      tenants: [{ id: TENANT_A, name: 'Daniel', customer_notification_preferences: { abandonedConversationReactivation: { enabled: false } } }],
+    }));
+    await seedEvolutionTenant();
+    const seeded = await logEscalation(TENANT_A, PHONE, 'Cliente Teste', 'Cliente sumiu', 'oi', 'general');
+    const withGuidance = await submitOperatorReply(TENANT_A, seeded.id, 'Avisa que ainda temos horário essa semana');
+
+    const conversationStoreMock = await import('../conversationStore');
+    (conversationStoreMock.getConversation as any).mockResolvedValue({
+      messages: [{ sender: 'lead', text: 'oi', timestamp: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString() }],
+    });
+    (reviewAutoReplyBeforeSend as any).mockResolvedValue({ approved: true, source: 'gemini-reviewer', severity: 'low', reason: 'ok' });
+    const ai = { models: { generateContent: vi.fn().mockResolvedValue({ text: 'Oi! Ainda temos horário essa semana.' }) } } as any;
+
+    const outcome = await sendOperatorGuidedFollowUp(TENANT_A, withGuidance!, {
+      ai,
+      evolutionApiUrl: 'https://shared.example.com',
+      evolutionApiKey: 'shared-key',
+      evolutionInstanceName: 'shared-instance',
+      tenantName: 'Daniel',
+    });
+
+    expect(outcome.sent).toBe(true);
+    expect((outcome as any).skippedByPreference).toBeUndefined();
+    expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(1);
   });
 });

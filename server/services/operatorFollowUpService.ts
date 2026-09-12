@@ -13,6 +13,22 @@
  *   generateAutoReplyForText (webhooks.ts consome a pendência a cada nova
  *   mensagem recebida).
  *
+ * TASK-0400 (12/09/2026, achado real reportado ao vivo): até aqui esta
+ * função SEMPRE mandava pelas funções da Meta (`sendWhatsAppTextMessage`/
+ * `sendWhatsAppTemplateMessage`), mesmo pra tenants cujo canal real é
+ * Evolution API (Daniel, Monique — os dois tenants reais hoje) — sem
+ * credencial Meta compartilhada configurada, a chamada lançava
+ * "META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes" e a requisição
+ * inteira falhava, mesmo com a orientação do operador já salva com
+ * sucesso. Além disso, a "janela de 24h" é uma regra específica da Meta
+ * Cloud API — a Evolution API (Baileys) não tem esse conceito (mesma
+ * observação já registrada em reminderJob.ts/pendingFollowUpJob.ts), então
+ * o "convite" via template nem fazia sentido pra esse canal: devia
+ * simplesmente mandar texto livre a qualquer momento. Corrigido: resolve o
+ * canal real do tenant primeiro (mesmo `resolveCredentialsForTenant` já
+ * usado em reminderJob.ts/adminAlertChannel.ts) e só aplica a lógica de
+ * janela/template quando o canal é de fato Meta.
+ *
  * Nunca inventa dados — a orientação do operador é o que baliza a resposta,
  * a IA só a transforma numa mensagem natural pro cliente.
  */
@@ -20,6 +36,8 @@ import type { GoogleGenAI } from '@google/genai';
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 import { getConversation, recordOutgoingMessage } from './conversationStore';
 import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage } from './metaSend';
+import { sendEvolutionTextMessage } from './evolutionSend';
+import { resolveCredentialsForTenant } from './tenantResolver';
 import { logEscalation, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, type Escalation } from './escalationStore';
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
 import { buildChronologicalConversationContext } from './conversationReplyGuard';
@@ -93,6 +111,9 @@ export interface FollowUpDeps {
   ai: GoogleGenAI | null;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+  evolutionInstanceName?: string;
   tenantName: string;
 }
 
@@ -115,9 +136,22 @@ export async function sendOperatorGuidedFollowUp(
 ): Promise<FollowUpOutcome> {
   if (!escalation.operatorReply) return { sent: false, reason: 'Escalonamento sem orientação do operador.' };
 
-  const window = await getCustomerServiceWindowStatus(tenantId, escalation.phone);
+  // TASK-0400: resolve o canal REAL do tenant antes de decidir qualquer
+  // coisa — mesmo padrão já usado em reminderJob.ts/adminAlertChannel.ts.
+  // A janela de 24h abaixo só é uma regra de verdade pro canal Meta.
+  const channel = await resolveCredentialsForTenant(
+    tenantId,
+    { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
+    { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
+  );
+  if (channel.provider === 'instagram') {
+    // Mesmo fallback já usado em pendingFollowUpJob.ts — Instagram ainda não tem esse fluxo.
+    return { sent: false, reason: 'Canal Instagram ainda não suporta retomada automática.' };
+  }
 
-  if (!window.withinWindow) {
+  const window = channel.provider === 'meta' ? await getCustomerServiceWindowStatus(tenantId, escalation.phone) : null;
+
+  if (channel.provider === 'meta' && window && !window.withinWindow) {
     // TASK-0399: tenant pode desligar o convite proativo de reativação —
     // a orientação do operador (`escalation.operatorReply`, já persistida
     // por submitOperatorReply ANTES desta função rodar) nunca se perde: a
@@ -129,12 +163,12 @@ export async function sendOperatorGuidedFollowUp(
     if (!notificationPrefs.abandonedConversationReactivation.enabled) {
       return { sent: false, reason: 'Reativação automática desligada em Configurações — a orientação continua salva e será usada assim que o cliente responder.', skippedByPreference: true };
     }
-    if (!deps.metaPhoneNumberId || !deps.metaAccessToken) {
+    if (!channel.metaPhoneNumberId || !channel.metaAccessToken) {
       return { sent: false, reason: 'Credenciais do WhatsApp ausentes — não foi possível mandar o template de reengajamento.' };
     }
     await sendWhatsAppTemplateMessage(
-      deps.metaPhoneNumberId,
-      deps.metaAccessToken,
+      channel.metaPhoneNumberId,
+      channel.metaAccessToken,
       escalation.phone,
       REENGAGEMENT_TEMPLATE_NAME,
       REENGAGEMENT_TEMPLATE_LANGUAGE,
@@ -145,6 +179,10 @@ export async function sendOperatorGuidedFollowUp(
     return { sent: true, viaTemplate: true };
   }
 
+  // Chegou aqui: canal Meta dentro da janela de 24h, OU canal Evolution
+  // (que não tem esse conceito de janela — texto livre funciona a
+  // qualquer momento) — os dois casos respondem de imediato com base na
+  // orientação do operador.
   if (!deps.ai) return { sent: false, reason: 'IA indisponível no momento.' };
   // TASK-0316: buscada ANTES de gerar a mensagem (antes só era buscada
   // depois, pro revisor de segurança) — o prompt que REDIGE a retomada
@@ -189,7 +227,11 @@ export async function sendOperatorGuidedFollowUp(
     return { sent: false, reason: `Revisor pré-envio bloqueou o rascunho (${safety.severity}): ${safety.reason} Revise em "Aprovar e enviar".` };
   }
 
-  await sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, escalation.phone, message);
+  if (channel.provider === 'evolution') {
+    await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, escalation.phone, message);
+  } else {
+    await sendWhatsAppTextMessage(channel.metaPhoneNumberId, channel.metaAccessToken, escalation.phone, message);
+  }
   await recordOutgoingMessage(
     tenantId,
     escalation.phone,
@@ -197,6 +239,6 @@ export async function sendOperatorGuidedFollowUp(
     'ai'
   );
   await markOperatorGuidanceConsumed(tenantId, escalation.id);
-  console.log(`🤝 [Retomada guiada] tenant=${tenantId} respondeu ${escalation.phone} com base na orientação do operador (dentro da janela de 24h).`);
+  console.log(`🤝 [Retomada guiada] tenant=${tenantId} respondeu ${escalation.phone} com base na orientação do operador (${channel.provider === 'meta' ? 'dentro da janela de 24h' : 'canal Evolution, sem janela'}).`);
   return { sent: true, viaTemplate: false, message };
 }
