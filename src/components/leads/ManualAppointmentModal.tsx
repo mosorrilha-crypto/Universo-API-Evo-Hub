@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CalendarPlus, Sparkles, Loader2, Pencil } from 'lucide-react';
+import { CalendarPlus, Sparkles, Loader2, Pencil, X } from 'lucide-react';
 import { AutoResizeTextarea } from '../AutoResizeTextarea';
 
 interface ManualAppointmentModalProps {
@@ -45,13 +45,32 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
   const [isTypingTimeManually, setIsTypingTimeManually] = useState(false);
   if (!isOpen) return null;
   const showSlotPicker = !isTypingTimeManually && (isLoadingFreeSlots || freeSlots.length > 0);
+  // TASK-0404 (pedido direto, print anotado): "o pop-up de agendamento pode
+  // abrir sem cobrir toda a tela" — era um overlay centralizado (fixed
+  // inset-0 + items-center), que no celular tomava quase a tela inteira.
+  // Vira um painel lateral no desktop (entra pela direita, mesmo padrão
+  // visual da Ficha do Contato/Ficha IA — h-full, borda à esquerda) e um
+  // bottom-sheet no mobile (mesmo padrão já usado pela gaveta da Ficha IA
+  // em WhatsAppLeadsSim.tsx) — a conversa continua visível ao lado/atrás em
+  // vez de desaparecer atrás de um backdrop escuro cobrindo tudo.
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <CalendarPlus className="w-5 h-5 text-emerald-400" />
-          Cadastrar agendamento manual
-        </h3>
+    <div
+      className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-end justify-center lg:items-stretch lg:justify-end animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-800 rounded-t-2xl lg:rounded-t-none w-full lg:w-[420px] lg:h-full max-h-[88vh] lg:max-h-none overflow-y-auto p-5 lg:p-6 space-y-4 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <CalendarPlus className="w-5 h-5 text-emerald-400" />
+            Cadastrar agendamento manual
+          </h3>
+          <button type="button" onClick={onClose} className="shrink-0 p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
         <p className="text-xs text-slate-400">
           Pra um horário combinado fora do WhatsApp (telefone, presencial). Cria o evento real na agenda e ativa o lembrete automático — não conta como venda vinda de anúncio.
         </p>

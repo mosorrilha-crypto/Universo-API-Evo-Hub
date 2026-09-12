@@ -14,6 +14,8 @@ import {
   PencilLine,
   Save,
   Loader2,
+  Plus,
+  Pencil,
 } from 'lucide-react';
 import type { ContactProfileData } from './ownerPanelTypes';
 import { ContactJourneyTimeline } from './ContactJourneyTimeline';
@@ -27,6 +29,10 @@ interface ConversationContextSidebarProps {
   isMobile?: boolean;
   /** TASK-0292 (pedido direto, print: "este campo não está conectado a agenda, e eu não consigo editar pois a cliente remarcou") — o card AGENDAMENTOS é só leitura, sem jeito de corrigir um horário desatualizado quando o reagendamento aconteceu fora dos fluxos que escrevem em `appointments` (ex.: editar o evento direto no Google Calendar). Ressincroniza com o estado atual do mesmo evento (POST /api/conversations/:phone/appointment/resync). */
   onResyncAppointment?: () => Promise<void> | void;
+  /** TASK-0404 (pedido direto, print anotado): "unir o ícone de agenda com a função de agenda que já temos dentro da ficha do cliente" — abre o mesmo modal de cadastro manual (agora um painel lateral) já usado no cabeçalho/menu ⋮, sem duplicar formulário. */
+  onOpenManualAppointment?: () => void;
+  /** TASK-0404 (pedido direto): reaproveita o MESMO endpoint já usado pelo widget de Agenda (PATCH /api/google-calendar/events/:eventId/reschedule — confirma disponibilidade, move o evento real no Google Calendar e atualiza o espelho local) — nunca uma escrita nova. Só aparece por agendamento quando `eventId` está presente (uma pré-reserva sem comprovante aprovado ainda não tem evento real pra remarcar). */
+  onRescheduleAppointment?: (eventId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   /** Histórico cronológico do contato (agendamentos + mudanças de estágio do CRM) — GET /api/conversations/:phone/journey, sem backfill. */
   journeyEvents?: ContactJourneyEvent[];
   isJourneyLoading?: boolean;
@@ -48,12 +54,18 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
   onClose,
   isMobile,
   onResyncAppointment,
+  onOpenManualAppointment,
+  onRescheduleAppointment,
   journeyEvents,
   isJourneyLoading,
   onSaveMemory,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
+  const [reschedulingApptId, setReschedulingApptId] = useState<string | null>(null);
+  const [rescheduleDraft, setRescheduleDraft] = useState('');
+  const [isSavingReschedule, setIsSavingReschedule] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
@@ -99,6 +111,45 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
     if (contact.phone) {
       const cleanPhone = contact.phone.replace(/\D/g, '');
       window.open(`https://wa.me/${cleanPhone}`, '_blank');
+    }
+  };
+
+  // TASK-0404 — "editar horário" reaproveita o MESMO padrão (input
+  // datetime-local + duração preservada) já usado no widget de Agenda
+  // (UpcomingEventsPanel.tsx, EventRowControls) — nunca uma lógica nova.
+  type UpcomingAppointment = NonNullable<ContactProfileData['upcomingAppointments']>[number];
+  const toDatetimeLocalValue = (iso: string): string => {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const startEditingApptTime = (appt: UpcomingAppointment) => {
+    setRescheduleError(null);
+    setRescheduleDraft(appt.startIso ? toDatetimeLocalValue(appt.startIso) : '');
+    setReschedulingApptId(appt.id);
+  };
+  const cancelEditingApptTime = () => {
+    setReschedulingApptId(null);
+    setRescheduleError(null);
+  };
+  const saveApptTime = async (appt: UpcomingAppointment) => {
+    if (!onRescheduleAppointment || !appt.eventId || !rescheduleDraft) return;
+    setIsSavingReschedule(true);
+    setRescheduleError(null);
+    try {
+      const durationMs = appt.startIso && appt.endIso
+        ? new Date(appt.endIso).getTime() - new Date(appt.startIso).getTime()
+        : 60 * 60 * 1000;
+      const newStart = new Date(rescheduleDraft);
+      const newEnd = new Date(newStart.getTime() + durationMs);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const toNaiveIso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+      await onRescheduleAppointment(appt.eventId, toNaiveIso(newStart), toNaiveIso(newEnd));
+      setReschedulingApptId(null);
+    } catch (error: any) {
+      setRescheduleError(error?.message || 'Não foi possível remarcar agora.');
+    } finally {
+      setIsSavingReschedule(false);
     }
   };
 
@@ -290,24 +341,41 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
         </div>
       </div>
 
-      {/* Bloco: AGENDAMENTOS */}
+      {/* Bloco: AGENDAMENTOS — TASK-0404 (pedido direto, print anotado):
+          "unir o ícone de agenda com a função de agenda que já temos dentro
+          da ficha do cliente" — este card agora é o destino único do botão
+          de agenda do cabeçalho/menu ⋮, e ganha o cadastro (que antes só
+          existia em outro lugar) direto aqui, ao lado de Ressincronizar. */}
       <div className="border-t border-slate-800/80 pt-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-2">
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
             Agendamentos
           </span>
-          {onResyncAppointment && contact.upcomingAppointments && contact.upcomingAppointments.length > 0 && (
-            <button
-              type="button"
-              onClick={handleResync}
-              disabled={isResyncing}
-              title="Ressincronizar com o horário atual da agenda — use se a cliente remarcou por fora (ex.: direto no Google Calendar) e este card ficou desatualizado."
-              className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 disabled:opacity-50 disabled:cursor-wait"
-            >
-              <RefreshCw className={`w-3 h-3 ${isResyncing ? 'animate-spin' : ''}`} />
-              {isResyncing ? 'Ressincronizando...' : 'Ressincronizar'}
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {onOpenManualAppointment && (!contact.upcomingAppointments || contact.upcomingAppointments.length === 0) && (
+              <button
+                type="button"
+                onClick={onOpenManualAppointment}
+                title="Cadastrar um agendamento manual (combinado fora do WhatsApp)"
+                className="flex items-center gap-1 rounded-lg bg-emerald-500/90 px-2 py-1 text-[10px] font-bold text-slate-950 hover:bg-emerald-400 transition-colors cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                Cadastrar
+              </button>
+            )}
+            {onResyncAppointment && contact.upcomingAppointments && contact.upcomingAppointments.length > 0 && (
+              <button
+                type="button"
+                onClick={handleResync}
+                disabled={isResyncing}
+                title="Ressincronizar com o horário atual da agenda — use se a cliente remarcou por fora (ex.: direto no Google Calendar) e este card ficou desatualizado."
+                className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 disabled:opacity-50 disabled:cursor-wait"
+              >
+                <RefreshCw className={`w-3 h-3 ${isResyncing ? 'animate-spin' : ''}`} />
+                {isResyncing ? 'Ressincronizando...' : 'Ressincronizar'}
+              </button>
+            )}
+          </div>
         </div>
 
         {contact.upcomingAppointments && contact.upcomingAppointments.length > 0 ? (
@@ -321,10 +389,48 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
                   <span className="text-[11px] font-bold text-slate-200 block">{appt.date}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-200 truncate">{appt.time} - {appt.title}</p>
+                  {reschedulingApptId === appt.id ? (
+                    <form
+                      className="flex items-center gap-1.5"
+                      onSubmit={(e) => { e.preventDefault(); void saveApptTime(appt); }}
+                    >
+                      <input
+                        autoFocus
+                        type="datetime-local"
+                        required
+                        value={rescheduleDraft}
+                        onChange={(e) => setRescheduleDraft(e.target.value)}
+                        disabled={isSavingReschedule}
+                        className="px-1.5 py-1 bg-slate-950 border border-emerald-600 rounded-lg text-[11px] text-white focus:outline-none disabled:opacity-50"
+                      />
+                      <button type="submit" disabled={isSavingReschedule} title="Salvar novo horário" className="shrink-0 text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer">
+                        {isSavingReschedule ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      </button>
+                      <button type="button" disabled={isSavingReschedule} onClick={cancelEditingApptTime} title="Cancelar" className="shrink-0 text-slate-500 hover:text-white disabled:opacity-50 cursor-pointer">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-semibold text-slate-200 truncate">{appt.time} - {appt.title}</p>
+                      {onRescheduleAppointment && appt.eventId && appt.status !== 'passed' && (
+                        <button
+                          type="button"
+                          onClick={() => startEditingApptTime(appt)}
+                          title="Editar horário — atualiza o evento real no Google Calendar"
+                          className="shrink-0 text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <span className={`text-[10px] ${appt.status === 'passed' ? 'text-slate-500' : appt.status === 'pending_payment' ? 'text-amber-400 font-medium' : 'text-emerald-400 font-medium'}`}>
                     {appt.status === 'passed' ? 'já passou' : appt.status === 'pending_payment' ? 'pré-reserva — aguardando comprovante' : 'confirmado'}
                   </span>
+                  {reschedulingApptId === appt.id && rescheduleError && (
+                    <p className="text-[10px] text-rose-300 mt-1">{rescheduleError}</p>
+                  )}
                 </div>
               </div>
             ))}

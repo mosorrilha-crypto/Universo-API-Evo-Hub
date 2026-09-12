@@ -62,5 +62,10 @@ export interface ContactProfileData {
     title: string;
     /** 'pending_payment' = pré-reserva sem evento real na agenda ainda, aguardando aprovação de comprovante — nunca deve ser exibido como "confirmado". */
     status: 'scheduled' | 'passed' | 'cancelled' | 'pending_payment';
+    /** ID do evento real no Google Calendar — ausente numa pré-reserva ainda sem comprovante aprovado. Só quando presente dá pra remarcar (ver onRescheduleAppointment). */
+    eventId?: string;
+    startIso?: string;
+    /** Ausente pra pré-reserva recém-criada — quem remarca cai pra uma duração padrão nesse caso (mesmo fallback já usado em UpcomingEventsPanel.tsx). */
+    endIso?: string;
   }>;
 }

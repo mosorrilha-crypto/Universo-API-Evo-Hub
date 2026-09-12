@@ -16,6 +16,7 @@ import {
 } from '../services/googleCalendar';
 import { updateAppointmentSummaryByEventId, updateAppointmentTimesByEventId, clearAppointmentByEventId, getAppointmentByEventId } from '../services/appointmentStore';
 import { clearRemindersForEvent } from '../services/reminderStore';
+import { recordAppointmentJourneyEvent } from '../services/contactJourneyStore';
 import { markEventCompleted, markEventNotCompleted, getCompletedEventIds } from '../services/calendarEventCompletionStore';
 import { getConversation } from '../services/conversationStore';
 import { queueLeadSheetSync, getBackupSheetUrl } from '../services/googleSheetsSync';
@@ -349,6 +350,14 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
       return res.status(409).json({ error: 'Esse novo horário já está ocupado na agenda.' });
     }
 
+    // TASK-0404 (achado real durante a reformulação da Ficha do Cliente):
+    // remarcar pelo widget de Agenda nunca registrava um evento 'rescheduled'
+    // na jornada do contato (`appointment_journey_events`) — só o caminho da
+    // IA (autoReply.ts) fazia isso. A nova seção "Jornada do contato" na
+    // Ficha ficaria incompleta pra qualquer remarcação feita por aqui.
+    // Buscado ANTES de remarcar (precisa do telefone/resumo de antes).
+    const appointmentBeforeReschedule = await getAppointmentByEventId(tenantId, eventId).catch(() => undefined);
+
     try {
       await rescheduleCalendarEvent(tenantId, cfg, eventId, newStartIso, newEndIso);
     } catch (err: any) {
@@ -356,6 +365,16 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
     }
     await updateAppointmentTimesByEventId(tenantId, eventId, newStartIso, newEndIso);
     await clearRemindersForEvent(tenantId, eventId);
+    if (appointmentBeforeReschedule?.phone) {
+      await recordAppointmentJourneyEvent(tenantId, appointmentBeforeReschedule.phone, {
+        eventType: 'rescheduled',
+        serviceSummary: appointmentBeforeReschedule.summary,
+        scheduledStart: newStartIso,
+        scheduledEnd: newEndIso,
+        eventId,
+        actor: 'operator',
+      });
+    }
     res.json({ success: true });
   }));
 
@@ -390,6 +409,14 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
         firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
         interest: conversationForSheet?.interest || conversationForSheet?.adHeadline,
         scheduled: false,
+      });
+      // TASK-0404 (mesmo achado do reschedule acima): cancelar pelo widget
+      // de Agenda também nunca registrava o evento 'cancelled' na jornada.
+      await recordAppointmentJourneyEvent(tenantId, cancelledAppointment.phone, {
+        eventType: 'cancelled',
+        serviceSummary: cancelledAppointment.summary,
+        eventId,
+        actor: 'operator',
       });
     }
     res.json({ success: true });

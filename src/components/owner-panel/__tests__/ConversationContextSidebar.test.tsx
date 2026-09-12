@@ -120,3 +120,81 @@ describe('ConversationContextSidebar — pré-reserva não é agendamento confir
     expect(screen.queryByText('Agendamento Confirmado')).toBeNull();
   });
 });
+
+// TASK-0404 (pedido direto, print anotado): "unir o ícone de agenda com a
+// função de agenda que já temos dentro da ficha do cliente" — o bloco
+// Agendamentos ganha um botão de cadastro (só quando o contato ainda não tem
+// nenhum agendamento, mesma regra que já valia pro botão que existia no
+// cabeçalho) e um "editar horário" por agendamento que reaproveita o MESMO
+// endpoint de remarcar já usado no widget de Agenda (nunca uma escrita nova).
+describe('ConversationContextSidebar — cadastro e edição de horário (TASK-0404)', () => {
+  const contactWithoutAppointment: ContactProfileData = { ...baseContact, upcomingAppointments: [] };
+  const contactWithAppointment: ContactProfileData = {
+    ...baseContact,
+    upcomingAppointments: [
+      {
+        id: 'evt-1',
+        date: '18/09/2026',
+        time: '14:00',
+        title: 'Combo Micro Cejas + Labios',
+        status: 'scheduled',
+        eventId: 'evt-1',
+        startIso: '2026-09-18T14:00:00',
+        endIso: '2026-09-18T15:00:00',
+      },
+    ],
+  };
+
+  it('mostra "Cadastrar" só quando não há agendamento ativo e a prop foi passada', () => {
+    const onOpenManualAppointment = vi.fn();
+    const { rerender } = render(
+      <ConversationContextSidebar contact={contactWithoutAppointment} agentStatus="active" onOpenManualAppointment={onOpenManualAppointment} />
+    );
+    expect(screen.getByText('Cadastrar')).toBeTruthy();
+
+    rerender(<ConversationContextSidebar contact={contactWithAppointment} agentStatus="active" onOpenManualAppointment={onOpenManualAppointment} />);
+    expect(screen.queryByText('Cadastrar')).toBeNull();
+  });
+
+  it('clicar em "Cadastrar" chama onOpenManualAppointment', () => {
+    const onOpenManualAppointment = vi.fn();
+    render(<ConversationContextSidebar contact={contactWithoutAppointment} agentStatus="active" onOpenManualAppointment={onOpenManualAppointment} />);
+    fireEvent.click(screen.getByText('Cadastrar'));
+    expect(onOpenManualAppointment).toHaveBeenCalledTimes(1);
+  });
+
+  it('sem onRescheduleAppointment ou sem eventId, não mostra o lápis de "editar horário"', () => {
+    render(<ConversationContextSidebar contact={contactWithAppointment} agentStatus="active" />);
+    expect(screen.queryByTitle('Editar horário — atualiza o evento real no Google Calendar')).toBeNull();
+
+    const pendingReservationWithoutEventId: ContactProfileData = {
+      ...baseContact,
+      upcomingAppointments: [{ id: 'payment-appointment', date: '19/09/2026', time: '13:30', title: 'Combo Micro Cejas + Labios', status: 'pending_payment' }],
+    };
+    render(<ConversationContextSidebar contact={pendingReservationWithoutEventId} agentStatus="active" onRescheduleAppointment={vi.fn()} />);
+    expect(screen.queryByTitle('Editar horário — atualiza o evento real no Google Calendar')).toBeNull();
+  });
+
+  it('editar horário chama onRescheduleAppointment com o novo horário, preservando a duração original', async () => {
+    const onRescheduleAppointment = vi.fn(async () => undefined);
+    render(<ConversationContextSidebar contact={contactWithAppointment} agentStatus="active" onRescheduleAppointment={onRescheduleAppointment} />);
+
+    fireEvent.click(screen.getByTitle('Editar horário — atualiza o evento real no Google Calendar'));
+    const input = screen.getByDisplayValue('2026-09-18T14:00') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '2026-09-20T09:00' } });
+    fireEvent.click(screen.getByTitle('Salvar novo horário'));
+
+    expect(onRescheduleAppointment).toHaveBeenCalledWith('evt-1', '2026-09-20T09:00:00', '2026-09-20T10:00:00');
+  });
+
+  it('cancelar a edição de horário não chama onRescheduleAppointment', () => {
+    const onRescheduleAppointment = vi.fn(async () => undefined);
+    render(<ConversationContextSidebar contact={contactWithAppointment} agentStatus="active" onRescheduleAppointment={onRescheduleAppointment} />);
+
+    fireEvent.click(screen.getByTitle('Editar horário — atualiza o evento real no Google Calendar'));
+    fireEvent.click(screen.getByTitle('Cancelar'));
+
+    expect(onRescheduleAppointment).not.toHaveBeenCalled();
+    expect(screen.getByText('14:00 - Combo Micro Cejas + Labios')).toBeTruthy();
+  });
+});
