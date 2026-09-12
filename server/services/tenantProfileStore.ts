@@ -127,3 +127,87 @@ export function formatBusinessHoursForPrompt(hours: BusinessHours | null): strin
   if (!lines.length) return '';
   return `Horário de funcionamento:\n${lines.join('\n')}`;
 }
+
+/**
+ * `admin_alert_phone` (número que recebe os alertas operacionais reais via
+ * WhatsApp) + preferência por tipo de alerta — pedido direto (12/09/2026,
+ * achado real: alertas de um tenant chegando no número de outro, porque o
+ * `admin_alert_phone` só dava pra configurar via SQL direto no Supabase,
+ * sem nenhuma tela). Só cobre os 3 alertas que hoje mandam WhatsApp de
+ * verdade pra esse número — `agentPausedAlertJob.ts`,
+ * `evolutionConnectionAlertJob.ts`, `systemErrorAlertService.ts` — todos via
+ * `adminAlertChannel.ts`/`sendWhatsAppTemplateMessage`. Escalonamento
+ * (`escalationAlertService.ts`) e pagamento pendente
+ * (`paymentPendingAlertJob.ts`, que só reusa `logEscalation`) já são só
+ * notificação push desde a TASK-0298 — nenhum número de telefone envolvido,
+ * então não fazem parte desta preferência.
+ */
+export type AlertType = 'agent_paused' | 'evolution_disconnected' | 'system_error';
+
+export type AlertPreferences = Record<AlertType, boolean>;
+
+export const DEFAULT_ALERT_PREFERENCES: AlertPreferences = {
+  agent_paused: true,
+  evolution_disconnected: true,
+  system_error: true,
+};
+
+const ALERT_TYPES = Object.keys(DEFAULT_ALERT_PREFERENCES) as AlertType[];
+
+export interface TenantAlertSettings {
+  adminAlertPhone: string | null;
+  preferences: AlertPreferences;
+}
+
+export async function getTenantAlertSettings(tenantId: string): Promise<TenantAlertSettings> {
+  const db = getDb();
+  const { data } = await db.from('tenants').select('admin_alert_phone, alert_preferences').eq('id', tenantId).maybeSingle();
+  const stored = (data?.alert_preferences as Partial<AlertPreferences> | null) || {};
+  return {
+    adminAlertPhone: (data?.admin_alert_phone as string | undefined) || null,
+    preferences: { ...DEFAULT_ALERT_PREFERENCES, ...stored },
+  };
+}
+
+/** Só dígitos, 8 a 15 (mesmo padrão de telefone já usado no resto do projeto — código do país + número, sem "+"/espaços). `null` explícito remove o número (desliga os 3 alertas). */
+export function validateAdminAlertPhone(phone: unknown): phone is string | null {
+  if (phone === null) return true;
+  if (typeof phone !== 'string') return false;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 8 && digits.length <= 15;
+}
+
+export function validateAlertPreferences(prefs: unknown): prefs is Partial<AlertPreferences> {
+  if (prefs === null || typeof prefs !== 'object' || Array.isArray(prefs)) return false;
+  for (const [key, value] of Object.entries(prefs as Record<string, unknown>)) {
+    if (!ALERT_TYPES.includes(key as AlertType)) return false;
+    if (typeof value !== 'boolean') return false;
+  }
+  return true;
+}
+
+/**
+ * `getPlatformDb()` de propósito, mesmo motivo já documentado em
+ * `setTenantBusinessHours` acima: a tabela `tenants` só tem policy RLS de
+ * SELECT pro papel `authenticated`, nenhuma de UPDATE — `getDb()` (cliente
+ * tenant-scoped) faria o UPDATE sem erro nenhum, mas RLS filtraria pra zero
+ * linhas afetadas, silenciosamente. `tenantId` já vem verificado do JWT
+ * autenticado antes de chegar aqui, nunca de input do cliente.
+ */
+export async function setTenantAlertSettings(
+  tenantId: string,
+  patch: { adminAlertPhone?: string | null; preferences?: Partial<AlertPreferences> }
+): Promise<void> {
+  const update: Record<string, unknown> = {};
+  if (patch.adminAlertPhone !== undefined) {
+    update.admin_alert_phone = patch.adminAlertPhone ? patch.adminAlertPhone.replace(/\D/g, '') : null;
+  }
+  if (patch.preferences !== undefined) {
+    const current = await getTenantAlertSettings(tenantId);
+    update.alert_preferences = { ...current.preferences, ...patch.preferences };
+  }
+  if (Object.keys(update).length === 0) return;
+  const db = getPlatformDb();
+  const { error } = await db.from('tenants').update(update).eq('id', tenantId);
+  if (error) throw error;
+}

@@ -25,6 +25,7 @@ import {
   Zap,
   BookOpen,
   ArrowRight,
+  ArrowUp,
   Sliders,
   Check,
   Layers,
@@ -133,6 +134,30 @@ function AuditMetric({ label, value, tone }: { label: string; value: string | nu
     slate: 'border-slate-700 bg-slate-950/70 text-slate-300',
   };
   return <div className={`knowledge-workspace__audit-metric rounded-xl border p-2.5 ${styles[tone]}`}><p className="text-[10px] font-semibold text-slate-500">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>;
+}
+
+/**
+ * Achado real (auditoria de UX, 12/09/2026): a página é uma rolagem única
+ * (`handleOpenTypedDocument` clica num card lá em cima e rola suave até a
+ * seção correspondente aqui embaixo) — depois de editar, a única forma de
+ * voltar pra escolher outro dos 8 documentos era rolar manualmente pra
+ * cima de novo, sem nenhum atalho. Link pequeno, mesmo em todas as 6
+ * seções, que rola de volta pro grid "Documentos da sua Base"
+ * (#knowledge-base-document-list) — só aparece pra quem usa a Base de
+ * Conhecimento tipada de verdade (`usesPublishedKnowledgeBase`), já que só
+ * nesse caso o grid existe na página.
+ */
+function BackToDocumentListLink({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => document.getElementById('knowledge-base-document-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+      className="inline-flex items-center gap-1 text-[10px] font-semibold text-cyan-300 hover:text-cyan-100"
+    >
+      <ArrowUp className="h-3 w-3" /> Voltar à lista de documentos
+    </button>
+  );
 }
 
 /**
@@ -2020,7 +2045,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       </div>
 
       {usesPublishedKnowledgeBase && (
-        <section className="rounded-2xl border border-cyan-400/25 bg-[radial-gradient(circle_at_92%_0%,rgba(34,211,238,0.14),transparent_38%),#0f172a] p-4 shadow-md">
+        <section id="knowledge-base-document-list" className="scroll-mt-28 rounded-2xl border border-cyan-400/25 bg-[radial-gradient(circle_at_92%_0%,rgba(34,211,238,0.14),transparent_38%),#0f172a] p-4 shadow-md">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10 text-cyan-200"><FileCheck className="h-5 w-5" /></div>
@@ -2297,8 +2322,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       {/* Formulário visual da fonte tipada — todas as seções permanecem editáveis. */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-10">
 
-        {/* SECTION 1: General Profile & Goal */}
-        <div id="knowledge-base-section-s1" className="space-y-5 scroll-mt-5">
+        {/* Achado real (auditoria de UX, 12/09/2026): `handleOpenTypedDocument`
+            acima faz `scrollIntoView({ block: 'start' })` pra estas 6 seções,
+            mas `Header.tsx` renderiza um cabeçalho `sticky top-0 z-30` real
+            (~64px+ com safe-area no celular) por cima de TODA a página — com
+            `scroll-mt-5` (20px, valor antigo) o topo da seção, incluindo o
+            próprio título que diz qual seção é essa, ficava escondido atrás
+            do cabeçalho fixo depois do scroll suave. `scroll-mt-28` (112px)
+            dá folga suficiente pro título aparecer sempre visível.
+            SECTION 1: General Profile & Goal */}
+        <div id="knowledge-base-section-s1" className="space-y-5 scroll-mt-28">
           <button
             type="button"
             onClick={() => toggleSection('s1')}
@@ -2310,6 +2343,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </span>
             {openSections.s1 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
+          <BackToDocumentListLink visible={usesPublishedKnowledgeBase && Boolean(openSections.s1)} />
           {openSections.s1 && (
           <div className="space-y-5">
             <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
@@ -2339,8 +2373,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
+                {/* Achado real (auditoria de UX, 12/09/2026): este campo
+                    pertence ao documento "Voz da marca" (splitVisualKnowledgeBaseIntoDocuments),
+                    mas mora visualmente dentro da seção "Perfil & Objetivo"
+                    — um novo usuário clicando no card "Voz da marca" cai
+                    exatamente aqui sem nenhum aviso de que saiu do "Perfil
+                    do negócio". Etiqueta só pra deixar isso explícito, sem
+                    mudar a estrutura de seções (mudança maior, fora do
+                    escopo desta correção pontual). */}
+                <label className="mb-1 flex items-center gap-1.5 text-xs font-bold text-slate-300">
                   Tom de Voz do Agente:
+                  <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-200">Voz da marca</span>
                 </label>
                 <AutoResizeTextarea
                   minRows={1}
@@ -2407,8 +2450,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
+              {/* Mesmo motivo do chip "Voz da marca" acima: este campo
+                  pertence ao documento "Preços e políticas", não ao
+                  "Perfil do negócio" que dá nome a esta seção. */}
+              <label className="mb-1 flex items-center gap-1.5 text-xs font-bold text-slate-300">
                 Políticas Comerciais e Formas de Pagamento:
+                <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">Preços e políticas</span>
               </label>
               <AutoResizeTextarea
                 minRows={2}
@@ -2489,7 +2536,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* SECTION 2: Business Rules & Constraints */}
-        <div id="knowledge-base-section-s2" className="space-y-5 scroll-mt-5">
+        <div id="knowledge-base-section-s2" className="space-y-5 scroll-mt-28">
           <button
             type="button"
             onClick={() => toggleSection('s2')}
@@ -2501,6 +2548,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </span>
             {openSections.s2 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
+          <BackToDocumentListLink visible={usesPublishedKnowledgeBase && Boolean(openSections.s2)} />
           {openSections.s2 && (
           <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
@@ -2508,6 +2556,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <ShieldAlert className="w-4 h-4 text-amber-400" />
                   Regras de Negócio & Diretrizes do Agente
+                  {/* Achado real (auditoria de UX, 12/09/2026): esta seção
+                      inteira serializa como `businessRules` do documento
+                      "Preços e políticas" (splitVisualKnowledgeBaseIntoDocuments)
+                      — o card "Encaminhamento humano" (human_handoff_rules)
+                      também aponta pra cá (TYPED_DOCUMENT_NAVIGATION), mas
+                      não existe nenhum campo visual específico de handoff
+                      humano aqui nem em nenhum outro lugar deste formulário;
+                      quem clica nesse card cai numa seção sobre outro
+                      documento, sem nada que corresponda ao que clicou. Não
+                      corrigido aqui de propósito — decisão de produto sobre
+                      criar esse campo, não um ajuste de rolagem/rótulo. */}
+                  <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">Preços e políticas</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Cadastre regras estritas (Do's and Don'ts) que o agente NUNCA pode descumprir ao conversar com os clientes.
@@ -2609,7 +2669,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* SECTION 3: Products & Pricing */}
-        <div id="knowledge-base-section-s3" className="space-y-5 scroll-mt-5">
+        <div id="knowledge-base-section-s3" className="space-y-5 scroll-mt-28">
           <button
             type="button"
             onClick={() => toggleSection('s3')}
@@ -2621,6 +2681,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </span>
             {openSections.s3 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
+          <BackToDocumentListLink visible={usesPublishedKnowledgeBase && Boolean(openSections.s3)} />
           {openSections.s3 && (
           <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between gap-3">
@@ -3094,7 +3155,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* SECTION 4: FAQs & Common Questions */}
-        <div id="knowledge-base-section-s4" className="space-y-5 scroll-mt-5">
+        <div id="knowledge-base-section-s4" className="space-y-5 scroll-mt-28">
           <button
             type="button"
             onClick={() => toggleSection('s4')}
@@ -3106,6 +3167,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </span>
             {openSections.s4 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
+          <BackToDocumentListLink visible={usesPublishedKnowledgeBase && Boolean(openSections.s4)} />
           {openSections.s4 && (
           <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
@@ -3169,7 +3231,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* SECTION 5: Document Uploads */}
-        <div id="knowledge-base-section-s5" className="space-y-5 scroll-mt-5">
+        <div id="knowledge-base-section-s5" className="space-y-5 scroll-mt-28">
           <button
             type="button"
             onClick={() => toggleSection('s5')}
@@ -3181,6 +3243,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </span>
             {openSections.s5 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
+          <BackToDocumentListLink visible={usesPublishedKnowledgeBase && Boolean(openSections.s5)} />
           {openSections.s5 && (
           <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
@@ -3312,7 +3375,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             mensagem do cliente. Ver server/services/firstContactMessage.ts.
             Nenhum bloco = comportamento de sempre (a IA responde a 1ª
             mensagem normalmente), sem precisar de um toggle separado. */}
-        <div id="knowledge-base-section-s6" className="space-y-5 scroll-mt-5">
+        <div id="knowledge-base-section-s6" className="space-y-5 scroll-mt-28">
           <button
             type="button"
             onClick={() => toggleSection('s6')}
@@ -3324,6 +3387,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </span>
             {openSections.s6 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
+          <BackToDocumentListLink visible={usesPublishedKnowledgeBase && Boolean(openSections.s6)} />
           {openSections.s6 && (
           <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">

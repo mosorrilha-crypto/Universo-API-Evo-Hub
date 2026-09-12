@@ -41,7 +41,7 @@ import { upsertCrmLeadState } from '../services/crmStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleAccess';
 import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLogsModuleAccess';
-import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
+import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours, getTenantAlertSettings, setTenantAlertSettings, validateAdminAlertPhone, validateAlertPreferences } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
 import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, resolveKnowledgeBaseImageBinary, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
@@ -1904,6 +1904,28 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
     await setTenantBusinessHours(tenantOf(req), businessHours);
     res.json({ success: true });
+  }));
+
+  // Número que recebe os alertas operacionais reais (agente pausado/conexão
+  // caiu/erro de sistema) via WhatsApp + preferência por tipo — até aqui só
+  // dava pra configurar via SQL direto no Supabase (achado real: alerta de
+  // um tenant chegando no número de outro). Mesmo padrão de autenticação/
+  // tenant-escopo de /api/business-hours acima. Ver
+  // server/services/tenantProfileStore.ts pra por que só estes 3 tipos.
+  router.get('/api/alert-settings', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json(await getTenantAlertSettings(tenantOf(req)));
+  }));
+
+  router.post('/api/alert-settings', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { adminAlertPhone, preferences } = req.body || {};
+    if (adminAlertPhone !== undefined && !validateAdminAlertPhone(adminAlertPhone)) {
+      return res.status(400).json({ error: 'Campo "adminAlertPhone" inválido — use só o número com código do país (8 a 15 dígitos), ou null pra remover.' });
+    }
+    if (preferences !== undefined && !validateAlertPreferences(preferences)) {
+      return res.status(400).json({ error: 'Campo "preferences" inválido — cada chave precisa ser um tipo de alerta reconhecido com valor true/false.' });
+    }
+    await setTenantAlertSettings(tenantOf(req), { adminAlertPhone, preferences });
+    res.json(await getTenantAlertSettings(tenantOf(req)));
   }));
 
   // Catálogo público (contato + opt-in) — até aqui só dava pra configurar

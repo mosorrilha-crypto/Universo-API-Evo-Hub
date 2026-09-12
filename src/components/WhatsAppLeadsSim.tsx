@@ -65,6 +65,7 @@ import {
   ArchiveRestore,
   Bell,
   BellOff,
+  BellRing,
   Mail,
   ChevronUp,
   ChevronDown,
@@ -255,6 +256,8 @@ interface WhatsAppLeadsSimProps {
   canSeeQuality?: boolean;
   canSeeSystemLogs?: boolean;
   canSeeBroadcast?: boolean;
+  /** Libera "Notificações" (número que recebe alertas operacionais via WhatsApp + preferência por tipo) dentro de "Configurações". */
+  canSeeAlerts?: boolean;
   /** Libera o item "Empresas" (navega pra administração de tenants) dentro
       de "Configurações", e a caixa de troca rápida "Empresa ativa" — mesmo
       papel do antigo `canSeeSaasMaster` de Header.tsx. */
@@ -399,6 +402,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   canSeeQuality,
   canSeeSystemLogs,
   canSeeBroadcast,
+  canSeeAlerts,
   canSeeSaasMaster,
   tenants = [],
   onSelectTenant,
@@ -4100,7 +4104,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           Ferramentas acima), que ao tocar abre uma grade de ícones (não
           mais linhas de texto) com cada opção, igual pedido: "pode virar um
           icon com outros ícones dentro". */}
-      {onSelectTab && (canManageAgent || canSeeCatalog || canSeeQuality || canSeeSystemLogs || canSeeBroadcast || canSeeSaasMaster) && (
+      {onSelectTab && (canManageAgent || canSeeCatalog || canSeeQuality || canSeeSystemLogs || canSeeBroadcast || canSeeAlerts || canSeeSaasMaster) && (
         <div className="w-full border-t border-slate-800 pt-2.5">
           <div className="grid w-full grid-cols-4 gap-2">
             {renderToolTile({
@@ -4142,6 +4146,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 icon: <Radio className="h-4 w-4" />,
                 label: isSpanish ? 'Envío Masivo' : 'Disparo em Massa',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('broadcast'); },
+              })}
+              {canSeeAlerts && renderToolTile({
+                key: 'settings-alerts',
+                icon: <BellRing className="h-4 w-4" />,
+                label: isSpanish ? 'Notificaciones' : 'Notificações',
+                onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('alerts'); },
               })}
               {canSeeSaasMaster && renderToolTile({
                 key: 'settings-saas',

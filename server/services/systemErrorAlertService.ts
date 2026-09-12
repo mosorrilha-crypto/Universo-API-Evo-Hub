@@ -42,6 +42,7 @@ interface TenantAlertRow {
   id: string;
   name: string | null;
   admin_alert_phone: string | null;
+  alert_preferences: Record<string, boolean> | null;
 }
 
 async function alertTenant(row: TenantAlertRow, details: SystemErrorDetails): Promise<void> {
@@ -58,6 +59,10 @@ async function alertTenant(row: TenantAlertRow, details: SystemErrorDetails): Pr
   const adminPhone = row.admin_alert_phone;
   if (!adminPhone) {
     console.warn(`⚠️  [Alerta de erro de sistema] tenant=${row.id} sem admin_alert_phone configurado — sem alerta via WhatsApp (push, se configurado, ainda foi tentado acima).`);
+    return;
+  }
+  if (row.alert_preferences?.system_error === false) {
+    console.log(`🔕 [Alerta de erro de sistema] tenant=${row.id} desativou este alerta em Configurações — sem WhatsApp (push, se configurado, ainda foi tentado acima).`);
     return;
   }
 
@@ -88,7 +93,7 @@ export async function notifySystemError(details: SystemErrorDetails, cooldownMs:
 
   try {
     const db = getDb();
-    const { data, error } = await db.from('tenants').select('id, name, admin_alert_phone');
+    const { data, error } = await db.from('tenants').select('id, name, admin_alert_phone, alert_preferences');
     if (error) throw error;
     const tenants = (data as TenantAlertRow[]) || [];
     await Promise.all(tenants.map((row) => alertTenant(row, details).catch((err) => console.warn(`⚠️  [Alerta de erro de sistema] tenant=${row.id} falha:`, (err as Error).message))));
