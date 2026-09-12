@@ -2438,9 +2438,66 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [isLoadingManualFreeSlots, setIsLoadingManualFreeSlots] = useState(false);
   const [manualFreeSlotsError, setManualFreeSlotsError] = useState<string | null>(null);
 
+  // Achado real (pedido direto, print anotado): "os serviços não estão
+  // sincronizados com o catálogo e não preenche o preço" — o <select> deste
+  // modal só listava `knowledgeBase.products` de NÍVEL SUPERIOR, nunca as
+  // `variants` — pra qualquer família com variação (ex: "Pestañas" da
+  // Monique, que só existe como 7 variantes: Lash Lift, Efecto Foxy...), o
+  // operador só via o nome da família (sem preço concreto, só a faixa
+  // "Gs 140.000 a Gs 350.000") e nenhuma opção específica pra escolher — por
+  // isso caía sempre no modo "Serviço personalizado" (a caixa de texto) como
+  // única saída na prática. `findProductMatch`/`findProductDurationMinutes`
+  // (server/services/knowledgeBaseStore.ts) já sabem casar pelo `code` da
+  // variante — só faltava o frontend oferecer essas opções e mostrar o preço
+  // resolvido. Duplicado aqui (sem promoção por timezone exata, é só pra
+  // exibição — o valor cobrado de verdade continua resolvido no backend).
+  const manualServiceCatalogOptions = useMemo(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const resolvePriceText = (entry: { price: string; promoPrice?: string; promoUntil?: string }) =>
+      entry.promoPrice && entry.promoUntil && todayIso <= entry.promoUntil ? entry.promoPrice : entry.price;
+    return (knowledgeBase.products || [])
+      .filter((p) => p.active !== false)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        priceText: resolvePriceText(p),
+        durationMinutes: p.durationMinutes,
+        variants: (p.variants || []).map((v) => ({
+          id: `${p.id}:${v.code}`,
+          code: v.code,
+          priceText: resolvePriceText(v),
+          durationMinutes: v.durationMinutes ?? p.durationMinutes,
+        })),
+      }));
+  }, [knowledgeBase.products]);
+
+  const findManualServiceDurationMinutes = (serviceName: string): number | undefined => {
+    for (const product of manualServiceCatalogOptions) {
+      if (product.name === serviceName) return product.durationMinutes;
+      const variant = product.variants.find((v) => v.code === serviceName);
+      if (variant) return variant.durationMinutes;
+    }
+    return undefined;
+  };
+
   const manualServiceDurationMinutes = isManualServiceCustom
     ? Number(manualCustomDurationMinutes)
-    : knowledgeBase.products.find((p) => p.name === manualServiceName)?.durationMinutes || 90;
+    : findManualServiceDurationMinutes(manualServiceName) || 90;
+
+  // Mesmo achado acima: sem isso, abrir o modal de um lugar diferente do
+  // último (ex: cadastrar pra um contato depois de ter usado "Serviço
+  // personalizado" pra outro, na mesma sessão) herdava o modo/nome/duração
+  // de antes — parecia que o formulário "esqueceu" de voltar pro catálogo.
+  // Sempre reseta ao ABRIR (não só ao fechar), pra qualquer um dos vários
+  // pontos de entrada (Ficha do Contato, menu ⋮, "Registrar agora").
+  useEffect(() => {
+    if (isManualAppointmentModalOpen) {
+      setIsManualServiceCustom(false);
+      setManualServiceName('');
+      setManualCustomDurationMinutes('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isManualAppointmentModalOpen]);
 
   useEffect(() => {
     if (!isManualAppointmentModalOpen || !manualDate || !(manualServiceDurationMinutes > 0)) {
@@ -6956,7 +7013,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         isOpen={isManualAppointmentModalOpen}
         leadName={selectedLead?.name}
         leadPhone={selectedLead?.phone}
-        products={knowledgeBase.products}
+        products={manualServiceCatalogOptions}
         serviceName={manualServiceName}
         onServiceNameChange={setManualServiceName}
         isCustomService={isManualServiceCustom}
