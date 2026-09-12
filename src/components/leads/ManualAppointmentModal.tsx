@@ -6,7 +6,13 @@ interface ManualAppointmentModalProps {
   isOpen: boolean;
   leadName?: string;
   leadPhone?: string;
-  products: Array<{ id: string; name: string }>;
+  /** Catálogo já achatado com preço/duração resolvidos (WhatsAppLeadsSim.tsx, `manualServiceCatalogOptions`) — cada `variants` vira um <optgroup>, casando pelo `code` (mesmo campo que `findProductMatch` usa no backend pra achar a variante). */
+  products: Array<{
+    id: string;
+    name: string;
+    priceText: string;
+    variants: Array<{ id: string; code: string; priceText: string }>;
+  }>;
   serviceName: string;
   onServiceNameChange: (value: string) => void;
   /** Serviço avulso criado só pra este agendamento (nunca entra na Base de Conhecimento) — pedido real (19/08/2026): um horário/procedimento combinado especialmente com um cliente (ex: preço/serviço fora do catálogo padrão) precisava de um jeito de agendar sem sujar o catálogo geral que a IA usa com todo mundo. */
@@ -79,13 +85,17 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
             conversa já selecionada (o operador via o nome no cabeçalho por
             trás) — sem indicação nenhuma de "pra quem" dentro do próprio
             modal. Ficou confuso quando o widget de agenda (#209) passou a
-            abrir este mesmo modal fora do contexto de uma conversa. */}
+            abrir este mesmo modal fora do contexto de uma conversa.
+
+            TASK-0409 (pedido direto, print anotado com um círculo em volta
+            deste bloco): era uma caixa com fundo/borda igual a um campo de
+            texto de verdade, mas não é editável — confuso, parecia um input
+            esquecido em branco. Vira uma linha simples, sem caixa, só texto. */}
         {leadName || leadPhone ? (
-          <div className="bg-slate-950 border border-emerald-800/40 rounded-xl p-2.5 text-xs">
-            <span className="text-slate-500">Agendamento para: </span>
-            <span className="text-emerald-300 font-semibold">{leadName || leadPhone}</span>
-            {leadName && leadPhone && <span className="text-slate-500"> · {leadPhone}</span>}
-          </div>
+          <p className="text-xs text-slate-400 -mt-1">
+            Agendando para <span className="text-emerald-300 font-semibold">{leadName || leadPhone}</span>
+            {leadName && leadPhone && <span> · {leadPhone}</span>}
+          </p>
         ) : (
           <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">
             Nenhum contato selecionado — feche e escolha um contato antes de cadastrar.
@@ -138,17 +148,39 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
                 </p>
               </div>
             ) : (
-              <select
-                required
-                value={serviceName}
-                onChange={(e) => onServiceNameChange(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
-              >
-                <option value="">Selecione...</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.name}>{p.name}</option>
-                ))}
-              </select>
+              <>
+                <select
+                  required
+                  value={serviceName}
+                  onChange={(e) => onServiceNameChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="">Selecione...</option>
+                  {products.map((p) => (
+                    p.variants.length > 0 ? (
+                      <optgroup key={p.id} label={p.name}>
+                        {p.variants.map((v) => (
+                          <option key={v.id} value={v.code}>{v.code}</option>
+                        ))}
+                      </optgroup>
+                    ) : (
+                      <option key={p.id} value={p.name}>{p.name}</option>
+                    )
+                  ))}
+                </select>
+                {/* TASK-0409 (pedido direto): "não preenche o preço" — mostra
+                    o preço vigente do catálogo assim que um serviço é
+                    escolhido (o valor cobrado de verdade continua resolvido
+                    no backend, `resolveProductAmountByName`; isto é só pro
+                    operador conferir antes de confirmar). */}
+                {serviceName && (
+                  <p className="text-[11px] text-emerald-400 mt-1">
+                    {products.find((p) => p.name === serviceName)?.priceText
+                      ?? products.flatMap((p) => p.variants).find((v) => v.code === serviceName)?.priceText
+                      ?? 'Preço não encontrado no catálogo — confira o Financeiro depois de cadastrar.'}
+                  </p>
+                )}
+              </>
             )}
           </div>
 
