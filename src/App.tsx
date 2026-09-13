@@ -1813,6 +1813,7 @@ export const App: React.FC = () => {
             onThreadOpenChange={setIsMobileWhatsAppThreadOpen}
             financialModuleEnabled={canSeeFinancial}
             onAddTransaction={handleAddTransaction}
+            transactions={transactions}
             operatorName={currentUser?.name}
             closeThreadSignal={closeThreadSignal}
             pendingConversasAction={pendingConversasAction}

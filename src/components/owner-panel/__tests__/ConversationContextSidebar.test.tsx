@@ -198,3 +198,44 @@ describe('ConversationContextSidebar — cadastro e edição de horário (TASK-0
     expect(screen.getByText('14:00 - Combo Micro Cejas + Labios')).toBeTruthy();
   });
 });
+
+// TASK-0410 (pedido direto: "se eu quiser adicionar outro recebimento do
+// mesmo cliente... deve ficar registrado na ficha e sincronizado com o
+// financeiro") — a seção Pagamentos só aparece quando o Financeiro está
+// disponível (onRegisterPayment vem undefined senão) e mostra o histórico
+// real (mesma FinancialTransaction do Financeiro) desse contato específico.
+describe('ConversationContextSidebar — Pagamentos (TASK-0410)', () => {
+  it('sem onRegisterPayment (módulo Financeiro desligado), a seção Pagamentos não aparece', () => {
+    render(<ConversationContextSidebar contact={baseContact} agentStatus="active" />);
+    expect(screen.queryByText('Pagamentos')).toBeNull();
+  });
+
+  it('com onRegisterPayment mas sem pagamentos, mostra o estado vazio', () => {
+    render(<ConversationContextSidebar contact={baseContact} agentStatus="active" onRegisterPayment={vi.fn()} />);
+    expect(screen.getByText('Pagamentos')).toBeTruthy();
+    expect(screen.getByText('Nenhum pagamento registrado')).toBeTruthy();
+  });
+
+  it('lista os pagamentos reais do contato, mais recente primeiro (ordem já vem de quem chama)', () => {
+    const contactWithPayments: ContactProfileData = {
+      ...baseContact,
+      payments: [
+        { id: 'tx-2', amount: 400000, paymentMethod: 'Transferência Bancária', status: 'pendente', date: '2026-09-12T18:00:00Z', productName: 'Combo Micro Cejas + Labios — resto' },
+        { id: 'tx-1', amount: 50000, paymentMethod: 'PIX', status: 'pago', date: '2026-09-11T13:51:00Z', productName: 'Combo Micro Cejas + Labios — seña' },
+      ],
+    };
+    render(<ConversationContextSidebar contact={contactWithPayments} agentStatus="active" currency="PYG" onRegisterPayment={vi.fn()} />);
+
+    expect(screen.getByText('Combo Micro Cejas + Labios — seña')).toBeTruthy();
+    expect(screen.getByText('Combo Micro Cejas + Labios — resto')).toBeTruthy();
+    expect(screen.getByText('pago')).toBeTruthy();
+    expect(screen.getByText('pendente')).toBeTruthy();
+  });
+
+  it('clicar em "Registrar" chama onRegisterPayment', () => {
+    const onRegisterPayment = vi.fn();
+    render(<ConversationContextSidebar contact={baseContact} agentStatus="active" onRegisterPayment={onRegisterPayment} />);
+    fireEvent.click(screen.getByText('Registrar'));
+    expect(onRegisterPayment).toHaveBeenCalledTimes(1);
+  });
+});
