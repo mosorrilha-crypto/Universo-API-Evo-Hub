@@ -41,6 +41,16 @@ export interface ServiceWindowStatus {
   windowExpiresAt: string | null;
 }
 
+/** TASK-0410 — recorte do que a Ficha do Contato precisa mostrar de um recebimento (mesma FinancialTransaction real de src/types.ts, sem reimportar o módulo financeiro inteiro aqui). */
+export interface ContactPaymentSummary {
+  id: string;
+  amount: number;
+  paymentMethod: string;
+  status: 'pago' | 'pendente' | 'atrasado' | 'cancelado';
+  date: string;
+  productName: string;
+}
+
 export interface ContactProfileData {
   name: string;
   phone: string;
@@ -68,4 +78,6 @@ export interface ContactProfileData {
     /** Ausente pra pré-reserva recém-criada — quem remarca cai pra uma duração padrão nesse caso (mesmo fallback já usado em UpcomingEventsPanel.tsx). */
     endIso?: string;
   }>;
+  /** TASK-0410 (pedido direto: "os pagamentos desta cliente devem ficar registrados na ficha e sincronizados com o financeiro") — mais recente primeiro; App.tsx/WhatsAppLeadsSim.tsx filtram a mesma lista real do Financeiro por telefone, sem endpoint novo. */
+  payments?: ContactPaymentSummary[];
 }

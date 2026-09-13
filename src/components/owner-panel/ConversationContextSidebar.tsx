@@ -45,6 +45,10 @@ interface ConversationContextSidebarProps {
    * inteiro) pra quem está nesta aba.
    */
   onSaveMemory?: (patch: { conversationSummary: string | null }) => Promise<void>;
+  /** TASK-0410 (pedido direto: "os pagamentos desta cliente devem ficar registrados na ficha e sincronizados com o financeiro") — formata `contact.payments` (mesma FinancialTransaction real do Financeiro). Ex: "PYG"/"BRL". */
+  currency?: string;
+  /** Abre o mesmo TransactionDialog do Financeiro (WhatsAppLeadsSim.tsx), pré-preenchido com este contato — indisponível (undefined) quando o módulo Financeiro está desligado pro tenant ou o lead ainda não é real. */
+  onRegisterPayment?: () => void;
 }
 
 export const ConversationContextSidebar: React.FC<ConversationContextSidebarProps> = ({
@@ -59,6 +63,8 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
   journeyEvents,
   isJourneyLoading,
   onSaveMemory,
+  currency,
+  onRegisterPayment,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
@@ -441,6 +447,67 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
           </div>
         )}
       </div>
+
+      {/* TASK-0410 (pedido direto): "se eu quiser adicionar outro recebimento
+          do mesmo cliente... deve ficar registrado na ficha e sincronizado
+          com o financeiro" — histórico real (mesma FinancialTransaction do
+          Financeiro, filtrada por telefone em WhatsAppLeadsSim.tsx) + atalho
+          pra registrar um novo recebimento (ex: seña já paga, resto agora)
+          sem sair da Ficha. Só aparece quando o módulo Financeiro está
+          disponível pro tenant (onRegisterPayment vem undefined senão). */}
+      {onRegisterPayment && (
+        <div className="border-t border-slate-800/80 pt-4">
+          <div className="flex items-center justify-between mb-3 gap-2">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              Pagamentos
+            </span>
+            <button
+              type="button"
+              onClick={onRegisterPayment}
+              title="Registrar um recebimento deste cliente (ex: seña já paga, resto agora) — vai pro Financeiro"
+              className="flex items-center gap-1 rounded-lg bg-emerald-500/90 px-2 py-1 text-[10px] font-bold text-slate-950 hover:bg-emerald-400 transition-colors cursor-pointer"
+            >
+              <Plus className="w-3 h-3" />
+              Registrar
+            </button>
+          </div>
+
+          {contact?.payments && contact.payments.length > 0 ? (
+            <div className="space-y-2">
+              {contact.payments.map((payment) => (
+                <div
+                  key={payment.id}
+                  className="flex items-center justify-between gap-2.5 p-2.5 bg-slate-800/40 rounded-xl border border-slate-800"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-200 truncate">{payment.productName}</p>
+                    <p className="text-[10px] text-slate-500">
+                      {new Date(payment.date).toLocaleDateString('pt-BR')} · {payment.paymentMethod}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-bold text-slate-100">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency || 'PYG' }).format(payment.amount)}
+                    </p>
+                    <span className={`text-[10px] font-medium ${
+                      payment.status === 'pago' ? 'text-emerald-400'
+                        : payment.status === 'pendente' ? 'text-amber-400'
+                        : payment.status === 'atrasado' ? 'text-rose-400'
+                        : 'text-slate-500'
+                    }`}>
+                      {payment.status === 'pago' ? 'pago' : payment.status === 'pendente' ? 'pendente' : payment.status === 'atrasado' ? 'atrasado' : 'cancelado'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-3 bg-slate-800/20 rounded-xl border border-slate-800 text-center">
+              <span className="text-xs text-slate-500">Nenhum pagamento registrado</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <ContactJourneyTimeline events={journeyEvents || []} isLoading={Boolean(isJourneyLoading)} />
 

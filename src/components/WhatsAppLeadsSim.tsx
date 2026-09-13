@@ -209,6 +209,12 @@ interface WhatsAppLeadsSimProps {
   /** Cria a transação financeira do caminho avulso do comprovante — App.tsx
       passa handleAddTransaction, a mesma função já usada pelo Financeiro. */
   onAddTransaction?: (tx: FinancialTransaction) => Promise<boolean>;
+  /** TASK-0410 (pedido direto: "os pagamentos desta cliente devem ficar
+      registrados na ficha e sincronizados com o financeiro") — lista
+      completa do tenant (mesmo estado já usado pelo Financeiro/Agenda em
+      App.tsx); filtrada por telefone aqui pra alimentar o card "Pagamentos"
+      da Ficha do Contato, sem endpoint novo nem fetch duplicado. */
+  transactions?: FinancialTransaction[];
   /** Nome do operador logado, só pra atribuição no lançamento avulso criado a partir de um comprovante. */
   operatorName?: string;
   /** TASK-0290 (pedido direto, print do botão "voltar" do Android circulado:
@@ -415,6 +421,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   openLeadRequestId,
   financialModuleEnabled,
   onAddTransaction,
+  transactions,
   operatorName,
   onToast,
   onSelectTab,
@@ -719,7 +726,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // editar antes de qualquer registro real acontecer.
   const [analyzingPaymentProofFor, setAnalyzingPaymentProofFor] = useState<string | null>(null);
   const [paymentProofDraft, setPaymentProofDraft] = useState<{
-    messageId: string;
+    /** Ausente quando aberto pela Ficha do Contato ("+ Registrar recebimento") em vez de a partir de uma imagem de comprovante no chat — nesse caso não há `sourceRef` de dedupe (ver savePaymentProofTransaction). */
+    messageId?: string;
     leadName: string;
     leadPhone: string;
     extraction: {
@@ -2700,6 +2708,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     return { upcomingAppointments, funnelStageName, isPendingPaymentProof };
   }, [selectedLead?.phone, selectedLead?.fullAnalysis?.stage, paymentAppointment, upcomingEvents]);
 
+  // TASK-0410 (pedido direto: "se eu quiser adicionar outro recebimento do
+  // mesmo cliente... deve ficar registrado na ficha e sincronizado com o
+  // financeiro") — filtra a lista já mantida por App.tsx (mesmo estado do
+  // Financeiro/Agenda, sem endpoint nem fetch novo) pelo telefone da
+  // conversa aberta, mais recente primeiro, pro card "Pagamentos" da Ficha.
+  const contactPayments = React.useMemo(() => {
+    const phone = selectedLead?.phone;
+    if (!phone || !transactions?.length) return [];
+    return transactions
+      .filter((tx) => tx.leadPhone === phone)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [selectedLead?.phone, transactions]);
+
+  // Abre o mesmo TransactionDialog usado pro comprovante marcado no chat,
+  // mas sem messageId — cobre o caso de um recebimento sem imagem (dinheiro,
+  // seña anterior + resto agora) registrado direto a partir da Ficha.
+  const handleOpenManualPaymentDialog = React.useCallback(() => {
+    if (!selectedLead) return;
+    setPaymentProofDraft({ leadName: selectedLead.name, leadPhone: selectedLead.phone, extraction: null });
+  }, [selectedLead]);
+
   // TASK-0267 (pedido direto): histórico completo de escalonamentos DESTE
   // contato — antes só existia o alerta do escalonamento ATIVO (banner no
   // topo da conversa, achado ~linha 4172) ou a fila geral de Pendências
@@ -3544,9 +3573,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           status: String(form.get('status') || 'pago') as PaymentStatus,
           date: new Date().toISOString(),
           operatorName,
-          channel: 'Comprovante via WhatsApp',
+          channel: paymentProofDraft.messageId ? 'Comprovante via WhatsApp' : 'Registrado na Ficha do Contato',
           entryType: 'income',
-          sourceRef: `chat-image:${paymentProofDraft.messageId}`,
+          // Sem messageId (aberto pela Ficha, não a partir de uma imagem do chat) não há
+          // origem única pra deduplicar — cada recebimento avulso é sua própria transação.
+          sourceRef: paymentProofDraft.messageId ? `chat-image:${paymentProofDraft.messageId}` : undefined,
         } as FinancialTransaction);
         if (!created) throw new Error('Não foi possível registrar no servidor.');
       }
@@ -6755,13 +6786,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     totalSteps: 5,
                   },
                   upcomingAppointments: contactFunnelInfo.upcomingAppointments,
+                  payments: contactPayments,
                 } : null}
+                currency={activeTenant?.currency || 'PYG'}
                 agentStatus={selectedLead?.aiBlockedAt ? 'paused' : 'active'}
                 onToggleAgentStatus={() => selectedLead && handleUpdateConversationState(selectedLead.id, { aiBlocked: !selectedLead.aiBlockedAt })}
                 onClose={() => setShowRightPanel(false)}
                 onResyncAppointment={handleResyncAppointment}
                 onOpenManualAppointment={(selectedLead as any)?.isReal ? () => setIsManualAppointmentModalOpen(true) : undefined}
                 onRescheduleAppointment={handleRescheduleEvent}
+                onRegisterPayment={financialModuleEnabled && (selectedLead as any)?.isReal ? handleOpenManualPaymentDialog : undefined}
                 journeyEvents={visibleContactJourney}
                 isJourneyLoading={isContactJourneyLoading}
                 onSaveMemory={handleSaveContactMemory}
@@ -6894,13 +6928,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     totalSteps: 5,
                   },
                   upcomingAppointments: contactFunnelInfo.upcomingAppointments,
+                  payments: contactPayments,
                 }}
+                currency={activeTenant?.currency || 'PYG'}
                 agentStatus={(selectedLead as any)?.aiBlockedAt ? 'paused' : 'active'}
                 onToggleAgentStatus={() => handleUpdateConversationState(selectedLead.id, { aiBlocked: !(selectedLead as any).aiBlockedAt })}
                 onClose={() => setMobileAnalysisOpen(false)}
                 onResyncAppointment={handleResyncAppointment}
                 onOpenManualAppointment={(selectedLead as any)?.isReal ? () => { setMobileAnalysisOpen(false); setIsManualAppointmentModalOpen(true); } : undefined}
                 onRescheduleAppointment={handleRescheduleEvent}
+                onRegisterPayment={financialModuleEnabled && (selectedLead as any)?.isReal ? () => { setMobileAnalysisOpen(false); handleOpenManualPaymentDialog(); } : undefined}
                 journeyEvents={visibleContactJourney}
                 isJourneyLoading={isContactJourneyLoading}
                 onSaveMemory={handleSaveContactMemory}
@@ -6981,7 +7018,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           initialValues={{
             description: paymentProofDraft.extraction?.bankOrApp
               ? `Comprovante recebido — ${paymentProofDraft.extraction.bankOrApp}`
-              : 'Comprovante recebido no WhatsApp',
+              : paymentProofDraft.messageId
+                ? 'Comprovante recebido no WhatsApp'
+                : undefined,
             amount: paymentProofDraft.extraction?.amount ?? undefined,
             paymentMethod: paymentProofDraft.extraction?.method ?? undefined,
           }}
