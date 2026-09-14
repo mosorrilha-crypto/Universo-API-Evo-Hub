@@ -906,7 +906,13 @@ export async function getPromptAuditView(tenantId: string, agent: AgentType, pho
   const knowledgeBaseContext = formatKnowledgeBaseForPrompt(runtimeKnowledgeBase.knowledgeBase);
   const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
   const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
-  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, fullKnowledgeBaseContext);
+  // TASK-0415 — buildCachedSystemInstruction ganhou o parâmetro leadsOnly na
+  // TASK-0412 (generateSpecialistReply já busca e passa); esta função tinha
+  // ficado pra trás, sempre montando o ramo "outOfScope é sempre false" mesmo
+  // pra tenants com o modo "somente leads" ligado — quebrava a promessa do
+  // docstring acima ("byte a byte igual ao que o especialista real usa").
+  const leadsOnly = await isLeadsOnlyMode(tenantId).catch(() => false);
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, fullKnowledgeBaseContext, leadsOnly);
 
   let conversationPreview: PromptAuditView['conversationPreview'];
   if (phone) {
