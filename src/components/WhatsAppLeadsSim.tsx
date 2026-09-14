@@ -812,6 +812,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // matchesAdTriggerMessage no backend).
   const [adTriggerMessages, setAdTriggerMessagesState] = useState<string[]>([]);
 
+  // Modo "somente leads" (TASK-0411/TASK-0412, pedido real, 14/09/2026):
+  // pra tenants que atendem pelo próprio número pessoal de WhatsApp (ex: um
+  // profissional autônomo que recebe tanto mensagem de paciente/cliente
+  // quanto assunto pessoal no mesmo número), liga um filtro semântico — a
+  // IA avalia cada mensagem e deixa de responder automaticamente as que
+  // identificar como pessoais, sem gerar nenhum alerta de falha. Diferente
+  // de "somente anúncios" (código puro, antes de chamar o Gemini), esse
+  // julgamento só o próprio modelo consegue fazer — ver autoReply.ts.
+  const [leadsOnly, setLeadsOnlyState] = useState(false);
+
   const loadAgentStatus = () => {
     apiFetch('/api/agent-status')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
@@ -819,6 +829,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         setAgentStatusState(data?.status || 'active');
         if (typeof data?.adsOnly === 'boolean') setAdsOnlyState(data.adsOnly);
         if (Array.isArray(data?.adTriggerMessages)) setAdTriggerMessagesState(data.adTriggerMessages);
+        if (typeof data?.leadsOnly === 'boolean') setLeadsOnlyState(data.leadsOnly);
         setAgentStatusLoadFailed(false);
       })
       .catch((err) => {
@@ -1225,6 +1236,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       console.error('Falha ao atualizar modo somente anúncios:', err);
       setAdsOnlyState(previous);
       setErrorMsg('Não foi possível atualizar o modo "somente anúncios" no servidor — tente de novo.');
+    }
+  };
+
+  const handleToggleLeadsOnly = async () => {
+    const previous = leadsOnly;
+    const next = !leadsOnly;
+    setLeadsOnlyState(next);
+    try {
+      const res = await apiFetch('/api/agent-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadsOnly: next }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao atualizar modo somente leads:', err);
+      setLeadsOnlyState(previous);
+      setErrorMsg('Não foi possível atualizar o modo "somente leads" no servidor — tente de novo.');
     }
   };
 
@@ -4144,6 +4173,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             )}
           </div>
         </div>
+        {/* TASK-0411/TASK-0412 (pedido direto do dono do produto): modo
+            "somente leads", em fileira própria abaixo — cramming numa 5ª
+            pill na mesma linha das 4 acima (3 status + Anúncios) deixaria
+            cada uma estreita demais em telas pequenas. Mesmo estilo visual
+            de pill que "Anúncios" (bg emerald quando ativo), mas sem badge
+            de configuração — é só um liga/desliga, sem opções extras. */}
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={handleToggleLeadsOnly}
+            title={
+              leadsOnly
+                ? 'Agente só responde mensagens que identificar como comerciais/profissionais — silêncio pra assuntos pessoais, mesmo na 1ª mensagem de um contato novo'
+                : 'Restringir o agente a só responder mensagens que identificar como comerciais/profissionais (útil quando este número também recebe assunto pessoal)'
+            }
+            className={`flex-1 rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold transition-colors cursor-pointer ${
+              leadsOnly ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-400 hover:text-white'
+            }`}
+          >
+            {isSpanish ? 'Solo leads' : 'Somente leads'}
+          </button>
+        </div>
       </div>
 
       {agentStatusLoadFailed && (
@@ -4611,6 +4662,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <Settings className="h-3.5 w-3.5" />
                 </button>
               )}
+              {/* TASK-0411/TASK-0412 (pedido direto do dono do produto):
+                  modo "somente leads", mesma família de ícone da linha
+                  acima — ao lado do de "Anúncios", ambos decidindo "o
+                  agente responde a quem?". */}
+              <button
+                type="button"
+                onClick={handleToggleLeadsOnly}
+                title={
+                  leadsOnly
+                    ? 'Somente leads ATIVO — agente só responde mensagens que identificar como comerciais/profissionais, silêncio pra assuntos pessoais'
+                    : 'Ativar modo somente leads — agente para de responder assuntos pessoais automaticamente (mesmo número usado pra atendimento e uso pessoal)'
+                }
+                className={`rounded-lg p-1.5 transition-all cursor-pointer ${
+                  leadsOnly ? 'bg-[var(--action)] text-[var(--action-contrast)]' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <UserCheck className="h-3.5 w-3.5" />
+              </button>
               {/* Achado real em produção (15/08/2026): enquanto agentStatus
                   ainda é null (GET inicial não confirmou nada) ou falhou de
                   vez, nenhum pill acende — antes disso "Ativo" ficava

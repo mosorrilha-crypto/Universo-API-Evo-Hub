@@ -31,6 +31,7 @@ import { upsertContactAgentMemory } from './contactAgentMemoryStore';
 import { recordAgentTurnTrace } from './agentTurnTraceStore';
 import { listRecentApprovedReplyExamples, formatApprovedReplyExamplesForPrompt } from './approvedReplyExampleStore';
 import { isPlausiblePersonalName } from './contactNameGuard';
+import { isLeadsOnlyMode } from './agentStatus';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
@@ -544,7 +545,7 @@ function buildStyleRulesSection(agent: AgentType): string {
   const numbered = applicable.map((rule, index) => `${index + 1}. ${rule.text}`).join('\n');
   return `REGRAS DE ESTILO (sempre aplicar):\n${numbered}`;
 }
-async function buildCachedSystemInstruction(tenantId: string, agent: AgentType, knowledgeBaseContext?: string): Promise<string> {
+async function buildCachedSystemInstruction(tenantId: string, agent: AgentType, knowledgeBaseContext?: string, leadsOnly?: boolean): Promise<string> {
   // Camada 1 por tenant (18/08/2026) — tenant com cópia própria (editada
   // pelo admin dele) tem prioridade; sem cópia própria, cai na Camada 1
   // global de sempre (override do saas_admin, ou o padrão hardcoded).
@@ -576,7 +577,7 @@ Acompanhamento de funil — pedido real (15/08/2026): uma auditoria de conversas
 
 Backup em planilha (pedido real, 01/09/2026, TASK-0185) — preencha "servicoInteresse" com o nome EXATO do serviço/produto do catálogo (igual ao catálogo, nunca uma tradução/paráfrase) que a cliente demonstrou interesse nesta mensagem ou no histórico recente — null quando ela só mencionou uma categoria genérica (ex: "cejas") sem especificar qual serviço dentro dela, ou quando ainda não ficou claro. Nunca invente um serviço que não esteja no catálogo nem que a cliente não tenha mencionado.
 
-Escopo de resposta automática (TASK-0411, pedido real — tenant que usa o mesmo número de WhatsApp pessoal e profissional): USE "outOfScope" SOMENTE quando as Regras de negócio do negócio abaixo definirem explicitamente que a IA só deve responder automaticamente mensagens de um determinado tipo (ex: só assunto profissional/clínico). Sem essa instrução explícita ali, "outOfScope" é SEMPRE false — este é o padrão pra praticamente todo negócio. Quando essa instrução existir, avalie se a mensagem se encaixa no que deve ser respondido; se não se encaixar, preencha "outOfScope": true e deixe "bubbles" como uma lista vazia — nenhuma resposta automática será enviada, sem gerar nenhum alerta de falha. Na dúvida real entre a mensagem se encaixar ou não, prefira responder normalmente (outOfScope: false) — só marque true havendo sinal razoavelmente claro de que a mensagem é do tipo que a regra do negócio pede pra não responder.
+${leadsOnly ? `Modo "somente leads" está ATIVO pra este negócio (TASK-0411/TASK-0412, pedido real — tenant que atende pelo mesmo número de WhatsApp pessoal e profissional, recebendo tanto lead/paciente quanto assunto totalmente pessoal no mesmo número): responda automaticamente SÓ quando a mensagem indicar um assunto comercial/profissional ligado ao que o negócio abaixo oferece (dúvida sobre serviço, preço, agendamento, procedimento). Quando a mensagem for claramente pessoal/social e sem nenhuma relação com o negócio (cumprimento solto numa conversa que já está claramente indo por assunto pessoal, organização de evento/carona, papo entre conhecidos, figurinha/reação sem texto nenhum), preencha "outOfScope": true e deixe "bubbles" como uma lista vazia — nenhuma resposta automática será enviada, sem gerar nenhum alerta de falha. Na dúvida real entre a mensagem ser comercial ou pessoal, SEMPRE prefira responder normalmente (outOfScope: false) — só marque true havendo sinal razoavelmente claro de assunto pessoal.` : 'O campo "outOfScope" abaixo é sempre false pra este negócio — nunca preencha true.'}
 
 Responda ESTRITAMENTE em JSON no formato:
 {"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null, "pendenteAvaliacao": null, "aguardandoCliente": null, "servicoInteresse": null, "outOfScope": false}
@@ -639,7 +640,22 @@ async function generateSpecialistReply(
   groqApiKey?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string; interestedService?: string; outOfScope?: boolean } | null> {
   const historyText = buildHistoryText(history);
-  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext);
+  // TASK-0411/TASK-0412 — "somente leads": buscado uma vez aqui (não dentro
+  // de buildCachedSystemInstruction) pra reaproveitar o mesmo valor tanto na
+  // Camada 1 (cacheada) quanto no lembrete dinâmico de 1ª mensagem abaixo,
+  // sem duas consultas separadas ao mesmo agent_status.
+  const leadsOnly = await isLeadsOnlyMode(tenantId).catch(() => false);
+  const isFirstMessage = !history || history.length === 0;
+  // TASK-0411/TASK-0412 — único ponto de decisão de quando um outOfScope
+  // retornado pelo modelo é aceito de verdade: precisa do modo "somente
+  // leads" ativo (nunca aceita se o tenant não ligou o modo, mesmo que o
+  // campo venha true por algum motivo) E não pode ser a 1ª mensagem da
+  // conversa (rede de segurança em código, não só instrução de prompt — se
+  // o modelo ignorar o lembrete acima e mesmo assim marcar outOfScope na
+  // 1ª mensagem, isso é IGNORADO aqui, caindo no fluxo antigo de falha real
+  // em vez de silenciar a mensagem mais importante de um lead novo).
+  const outOfScopeHonored = (p?: { outOfScope?: boolean }) => !!p?.outOfScope && leadsOnly && !isFirstMessage;
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext, leadsOnly);
   const specialistModel = 'gemini-3.6-flash';
   // Camada 1 (global) + Camada 3 (Base de Conhecimento do tenant) juntas
   // são idênticas em toda chamada deste (agent, tenantId) enquanto ninguém
@@ -651,7 +667,17 @@ async function generateSpecialistReply(
   // exatamente como sempre funcionou.
   const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${tenantId}`, systemInstruction);
 
-  const contextPreamble = `${contextPack ? `${contextPack.promptSection}\n\n` : ''}${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`;
+  // TASK-0411/TASK-0412 — reforço específico desta mensagem (Camada 4,
+  // dinâmica, nunca cacheada): mesmo a Camada 1 já dizendo pra nunca marcar
+  // outOfScope na 1ª mensagem de uma conversa, um lembrete direcionado bem
+  // na mensagem em que isso realmente se aplica (sem histórico nenhum
+  // ainda) é mais confiável do que só a regra geral — evita que um lead de
+  // verdade fique sem resposta só por mandar "Oi"/"Buenas" primeiro, sem
+  // contexto suficiente ainda pra qualquer julgamento de escopo.
+  const firstMessageOutOfScopeReminder = leadsOnly && isFirstMessage
+    ? 'Esta é a PRIMEIRA mensagem desta conversa (sem histórico anterior) — NUNCA marque "outOfScope" aqui, mesmo que a mensagem pareça pessoal/ambígua (ex: "Oi", "Buenas"); não há contexto suficiente ainda pra saber se é lead comercial ou contato pessoal. Responda normalmente.\n\n'
+    : '';
+  const contextPreamble = `${firstMessageOutOfScopeReminder}${contextPack ? `${contextPack.promptSection}\n\n` : ''}${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`;
 
   // Estrutural, não só textual (18/08/2026): messageBuffer.ts agrupa
   // mensagens de rajada do cliente (dentro da janela de 6s de silêncio) num
@@ -770,11 +796,11 @@ async function generateSpecialistReply(
         const groqBubbles = Array.isArray(groqParsed?.bubbles)
           ? groqParsed.bubbles.filter((b: unknown) => typeof b === 'string' && b.trim())
           : [];
-        // TASK-0411 — bubbles vazio é válido quando o modelo marcou
-        // outOfScope de propósito (mensagem fora do escopo definido nas
-        // Regras de negócio do tenant); só trata como falha do Groq quando
-        // bubbles vier vazio SEM esse sinal explícito.
-        if (!groqBubbles.length && !groqParsed?.outOfScope) {
+        // TASK-0411/TASK-0412 — bubbles vazio é válido quando o modelo
+        // marcou outOfScope de propósito e isso é aceito (modo "somente
+        // leads" ativo, não é a 1ª mensagem); só trata como falha do Groq
+        // quando bubbles vier vazio sem um outOfScope válido.
+        if (!groqBubbles.length && !outOfScopeHonored(groqParsed)) {
           throw new Error(`Groq retornou resposta do especialista sem "bubbles" válidas: ${JSON.stringify(groqParsed)}`);
         }
         parsed = groqParsed as SpecialistParsed;
@@ -817,13 +843,16 @@ async function generateSpecialistReply(
     : undefined;
 
   if (!bubbles.length) {
-    // TASK-0411 — bubbles vazio por decisão deliberada do modelo (mensagem
-    // fora do escopo que as Regras de negócio do tenant definiram como
-    // "só responder quando...") é um resultado válido, distinto de uma
-    // falha real de geração — nunca colapsa pro `null` de falha aqui,
-    // senão webhooks.ts trataria isso como "IA não conseguiu responder" e
-    // criaria um escalonamento falso pra cada mensagem fora de escopo.
-    if (parsed.outOfScope) return { phase, bubbles: [], needsHumanConfirmation: false, outOfScope: true };
+    // TASK-0411/TASK-0412 — bubbles vazio por decisão deliberada do modelo
+    // (modo "somente leads" ativo, mensagem claramente pessoal) é um
+    // resultado válido, distinto de uma falha real de geração — nunca
+    // colapsa pro `null` de falha aqui, senão webhooks.ts trataria isso
+    // como "IA não conseguiu responder" e criaria um escalonamento falso
+    // pra cada mensagem pessoal ignorada de propósito. outOfScopeHonored
+    // também cobre a rede de segurança da 1ª mensagem (ver comentário
+    // acima) — nesse caso cai no `return null` de sempre, mesmo com
+    // parsed.outOfScope=true.
+    if (outOfScopeHonored(parsed)) return { phase, bubbles: [], needsHumanConfirmation: false, outOfScope: true };
     return null;
   }
   // Acompanhamento de funil (pedido real, 15/08/2026 — server/services/pendingFollowUpJob.ts):
