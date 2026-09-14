@@ -1337,6 +1337,36 @@ describe('generateAutoReplyForText — outOfScope / modo "somente leads" (TASK-0
     expect(result?.bubbles).toEqual([]);
   });
 
+  // TASK-0416 — achado real: quando o tenant tem uma Mensagem de Primeiro
+  // Contato fixa (firstContactBlocks, nunca gerada pela IA) ou um operador
+  // escreveu antes de qualquer lead, `history` já não está vazio na 1ª vez
+  // que o especialista roda de verdade, mesmo sendo a 1ª vez — a rede de
+  // segurança "1ª mensagem sempre responde" precisa se basear em
+  // `specialistInvokedBefore` (vindo de conversationStore.markSpecialistInvoked),
+  // não em `history.length`.
+  it('modo ativo + histórico não vazio MAS specialistInvokedBefore=false (ex: só a saudação fixa de Primeiro Contato já foi enviada): rede de segurança ainda protege, ignora o outOfScope', async () => {
+    isLeadsOnlyMode.mockResolvedValueOnce(true);
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText(
+      'tenant-daniel', ai, 'oi tudo bem?', 'Cliente', undefined, SOME_HISTORY,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      false
+    );
+    expect(result).toBeNull();
+  });
+
+  it('modo ativo + histórico não vazio + specialistInvokedBefore=true: especialista já rodou antes de verdade, outOfScope aceito normalmente', async () => {
+    isLeadsOnlyMode.mockResolvedValueOnce(true);
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText(
+      'tenant-daniel', ai, 'Fala bb, cola na RP hoje', 'Cliente', undefined, SOME_HISTORY,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      true
+    );
+    expect(result).not.toBeNull();
+    expect(result?.outOfScope).toBe(true);
+  });
+
   it('modo DESLIGADO (default) + outOfScope=true com bubbles vazio: NUNCA aceito, mesmo com histórico — continua tratado como falha real (null)', async () => {
     const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
     const result = await generateAutoReplyForText('tenant-a', ai, 'Solo cejas precio', 'Cliente', undefined, SOME_HISTORY);

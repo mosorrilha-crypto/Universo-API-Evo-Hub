@@ -67,6 +67,20 @@ export interface StoredConversation {
   interest?: string;
   /** Conversa identificada como vinda de anúncio — automaticamente (ctwa_clid real ou texto batendo com um gatilho configurado, ver markAdGreetingMatched) ou manualmente pelo operador (ver updateConversationState, campo adLead). Só importa no modo "Só Anúncios" (agentStatus.isAdsOnlyMode): libera a resposta automática pra essa conversa mesmo sem referral real. */
   adGreetingMatchedAt?: string;
+  /**
+   * TASK-0416 — timestamp da 1ª vez que generateSpecialistReply (o
+   * especialista real, autoReply.ts) foi invocado nesta conversa. Existe pra
+   * separar "history vazio" (sinal de 1ª mensagem usado até aqui pela rede
+   * de segurança "1ª mensagem sempre responde" do modo leadsOnly,
+   * TASK-0411/0412) de "1ª vez que o especialista roda de verdade" — achado
+   * real: quando o tenant tem uma Mensagem de Primeiro Contato fixa
+   * (firstContactBlocks, nunca gerada pela IA — ver firstContactMessage.ts)
+   * OU quando um operador manda a 1ª mensagem antes de qualquer lead
+   * escrever, `history.length===0` nunca é verdade na 1ª vez que o
+   * especialista de fato roda, então a rede de segurança nunca disparava
+   * nesses casos (ver markSpecialistInvoked).
+   */
+  specialistInvokedAt?: string;
   /** IA para de responder automaticamente só pra esse número — ligado manualmente pelo operador (lead não qualificado/insistente) OU automaticamente pelo próprio autoReply.ts (alucinação de agenda sem ferramenta pra sustentar, ver stopAutoReply em autoReply.ts). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
   aiBlockedAt?: string;
   /** Quando o operador pediu explicitamente pra devolver o controle pra IA agora (ver ConversationStatePatch.releaseAiNow) — usado só pelo gate "operador ativo" de webhooks.ts, nunca exibido como estado persistente no painel. */
@@ -105,6 +119,7 @@ type ConversationRow = {
   ai_blocked_at: string | null;
   operator_ai_release_at: string | null;
   ad_greeting_matched_at: string | null;
+  specialist_invoked_at: string | null;
   last_read_at: string;
   /** Qual número do tenant esta conversa usa (principal, ou um broadcast_numbers) — ver getOrCreateConversationForBroadcast/resolveCredentialsForConversation. */
   phone_number_id: string | null;
@@ -158,6 +173,7 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     aiBlockedAt: row.ai_blocked_at || undefined,
     operatorAiReleaseAt: row.operator_ai_release_at || undefined,
     adGreetingMatchedAt: row.ad_greeting_matched_at || undefined,
+    specialistInvokedAt: row.specialist_invoked_at || undefined,
     phoneNumberId: row.phone_number_id ?? null,
     unreadCount: countUnreadMessages(row.messages || [], row.last_read_at),
     messages: (row.messages || [])
@@ -438,6 +454,20 @@ export async function getConversationAdGreetingMatched(tenantId: string, phone: 
   const db = getDb();
   const { data } = await db.from('conversations').select('ad_greeting_matched_at').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
   return !!data?.ad_greeting_matched_at;
+}
+
+/**
+ * TASK-0416 — marca que generateSpecialistReply já foi invocado ao menos
+ * uma vez nesta conversa (ver StoredConversation.specialistInvokedAt acima
+ * pro contexto completo do achado). Idempotente: só grava a 1ª vez, nunca
+ * sobrescreve (mesmo padrão de markAdGreetingMatched).
+ */
+export async function markSpecialistInvoked(tenantId: string, phone: string): Promise<void> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  const { data: existing } = await db.from('conversations').select('specialist_invoked_at').eq('id', conv.id).maybeSingle();
+  if (existing?.specialist_invoked_at) return;
+  await db.from('conversations').update({ specialist_invoked_at: new Date().toISOString() }).eq('id', conv.id);
 }
 
 /**

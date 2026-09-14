@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed, dedupeKeyFor } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText, markSpecialistInvoked } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, executeApprovedMediaAction, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
@@ -261,7 +261,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         // reabre.
         const pendingGuidance = await getPendingOperatorGuidance(tenantId, phone);
         const isCampaignEntry = Boolean(conversation?.adHeadline || conversation?.adGreetingMatchedAt);
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply, groqApiKey, historyExclude, isCampaignEntry);
+        // TASK-0416 — ver StoredConversation.specialistInvokedAt: history
+        // vazio não basta pra saber se é a 1ª vez que o especialista roda
+        // (Mensagem de Primeiro Contato fixa/operador podem ter escrito
+        // antes sem nunca chamar o especialista).
+        const specialistInvokedBefore = !!conversation?.specialistInvokedAt;
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply, groqApiKey, historyExclude, isCampaignEntry, specialistInvokedBefore);
+        await markSpecialistInvoked(tenantId, phone);
         if (!result) {
           // Achado real em produção (issue #82, item 4; revisado depois de
           // uma auditoria de conversas reais): mesmo com retry

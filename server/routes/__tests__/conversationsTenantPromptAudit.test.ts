@@ -141,4 +141,23 @@ describe('GET /api/tenant-prompt-audit', () => {
     expect(body.systemInstruction).toContain('AGENDAMENTO');
     expect(body.systemInstruction).not.toContain('FAQ/ESPECIALISTA');
   });
+
+  // TASK-0415 — regressão: getPromptAuditView não passava leadsOnly pra
+  // buildCachedSystemInstruction, então a auditoria sempre mostrava o ramo
+  // "outOfScope é sempre false" mesmo com o toggle "somente leads" ligado
+  // pro tenant — quebrava a promessa do docstring de refletir byte a byte o
+  // prompt real usado pelo especialista.
+  it('reflete o toggle "somente leads" (agent_status.leads_only) no systemInstruction', async () => {
+    const supabase = createFakeSupabase({
+      knowledge_base_documents: completePublishedDocuments(),
+      agent_status: [{ tenant_id: TENANT_A, status: 'active', ads_only: false, leads_only: true }],
+    });
+    initDb(supabase);
+
+    const res = await fetch(`${baseUrl}/api/tenant-prompt-audit?agent=faq`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.systemInstruction).toContain('Modo "somente leads" está ATIVO');
+    expect(body.systemInstruction).not.toContain('outOfScope" abaixo é sempre false');
+  });
 });
