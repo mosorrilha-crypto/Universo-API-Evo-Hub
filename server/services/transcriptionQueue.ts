@@ -266,6 +266,13 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
             emitAiReplyStatus(tenantId, message.from, 'failed');
             return;
           }
+          // TASK-0411 — mesmo tratamento do caminho de texto (webhooks.ts):
+          // decisão deliberada de não responder (fora do escopo definido
+          // nas Regras de negócio do tenant), nunca uma falha.
+          if (result.outOfScope) {
+            emitAiReplyStatus(tenantId, message.from, 'skipped_out_of_scope');
+            return;
+          }
           const safety = await reviewAutoReplyBeforeSend({
             customerMessage: outcome.result.transcription,
             draftBubbles: result.bubbles,

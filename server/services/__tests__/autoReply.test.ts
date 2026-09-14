@@ -1306,3 +1306,45 @@ describe('generateAutoReplyForText — gate de confirmação prematura de agenda
     expect(result?.bubbles).toEqual(['Recibí tu comprobante, ya lo estamos revisando.']);
   });
 });
+
+describe('generateAutoReplyForText — outOfScope (TASK-0411, tenant com número pessoal e profissional)', () => {
+  function makeFakeAiSpecialist(specialistReply: Record<string, unknown>) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text?.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'triagem' }) } as any;
+          return { text: JSON.stringify(specialistReply) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  it('outOfScope=true com bubbles vazio retorna um resultado (não null) com outOfScope=true e bubbles=[]', async () => {
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText('tenant-daniel', ai, 'Fala bb, cola na RP hoje', 'Cliente');
+    expect(result).not.toBeNull();
+    expect(result?.outOfScope).toBe(true);
+    expect(result?.bubbles).toEqual([]);
+  });
+
+  it('bubbles vazio SEM outOfScope continua sendo tratado como falha real (retorna null) — comportamento pré-existente preservado', async () => {
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false });
+    const result = await generateAutoReplyForText('tenant-a', ai, 'Solo cejas precio', 'Cliente');
+    expect(result).toBeNull();
+  });
+
+  it('outOfScope=true mas com bubbles preenchido é tratado como resposta normal (bubbles não vazio vence)', async () => {
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: ['Claro, te ayudo con eso.'], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText('tenant-daniel', ai, 'Quiero saber el precio', 'Cliente');
+    expect(result).not.toBeNull();
+    expect(result?.bubbles).toEqual(['Claro, te ayudo con eso.']);
+  });
+
+  it('sem outOfScope no JSON (tenant comum, sem essa regra na Base de Conhecimento) responde normalmente', async () => {
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: ['Gs 550.000.'], needsHumanConfirmation: false });
+    const result = await generateAutoReplyForText('tenant-a', ai, 'Cuánto cuesta', 'Cliente');
+    expect(result?.outOfScope).toBeFalsy();
+    expect(result?.bubbles).toEqual(['Gs 550.000.']);
+  });
+});

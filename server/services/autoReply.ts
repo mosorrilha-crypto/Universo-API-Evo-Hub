@@ -220,6 +220,20 @@ export interface AutoReplyResult {
    * conteúdo, sem o botão) como fallback automático.
    */
   quickReplyOptions?: { bodyText: string; buttons: { id: string; title: string }[] };
+  /**
+   * TASK-0411 (pedido real — tenant que usa o mesmo número de WhatsApp
+   * pessoal e profissional): true quando o modelo decidiu, seguindo uma
+   * instrução explícita nas Regras de negócio do tenant sobre quando
+   * responder, que esta mensagem está fora do escopo definido (ex: assunto
+   * claramente pessoal, não relacionado ao atendimento profissional) —
+   * `bubbles` vem vazio de propósito nesse caso. Diferente de um resultado
+   * `null` (falha real do Gemini/Groq mesmo após retry), isso NUNCA deve
+   * virar um escalonamento de "falha ao gerar resposta" — é uma decisão
+   * deliberada de não responder automaticamente, não um erro. Sem essa
+   * instrução na Base de Conhecimento do tenant, o modelo nunca marca isso
+   * — o padrão pra todo tenant continua sendo sempre responder.
+   */
+  outOfScope?: boolean;
 }
 
 /**
@@ -562,9 +576,11 @@ Acompanhamento de funil — pedido real (15/08/2026): uma auditoria de conversas
 
 Backup em planilha (pedido real, 01/09/2026, TASK-0185) — preencha "servicoInteresse" com o nome EXATO do serviço/produto do catálogo (igual ao catálogo, nunca uma tradução/paráfrase) que a cliente demonstrou interesse nesta mensagem ou no histórico recente — null quando ela só mencionou uma categoria genérica (ex: "cejas") sem especificar qual serviço dentro dela, ou quando ainda não ficou claro. Nunca invente um serviço que não esteja no catálogo nem que a cliente não tenha mencionado.
 
+Escopo de resposta automática (TASK-0411, pedido real — tenant que usa o mesmo número de WhatsApp pessoal e profissional): USE "outOfScope" SOMENTE quando as Regras de negócio do negócio abaixo definirem explicitamente que a IA só deve responder automaticamente mensagens de um determinado tipo (ex: só assunto profissional/clínico). Sem essa instrução explícita ali, "outOfScope" é SEMPRE false — este é o padrão pra praticamente todo negócio. Quando essa instrução existir, avalie se a mensagem se encaixa no que deve ser respondido; se não se encaixar, preencha "outOfScope": true e deixe "bubbles" como uma lista vazia — nenhuma resposta automática será enviada, sem gerar nenhum alerta de falha. Na dúvida real entre a mensagem se encaixar ou não, prefira responder normalmente (outOfScope: false) — só marque true havendo sinal razoavelmente claro de que a mensagem é do tipo que a regra do negócio pede pra não responder.
+
 Responda ESTRITAMENTE em JSON no formato:
-{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null, "pendenteAvaliacao": null, "aguardandoCliente": null, "servicoInteresse": null}
-Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar. nomeCapturado é null na grande maioria das vezes — só preencha nos casos descritos acima.`;
+{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null, "pendenteAvaliacao": null, "aguardandoCliente": null, "servicoInteresse": null, "outOfScope": false}
+Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar. nomeCapturado é null na grande maioria das vezes — só preencha nos casos descritos acima. outOfScope é false na grande maioria das vezes — só true nos casos descritos acima, e nesse caso "bubbles" deve ficar vazio.`;
 }
 
 /**
@@ -621,7 +637,7 @@ async function generateSpecialistReply(
   adContext?: string,
   isBurst?: boolean,
   groqApiKey?: string
-): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string; interestedService?: string } | null> {
+): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string; interestedService?: string; outOfScope?: boolean } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext);
   const specialistModel = 'gemini-3.6-flash';
@@ -697,6 +713,7 @@ async function generateSpecialistReply(
     pendenteAvaliacao?: string | null;
     aguardandoCliente?: string | null;
     servicoInteresse?: string | null;
+    outOfScope?: boolean;
   };
 
   // TASK-0346 (pedido direto, incidente ativo de produção — Gemini sem
@@ -753,7 +770,11 @@ async function generateSpecialistReply(
         const groqBubbles = Array.isArray(groqParsed?.bubbles)
           ? groqParsed.bubbles.filter((b: unknown) => typeof b === 'string' && b.trim())
           : [];
-        if (!groqBubbles.length) {
+        // TASK-0411 — bubbles vazio é válido quando o modelo marcou
+        // outOfScope de propósito (mensagem fora do escopo definido nas
+        // Regras de negócio do tenant); só trata como falha do Groq quando
+        // bubbles vier vazio SEM esse sinal explícito.
+        if (!groqBubbles.length && !groqParsed?.outOfScope) {
           throw new Error(`Groq retornou resposta do especialista sem "bubbles" válidas: ${JSON.stringify(groqParsed)}`);
         }
         parsed = groqParsed as SpecialistParsed;
@@ -795,7 +816,16 @@ async function generateSpecialistReply(
     ? parsed.nomeCapturado.trim()
     : undefined;
 
-  if (!bubbles.length) return null;
+  if (!bubbles.length) {
+    // TASK-0411 — bubbles vazio por decisão deliberada do modelo (mensagem
+    // fora do escopo que as Regras de negócio do tenant definiram como
+    // "só responder quando...") é um resultado válido, distinto de uma
+    // falha real de geração — nunca colapsa pro `null` de falha aqui,
+    // senão webhooks.ts trataria isso como "IA não conseguiu responder" e
+    // criaria um escalonamento falso pra cada mensagem fora de escopo.
+    if (parsed.outOfScope) return { phase, bubbles: [], needsHumanConfirmation: false, outOfScope: true };
+    return null;
+  }
   // Acompanhamento de funil (pedido real, 15/08/2026 — server/services/pendingFollowUpJob.ts):
   // strings curtas e opcionais, não booleans — já vêm com o motivo pronto
   // pra virar o texto do escalonamento, sem precisar adivinhar depois.
@@ -2394,6 +2424,18 @@ export async function generateAutoReplyForText(
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
+    }
+
+    // TASK-0411 (pedido real — tenant que usa o mesmo número de WhatsApp
+    // pessoal e profissional): a mensagem foi deliberadamente deixada sem
+    // resposta automática, seguindo uma instrução explícita nas Regras de
+    // negócio do tenant sobre quando responder. Curto-circuita aqui, antes
+    // do gate anti-alucinação e das checagens de confirmação prematura
+    // (que pressupõem bubbles não vazio) — webhooks.ts precisa receber
+    // outOfScope=true pra não tratar isso como falha nem escalar.
+    if (specialist.outOfScope) {
+      console.warn(`ℹ️  [Fora de escopo] tenant=${tenantId} agent=${agent} mensagem não respondida automaticamente (fora do escopo definido nas Regras de negócio do tenant).`);
+      return { phase: specialist.phase, bubbles: [], agent, needsHumanConfirmation: false, stopAutoReply: false, routerElapsedMs, outOfScope: true };
     }
 
     // Epic 4.5.7 — anti-alucinação: nenhum horário citado na resposta pode

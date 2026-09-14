@@ -276,6 +276,21 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
+
+        // TASK-0411 (pedido real — tenant que usa o mesmo número de
+        // WhatsApp pessoal e profissional): a IA decidiu deliberadamente,
+        // seguindo uma instrução explícita nas Regras de negócio do
+        // tenant, não responder esta mensagem por ela estar fora do
+        // escopo definido (ex: assunto claramente pessoal). Diferente do
+        // `!result` acima (falha real), isso nunca escala nem é
+        // registrado como "IA não conseguiu responder" — nenhuma mensagem
+        // é enviada, nenhum alerta de falha é criado, e a conversa segue
+        // sem nenhum rastro além do log informativo já emitido em
+        // autoReply.ts.
+        if (result.outOfScope) {
+          emitAiReplyStatus(tenantId, phone, 'skipped_out_of_scope');
+          return;
+        }
         emitAiReplyStatus(tenantId, phone, 'drafted');
 
         // Política de reclamações: a IA apenas identifica e encaminha. Não há
