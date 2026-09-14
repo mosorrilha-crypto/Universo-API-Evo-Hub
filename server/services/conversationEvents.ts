@@ -30,7 +30,7 @@ function eventName(tenantId: string): string {
 
 export interface ConversationEventMeta {
   /** Status da resposta automática pra essa conversa — ver emitAiReplyStatus abaixo. Ausente em atualizações comuns (nova mensagem, arquivar, etc.). */
-  aiReplyStatus?: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | 'resolved';
+  aiReplyStatus?: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | 'resolved' | 'skipped_out_of_scope';
 }
 
 /** Assina atualizações de conversa de um tenant. Retorna a função de cancelar a assinatura. */

@@ -22,7 +22,7 @@ import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage, listApprovedMetaM
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { sendBubbles, type OutboundChannel } from '../services/sendBubbles';
 import { resolveCredentialsForTenant, resolveCredentialsForConversation, resolveMetaTemplateCredentialsForTenant } from '../services/tenantResolver';
-import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
+import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, isLeadsOnlyMode, setLeadsOnlyMode, type AgentStatus } from '../services/agentStatus';
 import {
   getRuntimeKnowledgeBase,
   formatKnowledgeBaseForPrompt,
@@ -1733,27 +1733,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   // Status do agente automático (Epic 1.3 — pausar/restringir horário) +
-  // modo "somente anúncios" (pedido real, 14/08/2026 — ver agentStatus.ts).
+  // modo "somente anúncios" (pedido real, 14/08/2026) + modo "somente
+  // leads" (TASK-0411/TASK-0412, pedido real, 14/09/2026 — ver agentStatus.ts).
   router.get('/api/agent-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
-    const [status, adsOnly, adTriggerMessages] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId), getAdTriggerMessages(tenantId)]);
-    res.json({ status, adsOnly, adTriggerMessages });
+    const [status, adsOnly, adTriggerMessages, leadsOnly] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId), getAdTriggerMessages(tenantId), isLeadsOnlyMode(tenantId)]);
+    res.json({ status, adsOnly, adTriggerMessages, leadsOnly });
   }));
 
   router.post('/api/agent-status', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { status, adsOnly, adTriggerMessages } = req.body || {};
+    const { status, adsOnly, adTriggerMessages, leadsOnly } = req.body || {};
     const tenantId = tenantOf(req);
     try {
       if (status !== undefined) await setAgentStatus(tenantId, status as AgentStatus);
       if (typeof adsOnly === 'boolean') await setAdsOnlyMode(tenantId, adsOnly);
+      if (typeof leadsOnly === 'boolean') await setLeadsOnlyMode(tenantId, leadsOnly);
       if (Array.isArray(adTriggerMessages)) {
         if (!adTriggerMessages.every((m) => typeof m === 'string')) {
           return res.status(400).json({ error: 'adTriggerMessages precisa ser uma lista de textos.' });
         }
         await setAdTriggerMessages(tenantId, adTriggerMessages.map((m) => m.trim()).filter(Boolean));
       }
-      const [newStatus, newAdsOnly, newAdTriggerMessages] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId), getAdTriggerMessages(tenantId)]);
-      res.json({ status: newStatus, adsOnly: newAdsOnly, adTriggerMessages: newAdTriggerMessages });
+      const [newStatus, newAdsOnly, newAdTriggerMessages, newLeadsOnly] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId), getAdTriggerMessages(tenantId), isLeadsOnlyMode(tenantId)]);
+      res.json({ status: newStatus, adsOnly: newAdsOnly, adTriggerMessages: newAdTriggerMessages, leadsOnly: newLeadsOnly });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

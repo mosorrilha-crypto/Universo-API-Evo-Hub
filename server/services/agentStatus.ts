@@ -95,6 +95,34 @@ function normalizeForAdTriggerMatch(text: string): string {
 }
 
 /**
+ * Modo "somente leads" (TASK-0411/TASK-0412, pedido real — tenants que
+ * atendem pelo próprio número pessoal de WhatsApp, ex: Dr. Daniel Oliveira,
+ * fisioterapeuta, recebem tanto paciente/lead quanto assunto totalmente
+ * pessoal no mesmo número). Diferente de "somente anúncios" (ads_only,
+ * gate de código puro antes de chamar o Gemini, baseado em ctwa_clid/
+ * gatilho de texto), este é semântico: quando ativo, o especialista
+ * (autoReply.ts) avalia cada mensagem e pode marcar `outOfScope: true`
+ * (sem enviar resposta, sem escalar como falha) quando ela for claramente
+ * pessoal — mas a decisão em si só o modelo consegue tomar, então o gate
+ * fica dentro do prompt/resposta, não antes da chamada como o ads_only.
+ * Ortogonal aos dois flags acima — os três podem estar ativos ao mesmo
+ * tempo pro mesmo tenant.
+ */
+export async function isLeadsOnlyMode(tenantId: string): Promise<boolean> {
+  const db = getDb();
+  const { data } = await db.from('agent_status').select('leads_only').eq('tenant_id', tenantId).maybeSingle();
+  return !!data?.leads_only;
+}
+
+export async function setLeadsOnlyMode(tenantId: string, leadsOnly: boolean): Promise<void> {
+  const db = getDb();
+  const { error } = await db
+    .from('agent_status')
+    .upsert({ tenant_id: tenantId, leads_only: leadsOnly, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+  if (error) throw error;
+}
+
+/**
  * true se `text` bate (depois de normalizado) com algum dos gatilhos
  * configurados. Compara por PREFIXO (não substring solto) de propósito: os
  * "ice breakers" da Meta são um texto pronto que entra pré-preenchido na

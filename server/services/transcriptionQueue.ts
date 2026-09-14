@@ -79,10 +79,6 @@ export function getQueueStats() {
   };
 }
 
-export function getRecentResults(limit = 20) {
-  return recentResults.slice(0, limit);
-}
-
 export function startTranscriptionWorker(deps: TranscriptionQueueDeps) {
   if (workerStarted) return;
   workerStarted = true;
@@ -264,6 +260,13 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
           if (!result) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             emitAiReplyStatus(tenantId, message.from, 'failed');
+            return;
+          }
+          // TASK-0411 — mesmo tratamento do caminho de texto (webhooks.ts):
+          // decisão deliberada de não responder (fora do escopo definido
+          // nas Regras de negócio do tenant), nunca uma falha.
+          if (result.outOfScope) {
+            emitAiReplyStatus(tenantId, message.from, 'skipped_out_of_scope');
             return;
           }
           const safety = await reviewAutoReplyBeforeSend({

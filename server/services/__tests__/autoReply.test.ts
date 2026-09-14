@@ -34,7 +34,13 @@ const getGlobalPromptLayerOverride = vi.fn(async () => null as string | null);
 // confirmação prematura (16/08/2026) não deve mexer em nada nesse caso, que
 // é o default de todo teste que não seja sobre esse gate especificamente.
 const getAppointmentForPhone = vi.fn(async (..._args: any[]) => undefined as any);
+// TASK-0411/TASK-0412: false = "somente leads" desligado — o default de
+// todo teste que não seja sobre esse modo especificamente (outOfScope
+// nunca é aceito quando o tenant não ligou o toggle, mesmo que o modelo
+// retorne o campo).
+const isLeadsOnlyMode = vi.fn(async (..._args: any[]) => false);
 
+vi.mock('../agentStatus', () => ({ isLeadsOnlyMode }));
 vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
@@ -1304,5 +1310,58 @@ describe('generateAutoReplyForText — gate de confirmação prematura de agenda
     const ai = makeFakeAiAgendamentoConfirming('Recibí tu comprobante, ya lo estamos revisando.');
     const result = await generateAutoReplyForText('tenant-a', ai, 'te mandé el comprobante', 'Cliente', undefined, undefined, PHONE);
     expect(result?.bubbles).toEqual(['Recibí tu comprobante, ya lo estamos revisando.']);
+  });
+});
+
+describe('generateAutoReplyForText — outOfScope / modo "somente leads" (TASK-0411/TASK-0412)', () => {
+  function makeFakeAiSpecialist(specialistReply: Record<string, unknown>) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text?.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'triagem' }) } as any;
+          return { text: JSON.stringify(specialistReply) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  const SOME_HISTORY = [{ sender: 'lead' as const, text: 'Hola' }, { sender: 'agent' as const, text: 'Hola! En qué te ayudo?' }];
+
+  it('modo ativo + com histórico (não é a 1ª mensagem) + outOfScope=true com bubbles vazio: aceito, retorna outOfScope=true e bubbles=[]', async () => {
+    isLeadsOnlyMode.mockResolvedValueOnce(true);
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText('tenant-daniel', ai, 'Fala bb, cola na RP hoje', 'Cliente', undefined, SOME_HISTORY);
+    expect(result).not.toBeNull();
+    expect(result?.outOfScope).toBe(true);
+    expect(result?.bubbles).toEqual([]);
+  });
+
+  it('modo DESLIGADO (default) + outOfScope=true com bubbles vazio: NUNCA aceito, mesmo com histórico — continua tratado como falha real (null)', async () => {
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText('tenant-a', ai, 'Solo cejas precio', 'Cliente', undefined, SOME_HISTORY);
+    expect(result).toBeNull();
+  });
+
+  it('modo ativo + 1ª mensagem da conversa (sem histórico) + outOfScope=true: rede de segurança ignora o outOfScope, cai no null de falha em vez de silenciar um lead novo', async () => {
+    isLeadsOnlyMode.mockResolvedValueOnce(true);
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText('tenant-daniel', ai, 'Oi', 'Cliente');
+    expect(result).toBeNull();
+  });
+
+  it('modo ativo + outOfScope=true mas com bubbles preenchido: tratado como resposta normal (bubbles não vazio vence)', async () => {
+    isLeadsOnlyMode.mockResolvedValueOnce(true);
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: ['Claro, te ayudo con eso.'], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText('tenant-daniel', ai, 'Quiero saber el precio', 'Cliente', undefined, SOME_HISTORY);
+    expect(result).not.toBeNull();
+    expect(result?.bubbles).toEqual(['Claro, te ayudo con eso.']);
+  });
+
+  it('modo desligado, sem outOfScope no JSON (tenant comum): responde normalmente', async () => {
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: ['Gs 550.000.'], needsHumanConfirmation: false });
+    const result = await generateAutoReplyForText('tenant-a', ai, 'Cuánto cuesta', 'Cliente');
+    expect(result?.outOfScope).toBeFalsy();
+    expect(result?.bubbles).toEqual(['Gs 550.000.']);
   });
 });
