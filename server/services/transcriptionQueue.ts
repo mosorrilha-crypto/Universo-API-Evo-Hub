@@ -1,7 +1,7 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudio, isRealTranscriptionSource, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia } from './mediaDownload';
-import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from './conversationStore';
+import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, markSpecialistInvoked } from './conversationStore';
 import { emitAiReplyStatus } from './conversationEvents';
 import { saveMediaImage } from './mediaImageStore';
 import { sendBubbles, type OutboundChannel } from './sendBubbles';
@@ -240,6 +240,10 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
         const history = !allMessages ? undefined : audioIndex !== -1 ? allMessages.slice(0, audioIndex) : allMessages.slice(0, -1);
         // Mesmo sinal pro painel do caminho de texto (ver triggerAutoReply em webhooks.ts).
         emitAiReplyStatus(tenantId, message.from, 'generating');
+        // TASK-0416 — ver StoredConversation.specialistInvokedAt em
+        // conversationStore.ts: history vazio não basta pra saber se é a 1ª
+        // vez que o especialista roda de verdade.
+        const specialistInvokedBefore = !!conversation?.specialistInvokedAt;
         try {
           const result = await generateAutoReplyForText(
             tenantId,
@@ -255,8 +259,12 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
             undefined,
             undefined,
             undefined,
-            deps.groqApiKey
+            deps.groqApiKey,
+            undefined,
+            undefined,
+            specialistInvokedBefore
           );
+          await markSpecialistInvoked(tenantId, message.from);
           if (!result) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             emitAiReplyStatus(tenantId, message.from, 'failed');

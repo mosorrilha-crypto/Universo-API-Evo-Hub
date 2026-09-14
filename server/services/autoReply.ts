@@ -639,7 +639,22 @@ async function generateSpecialistReply(
   contextPack?: AgentContextPack,
   adContext?: string,
   isBurst?: boolean,
-  groqApiKey?: string
+  groqApiKey?: string,
+  /**
+   * TASK-0416 — true quando generateSpecialistReply JÁ rodou antes nesta
+   * conversa (ver conversationStore.markSpecialistInvoked/
+   * StoredConversation.specialistInvokedAt). Achado real: `history.length
+   * === 0` (definição antiga de "1ª mensagem") nunca é verdade na 1ª vez
+   * que o especialista roda de verdade quando o tenant tem uma Mensagem de
+   * Primeiro Contato fixa (firstContactBlocks — webhooks.ts intercepta e
+   * responde SEM chamar o especialista, então na 2ª mensagem do cliente já
+   * existem 2+ entradas no histórico) ou quando um operador escreveu antes
+   * de qualquer lead — nesses casos a rede de segurança "1ª mensagem sempre
+   * responde" do modo leadsOnly (TASK-0411/0412) nunca disparava de
+   * verdade. `undefined` (chamador não sabe / não migrou ainda) cai no
+   * comportamento antigo, mais conservador.
+   */
+  specialistInvokedBefore?: boolean
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string; interestedService?: string; outOfScope?: boolean } | null> {
   const historyText = buildHistoryText(history);
   // TASK-0411/TASK-0412 — "somente leads": buscado uma vez aqui (não dentro
@@ -647,7 +662,7 @@ async function generateSpecialistReply(
   // Camada 1 (cacheada) quanto no lembrete dinâmico de 1ª mensagem abaixo,
   // sem duas consultas separadas ao mesmo agent_status.
   const leadsOnly = await isLeadsOnlyMode(tenantId).catch(() => false);
-  const isFirstMessage = !history || history.length === 0;
+  const isFirstMessage = specialistInvokedBefore !== undefined ? !specialistInvokedBefore : !history || history.length === 0;
   // TASK-0411/TASK-0412 — único ponto de decisão de quando um outOfScope
   // retornado pelo modelo é aceito de verdade: precisa do modo "somente
   // leads" ativo (nunca aceita se o tenant não ligou o modo, mesmo que o
@@ -2290,7 +2305,9 @@ export async function generateAutoReplyForText(
    */
   messageCount?: number,
   /** Primeiro contato identificado como entrada de anúncio (headline Meta ou ice breaker configurado). A mensagem pode ter sido pré-preenchida pelo anúncio, portanto indica interesse inicial — não pedido confirmado de agenda. */
-  isCampaignEntry: boolean = false
+  isCampaignEntry: boolean = false,
+  /** TASK-0416 — ver doc completo em generateSpecialistReply. Repassado adiante sem lógica própria aqui. */
+  specialistInvokedBefore?: boolean
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
   // TASK-0278 — não confia cegamente no "nome" que o WhatsApp devolve: pode
@@ -2457,7 +2474,7 @@ export async function generateAutoReplyForText(
     // divergir do valor real sem aviso nenhum.
     const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
     const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
-    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, contextPack, adContext, isBurst, groqApiKey);
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, contextPack, adContext, isBurst, groqApiKey, specialistInvokedBefore);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
