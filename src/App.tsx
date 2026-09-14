@@ -1378,10 +1378,11 @@ export const App: React.FC = () => {
   // Toda cobrança criada pelo botão "Registrar Transferência / Venda" do
   // painel é uma ação real de operador — persiste no servidor sempre, mesmo
   // padrão de handleUpdateLead: nunca aplica local antes de confirmar.
-  // Devolve true/false pro FinancialDashboard.tsx saber se deve mostrar a
-  // tela de sucesso — achado real testando: antes disso o modal mostrava
-  // "Registrado com sucesso" mesmo quando o POST falhava (ex: 401), porque
-  // a chamada era fire-and-forget e o componente nunca esperava o resultado.
+  // Devolve true/false pro chamador (AgendaFinanceiroCenter.tsx, via
+  // onAddTransaction) saber se deve mostrar a tela de sucesso — achado real
+  // testando: antes disso o modal mostrava "Registrado com sucesso" mesmo
+  // quando o POST falhava (ex: 401), porque a chamada era fire-and-forget e
+  // o componente nunca esperava o resultado.
   const handleAddTransaction = async (newTx: FinancialTransaction): Promise<boolean> => {
     try {
       const res = await apiFetch('/api/financial/transactions', {

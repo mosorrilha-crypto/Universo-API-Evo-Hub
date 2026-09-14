@@ -75,7 +75,7 @@ export interface FinancialTransaction {
   leadName: string;
   leadPhone: string;
   productName: string;
-  /** Valor na moeda do tenant (Tenant.currency) — nunca assuma BRL, ver FinancialDashboard.tsx pra formatação. */
+  /** Valor na moeda do tenant (Tenant.currency) — nunca assuma BRL, ver AgendaFinanceiroCenter.tsx pra formatação. */
   amount: number;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;

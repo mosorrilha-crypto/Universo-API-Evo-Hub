@@ -79,10 +79,6 @@ export function getQueueStats() {
   };
 }
 
-export function getRecentResults(limit = 20) {
-  return recentResults.slice(0, limit);
-}
-
 export function startTranscriptionWorker(deps: TranscriptionQueueDeps) {
   if (workerStarted) return;
   workerStarted = true;

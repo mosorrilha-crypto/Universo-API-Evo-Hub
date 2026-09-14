@@ -1,25 +1,14 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import {
   getAuth,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signInWithPopup,
   GoogleAuthProvider,
-  signOut,
-  sendPasswordResetEmail,
-  onAuthStateChanged,
-  User,
   type Auth
 } from 'firebase/auth';
 import {
   getFirestore,
   doc,
   setDoc,
-  getDoc,
-  collection,
-  query,
-  where,
-  getDocs,
   type Firestore
 } from 'firebase/firestore';
 
@@ -85,37 +74,6 @@ function requireDb(): Firestore {
 }
 
 /**
- * Login com E-mail e Senha via Firebase Auth
- */
-export const loginWithEmailPassword = async (email: string, pass: string) => {
-  const credential = await signInWithEmailAndPassword(requireAuth(), email, pass);
-  return credential.user;
-};
-
-/**
- * Cadastro de novo usuário com E-mail e Senha no Firebase Auth
- */
-export const registerWithEmailPassword = async (email: string, pass: string, name?: string) => {
-  const credential = await createUserWithEmailAndPassword(requireAuth(), email, pass);
-  const user = credential.user;
-
-  // Salva o perfil do usuário na coleção 'users' do Firestore com tratamento de erro
-  try {
-    await setDoc(doc(requireDb(), 'users', user.uid), {
-      uid: user.uid,
-      email: user.email,
-      displayName: name || user.displayName || email.split('@')[0],
-      createdAt: new Date().toISOString(),
-      role: 'operator'
-    }, { merge: true });
-  } catch (err) {
-    console.warn('Não foi possível salvar perfil no Firestore:', err);
-  }
-
-  return user;
-};
-
-/**
  * Login via Google Pop-up
  */
 export const loginWithGoogle = async () => {
@@ -138,23 +96,3 @@ export const loginWithGoogle = async () => {
   return user;
 };
 
-/**
- * Envio de e-mail de redefinição/recuperação de senha
- */
-export const resetUserPassword = async (email: string) => {
-  await sendPasswordResetEmail(requireAuth(), email);
-};
-
-/**
- * Logout
- */
-export const logoutFirebase = async () => {
-  await signOut(requireAuth());
-};
-
-/**
- * Listener de estado da autenticação
- */
-export const onAuthUpdate = (callback: (user: User | null) => void) => {
-  return onAuthStateChanged(requireAuth(), callback);
-};
