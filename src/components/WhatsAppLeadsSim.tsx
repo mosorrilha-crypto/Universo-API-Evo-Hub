@@ -3407,9 +3407,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       if (realMessage) {
         setLeads((prev) => prev.map((l) => {
           if (l.id !== leadId) return l;
+          const current = l.messages || [];
+          // TASK-0415 (achado real, print de bolha duplicada): o servidor
+          // publica o evento SSE assim que grava a mensagem — ANTES de esta
+          // mesma requisição POST devolver a resposta pro navegador que a
+          // originou. Se `loadNewerMessages` (disparado por esse SSE)
+          // buscar e anexar a mensagem real (id de verdade) enquanto este
+          // POST ainda está em voo, ela já existe na lista quando chegamos
+          // aqui — trocar a bolha otimista por outra cópia do mesmo
+          // `realMessage` criaria uma segunda bolha idêntica em vez de
+          // reconciliar. Se a real já estiver presente, só remove a
+          // otimista; senão, reconcilia como antes.
+          const alreadyPresent = current.some((m) => m.id === realMessage.id);
           return {
             ...l,
-            messages: (l.messages || []).map((m) => (m.id === messageId ? { ...m, ...realMessage, timestamp: m.timestamp, rawTimestamp: realMessage.timestamp } : m)),
+            messages: alreadyPresent
+              ? current.filter((m) => m.id !== messageId)
+              : current.map((m) => (m.id === messageId ? { ...m, ...realMessage, timestamp: m.timestamp, rawTimestamp: realMessage.timestamp } : m)),
           };
         }));
       }
