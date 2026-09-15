@@ -3408,7 +3408,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         setLeads((prev) => prev.map((l) => {
           if (l.id !== leadId) return l;
           const current = l.messages || [];
-          // TASK-0415 (achado real, print de bolha duplicada): o servidor
+          // TASK-0417 (achado real, print de bolha duplicada): o servidor
           // publica o evento SSE assim que grava a mensagem — ANTES de esta
           // mesma requisição POST devolver a resposta pro navegador que a
           // originou. Se `loadNewerMessages` (disparado por esse SSE)

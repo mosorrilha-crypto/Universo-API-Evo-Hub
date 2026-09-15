@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * TASK-0415 (achado real, print do painel, tenant Monique — Evolution,
+ * TASK-0417 (achado real, print do painel, tenant Monique — Evolution,
  * "Francisca Ibarra"): a mesma mensagem enviada manualmente pelo operador
  * ("¡Hola, amiga, el retoque de las cejas está Gs 150.000") apareceu
  * DUAS VEZES no painel, embora só exista UMA linha em `messages` no banco
@@ -102,7 +102,7 @@ afterEach(() => {
   sseInstance = null;
 });
 
-describe('WhatsAppLeadsSim — bolha duplicada ao enviar manualmente (TASK-0415)', () => {
+describe('WhatsAppLeadsSim — bolha duplicada ao enviar manualmente (TASK-0417)', () => {
   it('não duplica a bolha quando o SSE anexa a mensagem real antes de o POST /send resolver', async () => {
     render(
       <AppPreferencesProvider>
