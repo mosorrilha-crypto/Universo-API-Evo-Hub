@@ -127,7 +127,36 @@ describe('grupos de navegação no desktop', () => {
       'Qualidade do agente',
       'Logs do sistema',
       'Disparo em Massa',
+      'Notificações',
     ]);
+  });
+
+  // Achado real (pedido direto): "as notificações estão disponíveis nas
+  // ferramentas do mobile e o ícone de mensagens não está disponível no
+  // desktop" — o painel de Notificações (aba `alerts`,
+  // NotificationsSettingsPanel) só era alcançável pela gaveta "Ferramentas"
+  // do mobile (WhatsAppLeadsSim.tsx); desktop não tem essa gaveta (removida
+  // na TASK-0225) e o dropdown "Configurar" nunca ganhou a entrada
+  // correspondente — só existia o toggle rápido de push (sino) no
+  // cabeçalho, sem acesso ao painel completo. Mesmo gate que App.tsx usa
+  // pra `canSeeAlerts` (cargo admin+, sem capability própria).
+  it('mostra Notificações no menu Configurar do desktop para admin+', async () => {
+    const user = userEvent.setup();
+    renderHeader(fullyEnabledCapabilities, { ...saasAdmin, role: 'admin' });
+
+    await user.click(screen.getByRole('button', { name: 'Configurar' }));
+    const menu = screen.getByRole('menu', { name: 'Configurar' });
+    expect(within(menu).getByRole('menuitem', { name: 'Notificações' })).not.toBeNull();
+  });
+
+  it('esconde Notificações (e o próprio menu Configurar, todo admin+) para quem é abaixo de admin', () => {
+    renderHeader(fullyEnabledCapabilities, { ...saasAdmin, role: 'manager' });
+
+    // Todas as entradas de `configurationNavigation` exigem admin+, então
+    // pra um cargo abaixo disso o próprio botão "Configurar" some — não só
+    // o item "Notificações" dentro dele.
+    expect(screen.queryByRole('button', { name: 'Configurar' })).toBeNull();
+    expect(screen.queryByText('Notificações')).toBeNull();
   });
 
   it('mostra Empresas como item direto e exclusivo do SaaS Admin', () => {

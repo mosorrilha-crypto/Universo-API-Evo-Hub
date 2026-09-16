@@ -1582,6 +1582,50 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
    * resto da função: erro no CRM só loga, nunca derruba a confirmação real do
    * pagamento.
    */
+  /**
+   * TASK-0421 (achado real, tenant Monique, "Johana Orue"): uma pré-reserva
+   * feita pela IA fica SEM evento real no Calendar até aqui — a aprovação
+   * do comprovante pelo operador é o gatilho real pra criar o evento de
+   * verdade (issue #289). Esse trecho existia SÓ dentro de
+   * /api/conversations/:phone/verify-payment — mas nenhum botão do painel
+   * chama esse endpoint desde a unificação da verificação de pagamento
+   * dentro do card de Escalonamentos (12/08/2026, ver resolve-payment
+   * abaixo), que foi escrito depois e nunca ganhou esta mesma lógica.
+   * Resultado real: pagamento aprovado pelo único botão que existe no
+   * painel marcava `payment_status = 'verified'` sem NUNCA bloquear o
+   * horário de verdade no Google Calendar da tenant — risco real de
+   * overbooking, silencioso (nenhum erro aparecia pro operador; o registro
+   * financeiro automático também falhava calado, porque depende do
+   * `eventId` como referência estável de dedupe). Extraído aqui como
+   * função compartilhada pra nunca mais divergir entre os dois caminhos
+   * que aprovam pagamento — reconsulta disponibilidade na hora (o horário
+   * pode ter sido ocupado por outra coisa nesse meio-tempo, ex: um
+   * agendamento manual do próprio operador) antes de criar o evento.
+   * Não faz nada (retorna sem lançar) quando o appointment já tem eventId.
+   */
+  async function ensureCalendarEventForApprovedPayment(tenantId: string, phone: string, appointment: TrackedAppointment): Promise<void> {
+    if (appointment.eventId) return;
+    if (!calendarConfig) {
+      throw Object.assign(new Error('Google Calendar não configurado neste servidor — não é possível criar o evento real.'), { statusCode: 503 });
+    }
+    let disponivel: boolean;
+    try {
+      disponivel = await checkFreeBusy(tenantId, calendarConfig, appointment.startIso, appointment.endIso, BUSINESS_TIMEZONE);
+    } catch (err: any) {
+      throw Object.assign(new Error(`Falha ao verificar disponibilidade na agenda: ${err.message}`), { statusCode: 502 });
+    }
+    if (!disponivel) {
+      throw Object.assign(new Error(`O horário reservado (${appointment.startIso}) ficou ocupado enquanto o pagamento era analisado — combine um novo horário com o cliente antes de aprovar.`), { statusCode: 409 });
+    }
+    let eventId: string;
+    try {
+      eventId = await createCalendarEvent(tenantId, calendarConfig, appointment.summary, 'Confirmado pelo agente após aprovação do comprovante de pagamento.', appointment.startIso, appointment.endIso, BUSINESS_TIMEZONE);
+    } catch (err: any) {
+      throw Object.assign(new Error(`Falha ao criar o evento na agenda: ${err.message}`), { statusCode: 502 });
+    }
+    await attachCalendarEventToHold(tenantId, phone, eventId);
+  }
+
   async function recordFinancialTransactionForVerifiedPayment(
     tenantId: string,
     phone: string,
@@ -1696,32 +1740,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const before = await getAppointmentForPhone(tenantId, phone);
     if (!before) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
 
-    // Issue #289 (18/08/2026): uma reserva feita pela IA fica SEM evento
-    // real no Calendar até aqui — o operador aprovando o comprovante é o
-    // gatilho real pra criar o evento de verdade, nunca antes. Reconsulta
-    // disponibilidade agora porque o horário pode ter sido ocupado por
-    // outra coisa nesse meio-tempo (ex: um agendamento manual do próprio
-    // operador, ou outra reserva que virou evento primeiro).
-    if (status === 'verified' && !before.eventId) {
-      if (!calendarConfig) {
-        return res.status(503).json({ error: 'Google Calendar não configurado neste servidor — não é possível criar o evento real.' });
-      }
-      let disponivel: boolean;
+    if (status === 'verified') {
       try {
-        disponivel = await checkFreeBusy(tenantId, calendarConfig, before.startIso, before.endIso, BUSINESS_TIMEZONE);
+        await ensureCalendarEventForApprovedPayment(tenantId, phone, before);
       } catch (err: any) {
-        return res.status(502).json({ error: `Falha ao verificar disponibilidade na agenda: ${err.message}` });
+        return res.status(err.statusCode || 502).json({ error: err.message });
       }
-      if (!disponivel) {
-        return res.status(409).json({ error: `O horário reservado (${before.startIso}) ficou ocupado enquanto o pagamento era analisado — combine um novo horário com o cliente antes de aprovar.` });
-      }
-      let eventId: string;
-      try {
-        eventId = await createCalendarEvent(tenantId, calendarConfig, before.summary, 'Confirmado pelo agente após aprovação do comprovante de pagamento.', before.startIso, before.endIso, BUSINESS_TIMEZONE);
-      } catch (err: any) {
-        return res.status(502).json({ error: `Falha ao criar o evento na agenda: ${err.message}` });
-      }
-      await attachCalendarEventToHold(tenantId, phone, eventId);
     }
 
     const updated = await setPaymentVerification(tenantId, phone, status, operatorId);
@@ -2631,16 +2655,30 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(400).json({ error: 'Campo "status" precisa ser "verified" ou "rejected".' });
     }
 
+    // TASK-0421 — ver comentário de ensureCalendarEventForApprovedPayment:
+    // este é o caminho que o botão "Confirmar pagamento" do painel
+    // (Escalonamentos) realmente chama — precisa da mesma garantia que
+    // verify-payment já tinha, senão o pagamento fica marcado como
+    // verificado sem NUNCA bloquear o horário de verdade no Calendar.
+    if (status === 'verified') {
+      const before = await getAppointmentForPhone(tenantId, phone);
+      if (!before) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
+      try {
+        await ensureCalendarEventForApprovedPayment(tenantId, phone, before);
+      } catch (err: any) {
+        return res.status(err.statusCode || 502).json({ error: err.message });
+      }
+    }
+
     const appointment = await setPaymentVerification(tenantId, phone, status, operatorId);
     if (!appointment) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
     const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, phone, appointment) : false;
     // Mesmo registro automático do Financeiro do verify-payment acima —
     // esse card de escalonamento é só outro caminho pra aprovar o mesmo
     // comprovante (issue real, 12/08/2026: existiam dois lugares
-    // desconectados pra confirmar o mesmo pagamento). Se o evento real ainda
-    // não existe no Calendar nesse ponto (não roda a criação como
-    // verify-payment acima), a função só não registra nada — sem evento
-    // não há `sourceRef` estável pra deduplicar.
+    // desconectados pra confirmar o mesmo pagamento). ensureCalendarEventForApprovedPayment
+    // acima já garante o evento real (TASK-0421), então `appointment.eventId`
+    // chega aqui sempre preenchido quando status === 'verified'.
     if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, appointment);
     await recordPaymentDecisionAudit(tenantId, phone, status, operatorId, appointment);
 

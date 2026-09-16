@@ -142,6 +142,42 @@ describe('POST /api/ai/reply-from-hint', () => {
     expect(lastPrompt.value.toLowerCase()).toContain('repita uma informa');
   });
 
+  // TASK-0419 — achado real de produção (print confirmado): um rascunho
+  // gerado por esta rota, em resposta a "Donde queda" (cliente em espanhol),
+  // saiu em PORTUGUÊS com um endereço genérico inventado ("Rua Exemplo, 123,
+  // São Paulo") — o endereço real do negócio (outro país/cidade) estava na
+  // Base de Conhecimento e foi ignorado. O prompt principal (autoReply.ts)
+  // já tinha essa trava (regra de localização/idioma); esta rota não tinha
+  // nenhuma equivalente. Mesmo padrão de teste do achado acima (TASK-0193):
+  // verifica que o PROMPT ENVIADO carrega as instruções novas, não o texto
+  // gerado (mockado).
+  it('o prompt enviado instrui a nunca inventar endereço/cidade e a nunca deixar a instrução do operador (em português) mudar o idioma da resposta', async () => {
+    mockResponse.shouldFail = false;
+    mockResponse.text = JSON.stringify({ reply: 'ok', detectedLanguage: 'Español', translation: 'ok' });
+
+    await fetch(`${baseUrl}/api/ai/reply-from-hint`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        leadInfo: { name: 'Karen Ojeda', phone: '595992992317' },
+        messages: [{ sender: 'lead', text: 'Donde queda' }],
+        agentKnowledgeBase: {
+          companyName: 'Estúdio Teste',
+          businessModel: 'Localizado em Calle Paso Bogarin, 3665, Loma Merlo - Luque.',
+          locationMapsUrl: 'https://www.google.com/maps?q=-25.25,-57.50',
+        },
+        hint: 'Responda primeiro e com precisão à última dúvida da cliente.',
+      }),
+    });
+
+    const promptLower = lastPrompt.value.toLowerCase();
+    expect(promptLower).toContain('nunca invente cidade, bairro, rua ou número de endereço');
+    expect(promptLower).toContain('exclusivamente o endereço/link de localização');
+    expect(promptLower).toContain('nunca uma indicação de em que idioma responder');
+    // O endereço real (fornecido na Base de Conhecimento) precisa continuar chegando ao prompt.
+    expect(lastPrompt.value).toContain('Calle Paso Bogarin, 3665, Loma Merlo - Luque.');
+  });
+
   // TASK-0315 (pedido direto: "as vezes me parecem fora de contexto com o
   // histórico do chat, principalmente o de retomada") — achado real: este
   // endpoint mandava o histórico como JSON.stringify cru, sem nenhuma
