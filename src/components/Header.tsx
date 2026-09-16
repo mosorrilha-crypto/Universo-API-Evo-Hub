@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Bell,
   BellOff,
+  BellRing,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -148,11 +149,15 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeAgentTools = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.agent;
   const canSeeCatalog = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.catalog;
   const canSeeQuality = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.quality;
+  // Mesmo gate que App.tsx usa pra `canSeeAlerts` (`canSeeAdminTools`, sem
+  // capability própria — Notificações não tem entrada em
+  // `TenantNavigationCapabilities`, é só cargo admin+).
+  const canSeeAlerts = hasRoleAtLeast(currentUser?.role, 'admin');
 
   const copy = isSpanish ? {
-    platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', systemLogs: 'Logs del sistema', broadcast: 'Envío Masivo', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
+    platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', systemLogs: 'Logs del sistema', broadcast: 'Envío Masivo', alerts: 'Notificaciones', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
   } : {
-    platform: 'Central de operação por WhatsApp', subtitle: canSeeFinancial ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', systemLogs: 'Logs do sistema', broadcast: 'Disparo em Massa', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
+    platform: 'Central de operação por WhatsApp', subtitle: canSeeFinancial ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', systemLogs: 'Logs do sistema', broadcast: 'Disparo em Massa', alerts: 'Notificações', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
   // TASK-0301 (pedido direto): Atendimento vira a tela padrão do sistema —
@@ -172,6 +177,13 @@ export const Header: React.FC<HeaderProps> = ({
     ...(canSeeQuality ? [{ id: 'quality' as ActiveTab, label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' as const }] : []),
     ...(canSeeSystemLogs ? [{ id: 'system_logs' as ActiveTab, label: copy.systemLogs, icon: <ScrollText className="w-4 h-4" />, accent: 'sky' as const }] : []),
     ...(canSeeBroadcast ? [{ id: 'broadcast' as ActiveTab, label: copy.broadcast, icon: <Radio className="w-4 h-4" />, accent: 'sky' as const }] : []),
+    // Achado real (pedido direto): o painel de Notificações (`alerts`,
+    // NotificationsSettingsPanel) só era alcançável pela gaveta
+    // "Ferramentas" do mobile (WhatsAppLeadsSim.tsx) — desktop não tem essa
+    // gaveta (removida na TASK-0225) e este dropdown "Configurar" nunca
+    // ganhou a entrada correspondente, então quem usa desktop não tinha
+    // nenhum jeito de chegar lá (só o toggle rápido de push no cabeçalho).
+    ...(canSeeAlerts ? [{ id: 'alerts' as ActiveTab, label: copy.alerts, icon: <BellRing className="w-4 h-4" />, accent: 'sky' as const }] : []),
   ];
   const saasNavigation: NavigationItem[] = canSeeSaasMaster ? [
     { id: 'saas', label: copy.companies, icon: <Layers className="w-4 h-4" /> },
