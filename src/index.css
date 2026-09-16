@@ -1028,17 +1028,27 @@ html[data-theme='dark'] body,
 
 html[data-theme='light'] {
   color-scheme: light;
-  --surface-deep: #F4F3EF;
+  /* Achado real, pedido direto (16/09/2026): a paleta original tinha um
+     undertone quente/bege (#F4F3EF, #DCDAD3, #22241F...) competindo com as
+     cores semânticas (âmbar/vermelho/azul) espalhadas pelo painel — pedido
+     pra deixar mais "clean"/"enterprise", trocando só a temperatura dos
+     NEUTROS (fundo/borda/texto) por um cinza-azulado frio, preservando a
+     luminosidade de cada token (contraste praticamente inalterado) e sem
+     tocar em nenhuma cor semântica (--pending/--danger/--reason/--app-
+     warning/--app-danger/--app-success/--app-info e suas *-surface/
+     *-border) nem no verde de ação (--action, pedido explícito pra manter
+     "porque já funciona muito bem como CTA") — só a base neutra muda. */
+  --surface-deep: #F7F8FA;
   --surface-panel: #FFFFFF;
   --surface-raised: #FFFFFF;
-  --surface-sunken: #EBE9E3;
-  --line-subtle: #DCDAD3;
-  --border: #DCDAD3;
-  --border-subtle: #EFEDE7;
-  --text-primary: #22241F;
-  --text-secondary: #5A5B54;
-  --text-muted: #8A877F;
-  --text-label: #94918A;
+  --surface-sunken: #EEF1F4;
+  --line-subtle: #E2E6EB;
+  --border: #E2E6EB;
+  --border-subtle: #EEF1F4;
+  --text-primary: #1F2937;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+  --text-label: #94A3B8;
   --action: #1C6B4B;
   --action-contrast: #FFFFFF;
   --pending: #8A5A00;
@@ -1059,17 +1069,17 @@ html[data-theme='light'] {
      aliasam pra var(...) mantêm uma única fonte de verdade com os tokens
      canônicos acima; os demais são genuinamente novos (esta paleta ainda
      não tinha search bar / chip / bolha de mensagem dedicados). */
-  --app-page: #F7F8F7;
+  --app-page: #F7F8FA;
   --app-surface: var(--surface-panel);
-  --app-surface-soft: #F5F5F3;
-  --app-surface-muted: #EFEFEC;
-  --app-surface-control: #E9E9E6;
+  --app-surface-soft: #F3F5F7;
+  --app-surface-muted: #EEF1F4;
+  --app-surface-control: #E6E9ED;
   --app-text-primary: var(--text-primary);
   --app-text-secondary: var(--text-secondary);
   --app-text-muted: var(--text-muted);
-  --app-text-disabled: #A5ABAD;
+  --app-text-disabled: #9CA6B2;
   --app-border: var(--border);
-  --app-border-strong: #D2D5D3;
+  --app-border-strong: #CBD2D9;
   --app-action: var(--action);
   --app-action-dark: #126447;
   --app-action-soft: #E5F2EB;
@@ -1087,7 +1097,7 @@ html[data-theme='light'] {
   --app-info-soft: #E5F2F6;
   --app-info-border: #9BCFD6;
   --app-input-bg: #FFFFFF;
-  --app-search-bg: #F1F0EE;
+  --app-search-bg: #EEF1F4;
   --app-chip-bg: #FFFFFF;
   --app-chip-active-bg: #E5F2EB;
   --app-message-incoming: #FFFFFF;
@@ -2748,11 +2758,15 @@ html[data-theme='clean'] .mobile-header-context-menu .border-t {
    opacidade padrão de botões desabilitados apagava rótulos críticos. Aqui,
    todo controle recebe texto, borda e superfície legíveis em cada estado. */
 html[data-theme='light'] {
-  --button-text: #22241F;
-  --button-muted-text: #686962;
-  --button-disabled-text: #686962;
-  --button-disabled-surface: #ECEBE6;
-  --button-disabled-border: #C9C6BD;
+  /* Mesma troca de temperatura (quente → cinza-azulado frio) do bloco de
+     neutros acima, 16/09/2026 — só os tons de texto/superfície/borda
+     neutros do botão; --button-action/-hover (verde) e --button-info/
+     -warning/-danger (semânticos) ficam intocados. */
+  --button-text: #1F2937;
+  --button-muted-text: #64748B;
+  --button-disabled-text: #64748B;
+  --button-disabled-surface: #EEF1F4;
+  --button-disabled-border: #D5DAE1;
   --button-action: #176B4C;
   --button-action-hover: #11563C;
   --button-info: #0D718A;
