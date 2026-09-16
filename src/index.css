@@ -1099,7 +1099,14 @@ html[data-theme='light'] {
   --app-input-bg: #FFFFFF;
   --app-search-bg: #EEF1F4;
   --app-chip-bg: #FFFFFF;
-  --app-chip-active-bg: #E5F2EB;
+  /* Achado real, pedido direto (print anotado, 16/09/2026): depois da
+     TASK-0422 esfriar os neutros, esta "pill" verde da aba ativa da barra
+     inferior (único uso deste token) ficou destoando — um hex fixo,
+     escolhido pra combinar com a paleta bege antiga, contra um cinza-
+     azulado novo. `color-mix` com --action em vez de um hex fixo garante
+     que a pill sempre lê como "um tom do verde da marca", harmônica com
+     qualquer neutro por trás dela. */
+  --app-chip-active-bg: color-mix(in srgb, var(--action) 14%, var(--surface-panel));
   --app-message-incoming: #FFFFFF;
   --app-message-outgoing: #D9FDD3;
 }
