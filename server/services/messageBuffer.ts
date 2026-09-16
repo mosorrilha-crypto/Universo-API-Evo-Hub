@@ -156,6 +156,37 @@ async function deletePersistedBuffer(tenantId: string, phone: string): Promise<v
 }
 
 /**
+ * TASK-0418 (achado real, print do painel, tenant Monique, cliente
+ * "Angela"): a cliente mandou "Hola soy Angela" e, mais de 10s depois (fora
+ * da janela de silêncio deste buffer), "Me gustaria saber más sobre las
+ * cejas" — a 1ª mensagem já tinha disparado o flush e começado a gerar
+ * resposta (Gemini + digitação simulada, ~20-25s) SEM nunca ter visto a 2ª,
+ * que chegou nesse meio-tempo e abriu um buffer novo e independente. A
+ * resposta da 1ª mensagem só saiu DEPOIS da 2ª já ter chegado — pareceu
+ * ignorar o que a cliente tinha acabado de responder, mesmo tendo sido
+ * gerada de boa-fé com o que existia até então.
+ *
+ * Retira (sem disparar o fluxo normal de flush/timer) um buffer pendente
+ * pro mesmo tenant/telefone, se existir — cancela o timer, remove da Map e
+ * apaga a marca persistida (melhor esforço, nunca bloqueia quem chama).
+ * Usado só por quem já está no meio de gerar uma resposta pro MESMO número
+ * (webhooks.ts, logo após a 1ª geração) pra absorver um texto que chegou
+ * nesse meio-tempo e regenerar incluindo tudo, em vez de deixá-lo disparar
+ * sua própria rodada separada mais tarde.
+ */
+export function takePendingBufferTexts(tenantId: string, phone: string): { texts: string[]; lastMessageId: string } | null {
+  const key = bufferKey(tenantId, phone);
+  const existing = buffers.get(key);
+  if (!existing) return null;
+  clearTimeout(existing.timer);
+  buffers.delete(key);
+  deletePersistedBuffer(tenantId, phone).catch((err: any) => {
+    console.warn(`⚠️  [Buffer de rajada] Falha ao remover marca persistida (absorção) pra ${phone}:`, err.message);
+  });
+  return { texts: existing.texts, lastMessageId: existing.lastMessageId };
+}
+
+/**
  * Varre `pending_message_buffers` por marcas cujo horário de disparo já
  * passou e ninguém tratou NESTA instância (não estão no Map em memória) —
  * só acontece de verdade depois de um restart no meio da janela de

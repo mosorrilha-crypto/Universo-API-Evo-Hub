@@ -18,7 +18,7 @@ import { transcribeAudio, isRealTranscriptionSource } from '../services/geminiTr
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment, getTenantBusinessHours, getTenantCustomerNotificationPreferences, funnelAutoFollowUpDelayMs, DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
-import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
+import { bufferIncomingText, startBufferRecoverySweeper, takePendingBufferTexts } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, bookingConfirmationEscalationSourceKey } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia, withMediaDownloadRetry } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
@@ -266,8 +266,30 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         // (Mensagem de Primeiro Contato fixa/operador podem ter escrito
         // antes sem nunca chamar o especialista).
         const specialistInvokedBefore = !!conversation?.specialistInvokedAt;
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply, groqApiKey, historyExclude, isCampaignEntry, specialistInvokedBefore);
+        let result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply, groqApiKey, historyExclude, isCampaignEntry, specialistInvokedBefore);
         await markSpecialistInvoked(tenantId, phone);
+
+        // TASK-0418 (achado real, ver messageBuffer.ts/takePendingBufferTexts):
+        // a cliente pode ter mandado mais mensagens ENQUANTO esta resposta
+        // era gerada (Gemini + digitação simulada, alguns segundos), fora da
+        // janela de silêncio do buffer que já tinha disparado esta rodada —
+        // um buffer novo e independente pra elas já existiria agora. Absorve
+        // esse texto e regenera incluindo tudo, em vez de mandar uma
+        // pergunta que a cliente já respondeu enquanto esperava (a regra de
+        // anti-repetição não ajuda aqui: o rascunho original nunca chegou a
+        // ver essa mensagem nova). Só uma rodada de absorção — uma 3ª
+        // mensagem chegando durante esta 2ª geração fica pra próxima rodada.
+        if (result) {
+          const pendingExtra = takePendingBufferTexts(tenantId, phone);
+          if (pendingExtra?.texts.length) {
+            console.warn(`🔁 [Resposta Automática] tenant=${tenantId} absorveu mensagem nova de ${phone} chegada durante a geração — regenerando com o texto completo.`);
+            text = [text, ...pendingExtra.texts].join('\n');
+            messageId = pendingExtra.lastMessageId;
+            historyExclude += pendingExtra.texts.length;
+            result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply, groqApiKey, historyExclude, isCampaignEntry, specialistInvokedBefore);
+            await markSpecialistInvoked(tenantId, phone);
+          }
+        }
         if (!result) {
           // Achado real em produção (issue #82, item 4; revisado depois de
           // uma auditoria de conversas reais): mesmo com retry
