@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
-import { bufferIncomingText, startBufferRecoverySweeper } from '../messageBuffer';
+import { bufferIncomingText, startBufferRecoverySweeper, takePendingBufferTexts } from '../messageBuffer';
 import type { ResolvedTenant } from '../tenantResolver';
 
 const TENANT_A: ResolvedTenant = { tenantId: 'tenant-a', provider: 'evolution', evolutionInstanceName: 'inst-a' };
@@ -219,5 +219,52 @@ describe('TASK-0388 — corrida entre o timer local e o sweeper de recuperação
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('takePendingBufferTexts (TASK-0418)', () => {
+  it('retorna null quando não há buffer pendente pra esse tenant/telefone', () => {
+    expect(takePendingBufferTexts('tenant-a', '595989999999')).toBeNull();
+  });
+
+  it('retira o buffer pendente (texto + lastMessageId), cancela o timer e não dispara mais o onFlush original', async () => {
+    vi.useFakeTimers();
+    try {
+      const onFlush = vi.fn();
+      bufferIncomingText('595988888888', 'Cliente', 'primeira', 'msg-1', TENANT_A, onFlush);
+      bufferIncomingText('595988888888', 'Cliente', 'segunda', 'msg-2', TENANT_A, onFlush);
+
+      const taken = takePendingBufferTexts('tenant-a', '595988888888');
+      expect(taken).toEqual({ texts: ['primeira', 'segunda'], lastMessageId: 'msg-2' });
+
+      // O timer original foi cancelado — nunca dispara o onFlush de quem
+      // criou o buffer (quem chamou takePendingBufferTexts assumiu o texto).
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onFlush).not.toHaveBeenCalled();
+
+      // Uma 2ª tentativa não encontra mais nada (já foi retirado).
+      expect(takePendingBufferTexts('tenant-a', '595988888888')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('remove a marca persistida do buffer retirado (melhor esforço)', async () => {
+    bufferIncomingText('595987654321', 'Cliente', 'oi', 'msg-1', TENANT_A, vi.fn());
+    await new Promise((r) => setTimeout(r, 10));
+    expect((supabase.__tables.pending_message_buffers || []).filter((r: any) => r.phone === '595987654321')).toHaveLength(1);
+
+    takePendingBufferTexts('tenant-a', '595987654321');
+    await new Promise((r) => setTimeout(r, 10));
+    expect((supabase.__tables.pending_message_buffers || []).filter((r: any) => r.phone === '595987654321')).toHaveLength(0);
+  });
+
+  it('isolamento por tenant — não retira o buffer de outro tenant no mesmo telefone', () => {
+    bufferIncomingText('595986543210', 'Cliente', 'oi tenant A', 'msg-a', TENANT_A, vi.fn());
+    bufferIncomingText('595986543210', 'Cliente', 'oi tenant B', 'msg-b', TENANT_B, vi.fn());
+
+    expect(takePendingBufferTexts('tenant-a', '595986543210')).toEqual({ texts: ['oi tenant A'], lastMessageId: 'msg-a' });
+    // O buffer do tenant B continua intacto.
+    expect(takePendingBufferTexts('tenant-b', '595986543210')).toEqual({ texts: ['oi tenant B'], lastMessageId: 'msg-b' });
   });
 });
