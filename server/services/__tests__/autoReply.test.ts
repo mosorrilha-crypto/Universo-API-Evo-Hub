@@ -1367,6 +1367,33 @@ describe('generateAutoReplyForText — outOfScope / modo "somente leads" (TASK-0
     expect(result?.outOfScope).toBe(true);
   });
 
+  // TASK-0429 — achado real (tenant Dr. Daniel, número compartilhado
+  // comercial/pessoal): `specialistInvokedBefore=false` sozinho NÃO significa
+  // "1ª mensagem da conversa" — significa só "o especialista nunca rodou
+  // nesta conversa ainda", o que também é verdade numa conversa de dias,
+  // majoritariamente pessoal, com dezenas/centenas de mensagens que nunca
+  // chegaram no especialista (confirmado com 60 e 118 mensagens reais em
+  // dois contatos). Antes desta correção, a rede de segurança recusava por
+  // engano o outOfScope nesses casos, forçando uma falha real (null) em vez
+  // do silêncio esperado — 33 escalonamentos falsos em 7 dias, só nesse tenant.
+  const LONG_MOSTLY_PERSONAL_HISTORY: { sender: 'lead' | 'agent'; text: string }[] = Array.from({ length: 60 }, (_, i) => ({
+    sender: i % 2 === 0 ? 'lead' : 'agent',
+    text: `assunto pessoal ${i}`,
+  }));
+
+  it('modo ativo + histórico longo (conversa antiga, majoritariamente pessoal) + specialistInvokedBefore=false: NÃO trata como 1ª mensagem, aceita o outOfScope normalmente', async () => {
+    isLeadsOnlyMode.mockResolvedValueOnce(true);
+    const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
+    const result = await generateAutoReplyForText(
+      'tenant-daniel', ai, 'Kkkkkkkk manda o video', 'Cliente', undefined, LONG_MOSTLY_PERSONAL_HISTORY,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      false
+    );
+    expect(result).not.toBeNull();
+    expect(result?.outOfScope).toBe(true);
+    expect(result?.bubbles).toEqual([]);
+  });
+
   it('modo DESLIGADO (default) + outOfScope=true com bubbles vazio: NUNCA aceito, mesmo com histórico — continua tratado como falha real (null)', async () => {
     const ai = makeFakeAiSpecialist({ phase: 'informacao', bubbles: [], needsHumanConfirmation: false, outOfScope: true });
     const result = await generateAutoReplyForText('tenant-a', ai, 'Solo cejas precio', 'Cliente', undefined, SOME_HISTORY);
