@@ -750,6 +750,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // evita rebaixar o mesmo clipe do servidor a cada clique.
   const realAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const audioObjectUrlCacheRef = React.useRef<Map<string, string>>(new Map());
+  // TASK-0425 (achado real, print do usuário): todo áudio real (recebido ou
+  // enviado por WhatsApp de verdade) mostrava "15s" fixo no painel — a API
+  // nunca guarda a duração real de um áudio em lugar nenhum, então o rótulo
+  // caía sempre no fallback `msg.audioDuration || 15` (msg.audioDuration só
+  // existe pra gravação feita na hora no navegador ou pros leads de
+  // demonstração, nunca pra mensagem real vinda do banco). Em vez de inventar
+  // um número, mede a duração de verdade quando o áudio é tocado pela 1ª vez
+  // (metadata do próprio <audio>) e cacheia por messageId — mostra vazio até
+  // então, nunca um valor fixo que quase sempre está errado.
+  const [realAudioDurations, setRealAudioDurations] = useState<Record<string, number>>({});
 
   // New Lead Modal state
   const [showAddLead, setShowAddLead] = useState(false);
@@ -3821,6 +3831,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       audioEl.src = url;
       audioEl.onended = () => setPlayingAudioId(null);
       audioEl.onerror = () => setPlayingAudioId(null);
+      audioEl.onloadedmetadata = () => {
+        if (Number.isFinite(audioEl.duration)) {
+          setRealAudioDurations((prev) => ({ ...prev, [messageId]: Math.round(audioEl.duration) }));
+        }
+      };
       await audioEl.play();
       setPlayingAudioId(messageId);
     } catch (err) {
@@ -6116,7 +6131,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 <div className="flex-1 min-w-0 bg-slate-700/60 h-1 rounded-full overflow-hidden">
                                   <div className={`h-full bg-emerald-500 ${playingAudioId === msg.id ? 'animate-pulse w-full' : 'w-1/3'}`} />
                                 </div>
-                                <span className="text-[9px] text-slate-400 flex-shrink-0">{msg.audioDuration || 15}s</span>
+                                <span className="text-[9px] text-slate-400 flex-shrink-0">
+                                  {(() => {
+                                    const known = msg.audioDuration || ((selectedLead as any)?.isReal ? realAudioDurations[msg.id] : undefined);
+                                    return known ? `${known}s` : '';
+                                  })()}
+                                </span>
                               </div>
                               {msg.text && (
                                 <p className="text-[10px] opacity-80 mt-1 leading-snug">

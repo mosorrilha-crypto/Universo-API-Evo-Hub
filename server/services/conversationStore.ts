@@ -12,6 +12,7 @@ import { registerPendingEcho } from './outboundEchoTracker';
 import { isAdsOnlyMode, getAdTriggerMessages, matchesAdTriggerMessage } from './agentStatus';
 import { matchCatalogClickCode, consumeCatalogClick } from './publicCatalogClickStore';
 import { deleteContactAgentMemory } from './contactAgentMemoryStore';
+import { clearPendingFollowUp } from './pendingFollowUpStore';
 
 /**
  * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
@@ -595,6 +596,20 @@ export async function recordOutgoingMessage(
   // chega de volta; pra Meta essa marca simplesmente nunca é
   // consumida e expira sozinha (sem custo real). Ver outboundEchoTracker.ts.
   registerPendingEcho(tenantId, phone, message.type, message.type === 'text' ? message.text : undefined).catch(() => {});
+  // TASK-0423 — achado real (tenant Monique, conversa com Ruth Gonzalez,
+  // 16/09/2026): um operador respondeu manualmente pelo painel (19:35) a um
+  // cliente com uma pendência de reengajamento 'customer_reply' aberta, mas
+  // resolveOpenEscalationsAfterManualReply (conversations.ts) só resolve
+  // ESCALONAMENTOS — nunca cancelava a pendência do funil. O job automático
+  // (pendingFollowUpJob.ts) não sabe que um humano já reengajou o cliente,
+  // então disparou por conta própria ~7min depois (19:42) uma mensagem quase
+  // idêntica, redundante. Só operador (sentBy='operator') conta como reengajamento
+  // de verdade — 'campaign' é envio em massa automático, não alguém cuidando
+  // desta conversa específica. Best-effort: nunca derruba o envio real por
+  // causa disso.
+  if (sentBy === 'operator') {
+    clearPendingFollowUp(tenantId, phone, 'customer_reply').catch(() => {});
+  }
   return (await getConversation(tenantId, phone))!;
 }
 
