@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed, dedupeKeyFor } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText, markSpecialistInvoked } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText, markSpecialistInvoked, type StoredConversation } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, executeApprovedMediaAction, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
@@ -47,6 +47,31 @@ async function endOfBusinessDayIso(tenantId: string): Promise<string> {
   const todayDateKey = naive.slice(0, 10);
   const closeTime = hours?.[String(weekdayNum)]?.close || DEFAULT_CLOSE_TIME;
   return localNaiveToUtcIso(`${todayDateKey}T${closeTime}:00`, BUSINESS_TIMEZONE);
+}
+
+/**
+ * Achado real (pedido do dono do produto, 30/08/2026; achado de novo,
+ * tenant Monique, "Ninfa Oviedo", 17/09/2026): quando o operador está
+ * respondendo manualmente AO VIVO, a IA cede a vez por 5min (ver comentário
+ * completo no 1º uso, abaixo) — mas essa checagem só rodava UMA vez, com o
+ * snapshot da conversa capturado ANTES de chamar o Gemini. Se o operador
+ * mandar uma mensagem manual DURANTE a geração (alguns segundos de Gemini +
+ * digitação simulada), a resposta da IA sai de qualquer jeito quando
+ * termina — cruzando por cima do que o operador já respondeu ao vivo
+ * (reproduzido na conversa real da Ninfa 3 vezes na mesma troca: a
+ * operadora chegou a se desculpar dizendo "Te contestó el assistente").
+ * Extraída aqui pra poder ser chamada de novo, com um snapshot FRESCO da
+ * conversa, bem antes do envio (ver TASK-0428 em triggerAutoReply).
+ */
+function isOperatorActivelyEngaged(conversation: StoredConversation | undefined): boolean {
+  const OPERATOR_ACTIVE_PAUSE_MS = 5 * 60 * 1000;
+  const lastOperatorMessage = [...(conversation?.messages || [])]
+    .reverse()
+    .find((m) => m.sender === 'agent' && m.sentBy === 'operator');
+  if (!lastOperatorMessage) return false;
+  const releasedAfterLastOperatorMessage = conversation?.operatorAiReleaseAt
+    && new Date(conversation.operatorAiReleaseAt).getTime() >= new Date(lastOperatorMessage.timestamp).getTime();
+  return Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS && !releasedAfterLastOperatorMessage;
 }
 
 interface WebhooksRouterDeps {
@@ -148,19 +173,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // conversa) DEPOIS da própria última mensagem manual dele, a pausa é
       // ignorada nesta rodada — uma nova mensagem manual dele depois disso
       // volta a pausar normalmente (o release não desativa o gate pra sempre).
-      const OPERATOR_ACTIVE_PAUSE_MS = 5 * 60 * 1000;
-      const lastOperatorMessage = [...(conversation?.messages || [])]
-        .reverse()
-        .find((m) => m.sender === 'agent' && m.sentBy === 'operator');
-      const releasedAfterLastOperatorMessage = conversation?.operatorAiReleaseAt
-        && (!lastOperatorMessage || new Date(conversation.operatorAiReleaseAt).getTime() >= new Date(lastOperatorMessage.timestamp).getTime());
-      if (
-        lastOperatorMessage
-        && Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS
-        && !releasedAfterLastOperatorMessage
-      ) {
-        return;
-      }
+      if (isOperatorActivelyEngaged(conversation)) return;
       // Modo "somente anúncios" (pedido real, 14/08/2026): quando o
       // proprietário conecta um número pessoal além do número dedicado do
       // agente (pra não perder mensagem enquanto valida confiança no
@@ -302,6 +315,20 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática (falhou mesmo com retry)', text);
           emitAiReplyStatus(tenantId, phone, 'escalated');
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+          return;
+        }
+
+        // TASK-0428 (achado real, tenant Monique, "Ninfa Oviedo"): a
+        // checagem de "operador ativo" no início desta função usou um
+        // snapshot da conversa capturado ANTES da geração acima (Gemini +
+        // digitação simulada, alguns segundos) — se o operador respondeu
+        // manualmente NESSE meio-tempo, esta resposta já nasceu stale e sai
+        // por cima do que ele acabou de dizer ao vivo. Reconsulta a
+        // conversa (snapshot fresco) e reaplica a mesma regra antes de
+        // seguir pro envio — mesmo espírito silencioso do gate original
+        // (nenhuma escalação, só cede a vez).
+        if (isOperatorActivelyEngaged(await getConversation(tenantId, phone))) {
+          emitAiReplyStatus(tenantId, phone, 'skipped_operator_active');
           return;
         }
 
