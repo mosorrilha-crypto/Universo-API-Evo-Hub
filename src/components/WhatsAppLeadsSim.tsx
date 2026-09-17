@@ -2940,9 +2940,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     return Date.now() - waitingSince > 30 * 60 * 1000 ? 'over30' : 'under30';
   };
 
+  // Achado real, pedido direto (print anotado, 16/09/2026): 'over30'/
+  // 'under30' usavam hex fixo (#231412/#231C10, os valores de
+  // --danger-surface/--pending-surface só do tema ESCURO) em vez dos tokens
+  // — no claro (e no azul/limpo) isso nunca mudava, sobrava uma tarja quase
+  // preta destoando de qualquer paleta clara. 'awaitingClient' ao lado já
+  // fazia certo (var(--text-label)/var(--surface-raised)); só faltava estas
+  // duas seguirem o mesmo padrão.
   const waitingGroupMeta: Record<WaitingGroupId, { label: string; className: string }> = {
-    over30: { label: 'ESPERANDO HÁ MAIS DE 30 MIN', className: 'text-[#A33A22] bg-[#231412]' },
-    under30: { label: 'ESPERANDO ATÉ 30 MIN', className: 'text-[#8A5A00] bg-[#231C10]' },
+    over30: { label: 'ESPERANDO HÁ MAIS DE 30 MIN', className: 'text-[var(--danger)] bg-[var(--danger-surface)]' },
+    under30: { label: 'ESPERANDO ATÉ 30 MIN', className: 'text-[var(--pending)] bg-[var(--pending-surface)]' },
     awaitingClient: { label: 'AGUARDANDO CLIENTE', className: 'text-[var(--text-label)] bg-[var(--surface-raised)]' },
   };
 
