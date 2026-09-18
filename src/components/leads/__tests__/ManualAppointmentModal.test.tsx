@@ -108,3 +108,40 @@ describe('ManualAppointmentModal — catálogo com variantes (TASK-0409)', () =>
     expect(screen.getByText(/5567998038466/)).toBeTruthy();
   });
 });
+
+/**
+ * TASK-0433 (achado real, pedido direto: prints mostrando "Esse horário já
+ * está ocupado na agenda" sem nenhum jeito de vincular o comprovante ao
+ * agendamento que já existe, e "Registrar receita avulsa" caindo no mesmo
+ * beco sem saída) — quando o 409 traz o evento real que colide
+ * (`conflictingEvent`), o modal oferece "vincular" em vez de só mostrar o
+ * erro puro.
+ */
+describe('ManualAppointmentModal — vincular agendamento existente no conflito (TASK-0433)', () => {
+  const conflictingEvent = { eventId: 'evt-existente-real', summary: 'Efecto Volumen Brasileño', startIso: '2026-09-17T09:30:00-04:00', endIso: '2026-09-17T10:30:00-04:00' };
+
+  it('sem conflictingEvent, mostra só o erro puro (comportamento de sempre)', () => {
+    render(<ManualAppointmentModal {...baseProps} products={[]} serviceName="" onServiceNameChange={noop} error="Esse horário já está ocupado na agenda." />);
+    expect(screen.getByText('Esse horário já está ocupado na agenda.')).toBeTruthy();
+    expect(screen.queryByText(/Vincular este agendamento/)).toBeNull();
+  });
+
+  it('com conflictingEvent, mostra o resumo do evento real e o botão de vincular', () => {
+    render(<ManualAppointmentModal {...baseProps} products={[]} serviceName="" onServiceNameChange={noop} error="Esse horário já está ocupado na agenda." conflictingEvent={conflictingEvent} />);
+    expect(screen.getByText(/Efecto Volumen Brasileño/)).toBeTruthy();
+    expect(screen.getByText('Vincular este agendamento já existente ao contato')).toBeTruthy();
+  });
+
+  it('clicar em "Vincular" chama onLinkConflictingEvent', () => {
+    const onLinkConflictingEvent = vi.fn();
+    render(<ManualAppointmentModal {...baseProps} products={[]} serviceName="" onServiceNameChange={noop} error="Esse horário já está ocupado na agenda." conflictingEvent={conflictingEvent} onLinkConflictingEvent={onLinkConflictingEvent} />);
+    fireEvent.click(screen.getByText('Vincular este agendamento já existente ao contato'));
+    expect(onLinkConflictingEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('isLinkingConflictingEvent=true desabilita o botão e troca o texto', () => {
+    render(<ManualAppointmentModal {...baseProps} products={[]} serviceName="" onServiceNameChange={noop} error="Esse horário já está ocupado na agenda." conflictingEvent={conflictingEvent} isLinkingConflictingEvent />);
+    const button = screen.getByText('Vinculando...').closest('button')!;
+    expect(button.disabled).toBe(true);
+  });
+});

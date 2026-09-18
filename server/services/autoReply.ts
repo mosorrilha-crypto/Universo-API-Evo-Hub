@@ -664,7 +664,26 @@ async function generateSpecialistReply(
   // Camada 1 (cacheada) quanto no lembrete dinâmico de 1ª mensagem abaixo,
   // sem duas consultas separadas ao mesmo agent_status.
   const leadsOnly = await isLeadsOnlyMode(tenantId).catch(() => false);
-  const isFirstMessage = specialistInvokedBefore !== undefined ? !specialistInvokedBefore : !history || history.length === 0;
+  // TASK-0429 — achado real (tenant Dr. Daniel, número compartilhado
+  // comercial/pessoal): `!specialistInvokedBefore` sozinho não é "1ª
+  // mensagem da conversa", é só "especialista nunca rodou nesta conversa
+  // ainda" — em conversas de dias/semanas, majoritariamente pessoais, isso
+  // fica true bem depois da conversa já ter dezenas/centenas de mensagens
+  // (confirmado com 60 e 118 mensagens reais em dois contatos). Quando o
+  // modelo finalmente classifica corretamente uma mensagem claramente
+  // pessoal como outOfScope, essa definição recusava por engano (achando
+  // que era a 1ª mensagem de um lead novo), forçando uma falha real em vez
+  // do silêncio esperado — 33 escalonamentos falsos em 7 dias. Exigir
+  // TAMBÉM um histórico curto restaura a proteção original (não descartar a
+  // 1ª mensagem real de um lead novo) sem abrir essa brecha; o limiar cobre
+  // os casos que motivaram trocar `history.length === 0` por
+  // `specialistInvokedBefore` (mensagem automática de 1º contato ou
+  // operador respondendo antes do lead somam 2+ entradas já na 2ª mensagem
+  // do cliente).
+  const FIRST_MESSAGE_HISTORY_THRESHOLD = 4;
+  const isFirstMessage = specialistInvokedBefore !== undefined
+    ? !specialistInvokedBefore && (!history || history.length <= FIRST_MESSAGE_HISTORY_THRESHOLD)
+    : !history || history.length === 0;
   // TASK-0411/TASK-0412 — único ponto de decisão de quando um outOfScope
   // retornado pelo modelo é aceito de verdade: precisa do modo "somente
   // leads" ativo (nunca aceita se o tenant não ligou o modo, mesmo que o

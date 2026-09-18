@@ -2480,6 +2480,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [isCreatingManualAppointment, setIsCreatingManualAppointment] = useState(false);
   const [manualAppointmentError, setManualAppointmentError] = useState<string | null>(null);
   const [manualAppointmentSuccess, setManualAppointmentSuccess] = useState(false);
+  // TASK-0433 (achado real, pedido direto: "o botão de registrar agora não
+  // funciona se já existe o agendamento manual pois ele aparece já agendado
+  // mas não tem como marcar que é deste serviço o comprovante") — quando o
+  // 409 de "horário ocupado" acima traz o evento real que colide
+  // (`conflictingEvent`), guarda aqui pra oferecer "vincular este
+  // agendamento existente" em vez de um beco sem saída.
+  const [manualConflictingEvent, setManualConflictingEvent] = useState<{ eventId: string; summary: string; startIso: string; endIso: string } | null>(null);
+  const [isLinkingConflictingAppointment, setIsLinkingConflictingAppointment] = useState(false);
 
   // Pedido real (20/08/2026): o operador digitava a hora "no escuro" e só
   // descobria conflito depois de tentar salvar. Busca os horários REALMENTE
@@ -2549,6 +2557,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setIsManualServiceCustom(false);
       setManualServiceName('');
       setManualCustomDurationMinutes('');
+      setManualConflictingEvent(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isManualAppointmentModalOpen]);
@@ -2586,6 +2595,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
     setIsCreatingManualAppointment(true);
     setManualAppointmentError(null);
+    setManualConflictingEvent(null);
     try {
       const durationMinutes = manualServiceDurationMinutes;
       const startIso = `${manualDate}T${manualTime}:00`;
@@ -2606,7 +2616,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!res.ok) {
+        // TASK-0433 — o 409 de horário ocupado pode trazer o evento real que
+        // colide (server/routes/conversations.ts); guarda pra oferecer
+        // "vincular a este agendamento existente" no modal em vez de um
+        // beco sem saída.
+        if (res.status === 409 && data.conflictingEvent) setManualConflictingEvent(data.conflictingEvent);
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
       setPaymentAppointment(data.appointment);
       setIsManualAppointmentModalOpen(false);
       setManualServiceName('');
@@ -2623,6 +2640,65 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setManualAppointmentError(err.message || 'Não foi possível cadastrar o agendamento agora.');
     } finally {
       setIsCreatingManualAppointment(false);
+    }
+  };
+
+  // TASK-0433 — vincula o evento real já existente na agenda (achado no 409
+  // de "horário ocupado" acima) a este contato, reaproveitando o mesmo
+  // endpoint já usado pela aba Agenda pra "evento criado direto no Google
+  // Calendar" (TASK-0270, POST link-appointment — nunca cria evento novo, só
+  // grava o vínculo telefone↔evento). Com "comprovante já recebido" marcado
+  // no mesmo modal, também chama verify-payment logo em seguida — mesmo
+  // caminho de API que resolve-payment/manual-appointment já usam pra
+  // aprovar um comprovante, só sem botão próprio no painel até aqui.
+  const handleLinkConflictingAppointment = async () => {
+    if (!selectedLead?.phone || !manualConflictingEvent) return;
+    setIsLinkingConflictingAppointment(true);
+    setManualAppointmentError(null);
+    try {
+      const linkRes = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/link-appointment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: manualConflictingEvent.eventId,
+          summary: manualConflictingEvent.summary,
+          startIso: manualConflictingEvent.startIso,
+          endIso: manualConflictingEvent.endIso,
+        }),
+      });
+      const linkData = await linkRes.json();
+      if (!linkRes.ok) throw new Error(linkData.error || `HTTP ${linkRes.status}`);
+
+      let finalAppointment = linkData.appointment;
+      if (manualPaymentReceived) {
+        const overrideAmount = manualPaymentAmountReceived.trim() ? Number(manualPaymentAmountReceived) : undefined;
+        const verifyRes = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/verify-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'verified', overrideAmount }),
+        });
+        const verifyData = await verifyRes.json();
+        if (!verifyRes.ok) throw new Error(verifyData.error || `HTTP ${verifyRes.status}`);
+        finalAppointment = verifyData.appointment;
+      }
+
+      setPaymentAppointment(finalAppointment);
+      setIsManualAppointmentModalOpen(false);
+      setManualConflictingEvent(null);
+      setManualServiceName('');
+      setIsManualServiceCustom(false);
+      setManualCustomDurationMinutes('');
+      setManualDate('');
+      setManualTime('');
+      setManualNotes('');
+      setManualPaymentReceived(false);
+      setManualPaymentAmountReceived('');
+      setManualAppointmentSuccess(true);
+      setTimeout(() => setManualAppointmentSuccess(false), 4000);
+    } catch (err: any) {
+      setManualAppointmentError(err.message || 'Não foi possível vincular este agendamento agora.');
+    } finally {
+      setIsLinkingConflictingAppointment(false);
     }
   };
 
@@ -7192,7 +7268,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         error={manualAppointmentError}
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
-        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); setManualPaymentAmountReceived(''); setIsManualServiceCustom(false); setManualCustomDurationMinutes(''); }}
+        conflictingEvent={manualConflictingEvent}
+        isLinkingConflictingEvent={isLinkingConflictingAppointment}
+        onLinkConflictingEvent={handleLinkConflictingAppointment}
+        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualConflictingEvent(null); setManualNotes(''); setManualPaymentReceived(false); setManualPaymentAmountReceived(''); setIsManualServiceCustom(false); setManualCustomDurationMinutes(''); }}
       />
 
       <ManageLabelsModal

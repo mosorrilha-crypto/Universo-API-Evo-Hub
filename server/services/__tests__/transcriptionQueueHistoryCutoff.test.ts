@@ -15,7 +15,7 @@
  * webhooksOperatorActivePause.test.ts) — só captura o `history` recebido
  * por generateAutoReplyForText, que é o único ponto que importa aqui.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const generateAutoReplyForText = vi.fn(async () => null);
 vi.mock('../autoReply', async (importOriginal) => {
@@ -90,22 +90,15 @@ function makeJob() {
   };
 }
 
-function waitForCall(mock: ReturnType<typeof vi.fn>, timeoutMs = 500): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if (mock.mock.calls.length > 0) return resolve();
-      if (Date.now() - start > timeoutMs) return reject(new Error('mock não foi chamado a tempo'));
-      setTimeout(check, 5);
-    };
-    check();
-  });
-}
-
 describe('processJob — corte de histórico no caminho de áudio', () => {
   beforeEach(() => {
     generateAutoReplyForText.mockClear();
     getConversation.mockClear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('exclui o próprio áudio do histórico por IDENTIDADE, preservando uma mensagem nova chegada depois dele (corrida real)', async () => {
@@ -124,7 +117,9 @@ describe('processJob — corte de histórico no caminho de áudio', () => {
     } as any);
 
     await processJob(makeJob(), { getAi: () => ({} as any) });
-    await waitForCall(generateAutoReplyForText);
+    // TASK-0430 — o áudio agora passa pelo mesmo debounce (~10s de
+    // silêncio) do buffer de texto antes de disparar a resposta.
+    await vi.advanceTimersByTimeAsync(10_000);
 
     const historyArg = (generateAutoReplyForText.mock.calls[0] as any[])[5];
     expect(historyArg.map((m: any) => m.id)).toEqual(['m-0']);
@@ -145,7 +140,7 @@ describe('processJob — corte de histórico no caminho de áudio', () => {
     } as any);
 
     await processJob(makeJob(), { getAi: () => ({} as any) });
-    await waitForCall(generateAutoReplyForText);
+    await vi.advanceTimersByTimeAsync(10_000);
 
     const historyArg = (generateAutoReplyForText.mock.calls[0] as any[])[5];
     expect(historyArg.map((m: any) => m.id)).toEqual(['m-0']);
