@@ -18,7 +18,8 @@ import { isPlausiblePersonalName } from './contactNameGuard';
 import { runWithTenantDbContext } from './tenantDbContext';
 import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
-import { bufferIncomingAudioText, startAudioBufferRecoverySweeper } from './audioMessageBuffer';
+import { bufferIncomingAudioText, startAudioBufferRecoverySweeper, takePendingAudioBufferTexts } from './audioMessageBuffer';
+import { markGenerating, unmarkGenerating } from './generatingLock';
 
 export interface TranscriptionJob {
   message: ParsedIncomingMessage;
@@ -141,10 +142,10 @@ async function generateAndSendAudioReply(
   resolvedTenant: ResolvedTenant,
   deps: TranscriptionQueueDeps,
   phone: string,
-  combinedText: string,
+  combinedTextArg: string,
   bufferedContactName: string | undefined,
-  lastMessageId: string,
-  messageCount: number,
+  lastMessageIdArg: string,
+  messageCountArg: number,
   firstMessageId: string
 ): Promise<void> {
   const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
@@ -163,8 +164,8 @@ async function generateAndSendAudioReply(
     // modo "somente anúncios" também vale pra áudio, usando a
     // transcrição (já combinada, se houve rajada) como o texto a
     // comparar com os gatilhos configurados.
-    await attachCatalogClickIfMatched(tenantId, phone, combinedText);
-    if (await shouldBlockForAdsOnlyMode(tenantId, phone, combinedText)) return;
+    await attachCatalogClickIfMatched(tenantId, phone, combinedTextArg);
+    if (await shouldBlockForAdsOnlyMode(tenantId, phone, combinedTextArg)) return;
     const kbContext = formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase);
     const segment = await getTenantSegment(tenantId);
     // TASK-0209/TASK-0430 — corta por IDENTIDADE (o messageId do PRIMEIRO
@@ -174,15 +175,24 @@ async function generateAndSendAudioReply(
     // for encontrado.
     const allMessages = conversation?.messages;
     const cutoffIndex = allMessages ? allMessages.findIndex((m) => m.id === firstMessageId) : -1;
-    const history = !allMessages ? undefined : cutoffIndex !== -1 ? allMessages.slice(0, cutoffIndex) : allMessages.slice(0, -messageCount);
+    const history = !allMessages ? undefined : cutoffIndex !== -1 ? allMessages.slice(0, cutoffIndex) : allMessages.slice(0, -messageCountArg);
     // Mesmo sinal pro painel do caminho de texto (ver triggerAutoReply em webhooks.ts).
     emitAiReplyStatus(tenantId, phone, 'generating');
+    // TASK-0431 — mesmo princípio do caminho de texto (webhooks.ts): marca
+    // que uma geração pro MESMO telefone está em andamento, pra que
+    // bufferIncomingAudioText/bufferIncomingText adiem seu próprio flush em
+    // vez de disparar por conta própria e virar um ciclo independente e
+    // redundante. Desmarcado no finally.
+    markGenerating(tenantId, phone);
     // TASK-0416 — ver StoredConversation.specialistInvokedAt em
     // conversationStore.ts: history vazio não basta pra saber se é a 1ª
     // vez que o especialista roda de verdade.
     const specialistInvokedBefore = !!conversation?.specialistInvokedAt;
+    let combinedText = combinedTextArg;
+    let lastMessageId = lastMessageIdArg;
+    let messageCount = messageCountArg;
     try {
-      const result = await generateAutoReplyForText(
+      let result = await generateAutoReplyForText(
         tenantId,
         deps.getAi(),
         combinedText,
@@ -202,6 +212,43 @@ async function generateAndSendAudioReply(
         specialistInvokedBefore
       );
       await markSpecialistInvoked(tenantId, phone);
+
+      // TASK-0431 (mesmo princípio de TASK-0418 no caminho de texto): a
+      // cliente pode ter mandado mais áudio(s) ENQUANTO esta resposta era
+      // gerada — agora que o flush adia enquanto isGenerating for true (ver
+      // generatingLock.ts/audioMessageBuffer.ts), esse texto ainda está
+      // esperando no buffer nesse momento. Absorve e regenera incluindo
+      // tudo, em vez de deixar o outro ciclo rodar depois, de forma
+      // independente e redundante.
+      if (result) {
+        const pendingExtra = takePendingAudioBufferTexts(tenantId, phone);
+        if (pendingExtra?.texts.length) {
+          console.warn(`🔁 [Resposta Automática] tenant=${tenantId} absorveu áudio novo de ${phone} chegado durante a geração — regenerando com o texto completo.`);
+          combinedText = [combinedText, ...pendingExtra.texts].join('\n');
+          lastMessageId = pendingExtra.lastMessageId;
+          messageCount += pendingExtra.texts.length;
+          result = await generateAutoReplyForText(
+            tenantId,
+            deps.getAi(),
+            combinedText,
+            bufferedContactName,
+            kbContext,
+            history,
+            phone,
+            undefined,
+            segment,
+            isEvolution ? undefined : { phoneNumberId, accessToken: token },
+            undefined,
+            undefined,
+            undefined,
+            deps.groqApiKey,
+            messageCount,
+            undefined,
+            specialistInvokedBefore
+          );
+          await markSpecialistInvoked(tenantId, phone);
+        }
+      }
       if (!result) {
         await logEscalation(tenantId, phone, bufferedContactName, 'IA não conseguiu gerar resposta automática pro áudio', combinedText);
         emitAiReplyStatus(tenantId, phone, 'failed');
@@ -288,6 +335,8 @@ async function generateAndSendAudioReply(
         await logEscalation(tenantId, phone, bufferedContactName, `Falha ao responder automaticamente: ${err.message}`, combinedText);
       }
       console.warn('❌ [Resposta Automática] Falhou:', err.message);
+    } finally {
+      unmarkGenerating(tenantId, phone);
     }
   });
 }

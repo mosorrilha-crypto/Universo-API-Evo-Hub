@@ -24,10 +24,15 @@
  */
 import { getDb, getPlatformDb } from './db';
 import { runWithTenantDbContext } from './tenantDbContext';
+import { isGenerating } from './generatingLock';
 import type { ResolvedTenant } from './tenantResolver';
 
 const SILENCE_MS = 10_000;
 const SWEEP_INTERVAL_MS = 15_000;
+
+/** TASK-0431 — mesmo princípio de messageBuffer.ts: adia o flush enquanto uma resposta pro mesmo telefone ainda está sendo gerada, em vez de disparar por conta própria e virar um ciclo independente e redundante. */
+const GENERATION_WAIT_RETRY_MS = 2_000;
+const MAX_GENERATION_WAIT_MS = 3 * 60_000;
 
 type FlushCallback = (combinedText: string, contactName: string | undefined, lastMessageId: string, messageCount: number, resolvedTenant: ResolvedTenant, firstMessageId: string) => void;
 
@@ -47,7 +52,12 @@ function bufferKey(tenantId: string, phone: string): string {
   return `${tenantId}:${phone}`;
 }
 
-async function doFlush(key: string, phone: string, buffer: PendingAudioBuffer, onFlush: FlushCallback) {
+async function doFlush(key: string, phone: string, buffer: PendingAudioBuffer, onFlush: FlushCallback, waitStartedAt: number = Date.now()) {
+  if (isGenerating(buffer.resolvedTenant.tenantId, phone) && Date.now() - waitStartedAt < MAX_GENERATION_WAIT_MS) {
+    const retryBuffer: PendingAudioBuffer = { ...buffer, timer: setTimeout(() => void doFlush(key, phone, retryBuffer, onFlush, waitStartedAt), GENERATION_WAIT_RETRY_MS) };
+    buffers.set(key, retryBuffer);
+    return;
+  }
   buffers.delete(key);
   flushing.add(key);
   try {
