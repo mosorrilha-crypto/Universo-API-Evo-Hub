@@ -4,6 +4,13 @@
  * Google Calendar + linha em appointments com source='manual'; recusa
  * quando o contato já tem agendamento ativo; recusa quando o horário está
  * ocupado; 400 em campos faltando; 503 sem Google Calendar configurado.
+ *
+ * TASK-0433 (achado real, pedido direto: "o botão de registrar agora não
+ * funciona se já existe o agendamento manual pois ele aparece já agendado
+ * mas não tem como marcar que é deste serviço o comprovante") — o 409 de
+ * horário ocupado agora tenta trazer o evento real que colide
+ * (`conflictingEvent`), best-effort, pra o frontend oferecer "vincular a
+ * este agendamento existente" em vez de um beco sem saída.
  */
 import express from 'express';
 import type { Server } from 'http';
@@ -11,9 +18,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const checkFreeBusy = vi.fn(async () => true);
 const createCalendarEvent = vi.fn(async (_tenantId: string, _cfg: unknown, _title: string, _description: string, _startIso: string, _endIso: string, _timezone: string) => 'evt-manual-123');
-vi.mock('../../services/googleCalendar', () => ({ checkFreeBusy, createCalendarEvent }));
+const listUpcomingEvents = vi.fn(async () => [] as Array<{ id: string; summary: string; startIso: string; endIso?: string }>);
+vi.mock('../../services/googleCalendar', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/googleCalendar')>();
+  return { ...actual, checkFreeBusy, createCalendarEvent, listUpcomingEvents };
+});
 
 const { createConversationsRouter } = await import('../conversations');
+const { localNaiveToUtcIso } = await import('../../services/googleCalendar');
 const { initDb } = await import('../../services/db');
 const { createFakeSupabase } = await import('../../services/__tests__/fakeSupabase');
 
@@ -60,6 +72,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   checkFreeBusy.mockResolvedValue(true);
   createCalendarEvent.mockResolvedValue('evt-manual-123');
+  listUpcomingEvents.mockResolvedValue([]);
   supabase = createFakeSupabase();
   initDb(supabase);
 });
@@ -236,6 +249,59 @@ describe('POST /api/conversations/:phone/manual-appointment', () => {
     });
     expect(res.status).toBe(409);
     expect(createCalendarEvent).not.toHaveBeenCalled();
+  });
+
+  it('409 traz o evento real que colide (conflictingEvent), pra o frontend oferecer "vincular" (TASK-0433)', async () => {
+    checkFreeBusy.mockResolvedValue(false);
+    const evStartIso = localNaiveToUtcIso('2026-08-15T10:00:00', 'America/Asuncion');
+    const evEndIso = localNaiveToUtcIso('2026-08-15T11:00:00', 'America/Asuncion');
+    listUpcomingEvents.mockResolvedValue([
+      { id: 'evt-existente-real', summary: 'Efecto Volumen Brasileño', startIso: evStartIso, endIso: evEndIso },
+    ]);
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00' }),
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.conflictingEvent).toEqual({ eventId: 'evt-existente-real', summary: 'Efecto Volumen Brasileño', startIso: evStartIso, endIso: evEndIso });
+  });
+
+  it('409 sem conflictingEvent quando nenhum evento na janela realmente colide (não impede o operador de ver o erro original)', async () => {
+    checkFreeBusy.mockResolvedValue(false);
+    const otherDayIso = localNaiveToUtcIso('2026-08-20T10:00:00', 'America/Asuncion');
+    listUpcomingEvents.mockResolvedValue([
+      { id: 'evt-outro-dia', summary: 'Cejas', startIso: otherDayIso, endIso: localNaiveToUtcIso('2026-08-20T11:00:00', 'America/Asuncion') },
+    ]);
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00' }),
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.conflictingEvent).toBeUndefined();
+  });
+
+  it('409 continua respondendo normalmente mesmo se a busca do evento que colide falhar (best-effort, nunca derruba o erro original)', async () => {
+    checkFreeBusy.mockResolvedValue(false);
+    listUpcomingEvents.mockRejectedValue(new Error('Google Calendar fora do ar'));
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00' }),
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error).toBe('Esse horário já está ocupado na agenda.');
+    expect(data.conflictingEvent).toBeUndefined();
   });
 
   it('503 quando o Google Calendar não está configurado neste servidor', async () => {
