@@ -19,6 +19,7 @@ import { hasFirstContactMessage, sendFirstContactMessage } from '../services/fir
 import { getTenantSegment, getTenantBusinessHours, getTenantCustomerNotificationPreferences, funnelAutoFollowUpDelayMs, DEFAULT_CUSTOMER_NOTIFICATION_PREFERENCES } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper, takePendingBufferTexts } from '../services/messageBuffer';
+import { markGenerating, unmarkGenerating } from '../services/generatingLock';
 import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, bookingConfirmationEscalationSourceKey } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia, withMediaDownloadRetry } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
@@ -228,6 +229,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // acontece (mensagem enviada ou escalonamento), então todo caminho do
       // try/catch abaixo precisa terminar com 'sent' ou 'failed'.
       emitAiReplyStatus(tenantId, phone, 'generating');
+      // TASK-0432 — marca que uma geração pro MESMO telefone está em
+      // andamento (server/services/generatingLock.ts): o buffer de texto
+      // (e o de áudio) adiam seu próprio flush enquanto isso for true, em
+      // vez de disparar por conta própria e virar um 2º ciclo independente
+      // e redundante. Desmarcado no finally, cobrindo todo caminho de saída
+      // (sucesso, escalonamento, erro).
+      markGenerating(tenantId, phone);
       try {
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
         // longa), não só na hora de enviar as bolhas.
@@ -532,6 +540,8 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           await logEscalation(tenantId, phone, contactName, `Falha ao responder automaticamente: ${err.message}`, text);
         }
         console.warn('❌ [Resposta Automática] Falhou:', err.message);
+      } finally {
+        unmarkGenerating(tenantId, phone);
       }
     });
   };
