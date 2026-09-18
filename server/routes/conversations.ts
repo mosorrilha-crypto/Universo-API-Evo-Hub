@@ -78,7 +78,7 @@ import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { resolveTenantId, requireRole } from '../middleware/rbac';
-import { conversationsStreamRateLimiter } from '../middleware/rateLimit';
+import { conversationsStreamRateLimiter, knowledgeBaseImageDeleteRateLimiter } from '../middleware/rateLimit';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
@@ -2383,7 +2383,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // mesmo desacoplamento já usado pro upload — só persiste de fato quando a
   // KB inteira é salva. Melhor esforço (deleteKnowledgeBaseImage nunca
   // lança), por isso sempre responde sucesso.
-  router.delete('/api/knowledge-base/images/:imageId', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/knowledge-base/images/:imageId', knowledgeBaseImageDeleteRateLimiter, authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantOf(req), req.params.imageId);
     res.json({ success: true });
   }));
