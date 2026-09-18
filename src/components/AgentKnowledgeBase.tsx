@@ -6,6 +6,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { AgentKnowledgeBase, AgentProduct, ProductVariant, BeforeAfterPair, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
+import { interpolate, type TranslationKey } from '../i18n/translations';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { ReconectarWhatsAppQrCode } from './ReconectarWhatsAppQrCode';
 import {
@@ -93,24 +94,24 @@ interface AgentKnowledgeBaseProps {
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
-const WEEKDAY_LABELS: { key: string; label: string }[] = [
-  { key: '1', label: 'Segunda' },
-  { key: '2', label: 'Terça' },
-  { key: '3', label: 'Quarta' },
-  { key: '4', label: 'Quinta' },
-  { key: '5', label: 'Sexta' },
-  { key: '6', label: 'Sábado' },
-  { key: '0', label: 'Domingo' },
+const WEEKDAY_LABELS: { key: string; labelKey: TranslationKey }[] = [
+  { key: '1', labelKey: 'kbWeekdayMonday' },
+  { key: '2', labelKey: 'kbWeekdayTuesday' },
+  { key: '3', labelKey: 'kbWeekdayWednesday' },
+  { key: '4', labelKey: 'kbWeekdayThursday' },
+  { key: '5', labelKey: 'kbWeekdayFriday' },
+  { key: '6', labelKey: 'kbWeekdaySaturday' },
+  { key: '0', labelKey: 'kbWeekdaySunday' },
 ];
 
 const DEFAULT_DAY_HOURS: DayHours = { open: '09:00', close: '18:00' };
 
 /** Ícone/rótulo/cor de cada tipo de bloco da Mensagem Inicial de Primeiro Contato — usado pra montar a sequência ordenada (ver SECTION 6 abaixo). */
-const FIRST_CONTACT_BLOCK_META: Record<FirstContactBlockType, { label: string; icon: React.ReactNode; color: string }> = {
-  text: { label: 'Texto', icon: <MessageSquare className="w-3.5 h-3.5" />, color: 'text-slate-300' },
-  image: { label: 'Imagem', icon: <ImageIcon className="w-3.5 h-3.5" />, color: 'text-blue-400' },
-  video: { label: 'Vídeo', icon: <Video className="w-3.5 h-3.5" />, color: 'text-emerald-400' },
-  file: { label: 'Arquivo', icon: <Paperclip className="w-3.5 h-3.5" />, color: 'text-sky-400' },
+const FIRST_CONTACT_BLOCK_META: Record<FirstContactBlockType, { labelKey: TranslationKey; icon: React.ReactNode; color: string }> = {
+  text: { labelKey: 'kbBlockTypeText', icon: <MessageSquare className="w-3.5 h-3.5" />, color: 'text-slate-300' },
+  image: { labelKey: 'kbBlockTypeImage', icon: <ImageIcon className="w-3.5 h-3.5" />, color: 'text-blue-400' },
+  video: { labelKey: 'kbBlockTypeVideo', icon: <Video className="w-3.5 h-3.5" />, color: 'text-emerald-400' },
+  file: { labelKey: 'kbBlockTypeFile', icon: <Paperclip className="w-3.5 h-3.5" />, color: 'text-sky-400' },
 };
 
 // A Base tem oito documentos tipados; estes atalhos tornam a estrutura
@@ -749,7 +750,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     bookable: true,
     active: true,
   };
-  const PRODUCT_WIZARD_STEPS = ['Básico', 'Preço & Agendamento', 'Status'] as const;
+  const PRODUCT_WIZARD_STEPS = [t('kbWizardStepBasic'), t('kbWizardStepPricing'), t('kbWizardStepStatus')] as const;
   const [isProductWizardOpen, setIsProductWizardOpen] = useState(false);
   const [productWizardStep, setProductWizardStep] = useState(0);
   const [productDraft, setProductDraft] = useState<ProductDraft>(EMPTY_PRODUCT_DRAFT);
@@ -2322,16 +2323,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           exatamente onde já estava, nada foi fundido. */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="text-xs font-bold text-slate-400">
-          Configuração visual da Base de Conhecimento
+          {t('kbVisualConfigLabel')}
         </span>
         <button
           type="button"
           onClick={handleDownloadMarkdown}
           className="px-3.5 py-2 rounded-xl font-bold text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
-          title="Baixa tudo (Camada 1, se visível, + as 6 seções abaixo) como um arquivo .md pra ler/editar/auditar fora do painel"
+          title={t('kbDownloadMdTitle')}
         >
           <Download className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Baixar .md (auditoria)</span>
+          <span>{t('kbDownloadMdButton')}</span>
         </button>
       </div>
 
@@ -2355,7 +2356,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <span className="flex items-center gap-1.5">
               <Target className="w-3.5 h-3.5" />
-              <span>1. Perfil & Objetivo</span>
+              <span>{t('kbTab1')}</span>
             </span>
             {openSections.s1 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
@@ -2366,10 +2367,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Building2 className="w-4 h-4 text-emerald-400" />
-                  Perfil do Cliente & Objetivo do Agente IA
+                  {t('kbSec1Heading')}
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Estas diretrizes definem quem o agente representa e qual é a sua missão comercial.
+                  {t('kbSec1Description')}
                 </p>
               </div>
             </div>
@@ -2377,7 +2378,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
-                  Nome da Empresa / Projeto:
+                  {t('kbFieldCompanyName')}
                 </label>
                 <input
                   type="text"
@@ -2398,7 +2399,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     mudar a estrutura de seções (mudança maior, fora do
                     escopo desta correção pontual). */}
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-bold text-slate-300">
-                  Tom de Voz do Agente:
+                  {t('kbFieldToneOfVoice')}
                   <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-200">{t('kbDocBrandVoiceLabel')}</span>
                 </label>
                 <AutoResizeTextarea
@@ -2413,7 +2414,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
-                Objetivo Principal do Agente no WhatsApp:
+                {t('kbFieldAgentGoal')}
               </label>
               <AutoResizeTextarea
                 minRows={2}
@@ -2426,7 +2427,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
-                Descrição Geral do Modelo de Negócio:
+                {t('kbFieldBusinessModel')}
               </label>
               <AutoResizeTextarea
                 minRows={3}
@@ -2439,7 +2440,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
-                Link de Localização (Google Maps) — opcional:
+                {t('kbFieldLocationMaps')}
               </label>
               <input
                 type="text"
@@ -2448,12 +2449,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 placeholder="Ex: https://www.google.com/maps/search/?api=1&query=Seu+Endereço+Completo"
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
               />
-              <p className="text-[11px] text-slate-500 mt-1">Quando preenchido, o agente manda esse link sempre que o cliente pedir o endereço/localização.</p>
+              <p className="text-[11px] text-slate-500 mt-1">{t('kbFieldLocationMapsHint')}</p>
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
-                Dados de Pagamento (PIX/conta bancária) — opcional:
+                {t('kbFieldPaymentDetails')}
               </label>
               <AutoResizeTextarea
                 minRows={2}
@@ -2462,7 +2463,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 placeholder="Ex: Chave PIX: 12.345.678/0001-90 (CNPJ) — Titular: Nome da Empresa"
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none leading-relaxed"
               />
-              <p className="text-[11px] text-slate-500 mt-1">Diferente do link de localização acima, isto NUNCA é usado pelo agente automático — quando preenchido, só aparece como um botão manual no menu de anexos da conversa, pro operador mandar sob demanda quando a cliente pedir.</p>
+              <p className="text-[11px] text-slate-500 mt-1">{t('kbFieldPaymentDetailsHint')}</p>
             </div>
 
             <div>
@@ -2470,7 +2471,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   pertence ao documento "Preços e políticas", não ao
                   "Perfil do negócio" que dá nome a esta seção. */}
               <label className="mb-1 flex items-center gap-1.5 text-xs font-bold text-slate-300">
-                Políticas Comerciais e Formas de Pagamento:
+                {t('kbFieldPricingPolicies')}
                 <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">{t('kbDocPricingPoliciesLabel')}</span>
               </label>
               <AutoResizeTextarea
@@ -2491,7 +2492,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Clock className="w-4 h-4 text-emerald-400" />
-                  Horário de Funcionamento
+                  {t('kbHoursTitleInline')}
                 </h3>
                 <button
                   onClick={handleSaveHours}
@@ -2499,14 +2500,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   className="px-3 py-1.5 rounded-lg font-bold text-[11px] bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>{isSavingHours ? 'Salvando...' : 'Salvar Horário'}</span>
+                  <span>{isSavingHours ? t('kbHoursSaving') : t('kbHoursSaveButton')}</span>
                 </button>
               </div>
               <p className="text-xs text-slate-400 mb-3">
-                O agendamento automático nunca oferece nem confirma um horário fora do expediente cadastrado aqui. Dias sem marcação = sem atendimento.
+                {t('kbHoursDescription')}
               </p>
               <div className="space-y-1.5">
-                {WEEKDAY_LABELS.map(({ key, label }) => {
+                {WEEKDAY_LABELS.map(({ key, labelKey }) => {
                   const dayHours = hoursForm[key];
                   const enabled = !!dayHours;
                   return (
@@ -2521,7 +2522,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           onChange={(e) => handleToggleDay(key, e.target.checked)}
                           className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
                         />
-                        <span className={enabled ? 'text-white font-semibold' : 'text-slate-500'}>{label}</span>
+                        <span className={enabled ? 'text-white font-semibold' : 'text-slate-500'}>{t(labelKey)}</span>
                       </label>
                       {enabled ? (
                         <div className="flex items-center gap-2">
@@ -2531,7 +2532,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                             onChange={(e) => handleDayTimeChange(key, 'open', e.target.value)}
                             className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-emerald-500 focus:outline-none"
                           />
-                          <span className="text-slate-500">até</span>
+                          <span className="text-slate-500">{t('kbHoursUntil')}</span>
                           <input
                             type="time"
                             value={dayHours!.close}
@@ -2540,7 +2541,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           />
                         </div>
                       ) : (
-                        <span className="text-slate-600 italic">sem atendimento</span>
+                        <span className="text-slate-600 italic">{t('kbHoursNoService')}</span>
                       )}
                     </div>
                   );
@@ -2560,7 +2561,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <span className="flex items-center gap-1.5">
               <ShieldAlert className="w-3.5 h-3.5" />
-              <span>2. Regras de Negócio ({formData.businessRules.length})</span>
+              <span>{interpolate(t('kbTab2'), { count: formData.businessRules.length })}</span>
             </span>
             {openSections.s2 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
@@ -2571,7 +2572,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <ShieldAlert className="w-4 h-4 text-amber-400" />
-                  Regras de Negócio & Diretrizes do Agente
+                  {t('kbSec2Heading')}
                   {/* Achado real (auditoria de UX, 12/09/2026): esta seção
                       inteira serializa como `businessRules` do documento
                       "Preços e políticas" (splitVisualKnowledgeBaseIntoDocuments)
@@ -2586,7 +2587,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">{t('kbDocPricingPoliciesLabel')}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Cadastre regras estritas (Do's and Don'ts) que o agente NUNCA pode descumprir ao conversar com os clientes.
+                  {t('kbSec2Description')}
                 </p>
               </div>
             </div>
@@ -2605,7 +2606,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>Adicionar Regra</span>
+                <span>{t('kbRuleAddButton')}</span>
               </button>
             </form>
 
@@ -2642,14 +2643,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                         <button
                           onClick={handleSaveEditRule}
                           className="text-slate-500 hover:text-emerald-400 p-1 transition-colors cursor-pointer"
-                          title="Salvar edição"
+                          title={t('kbRuleSaveEdit')}
                         >
                           <Check className="w-4 h-4" />
                         </button>
                         <button
                           onClick={handleCancelEditRule}
                           className="text-slate-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
-                          title="Cancelar edição"
+                          title={t('kbRuleCancelEdit')}
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -2659,14 +2660,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                         <button
                           onClick={() => handleStartEditRule(idx)}
                           className="text-slate-500 hover:text-emerald-400 p-1 transition-colors cursor-pointer"
-                          title="Editar regra"
+                          title={t('kbRuleEdit')}
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDeleteRule(idx)}
                           className="text-slate-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
-                          title="Excluir regra"
+                          title={t('kbRuleDelete')}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -2676,7 +2677,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 ))
               ) : (
                 <div className="p-8 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-slate-800/60">
-                  Nenhuma regra de negócio cadastrada. Adicione regras acima.
+                  {t('kbRuleEmpty')}
                 </div>
               )}
             </div>
@@ -2693,7 +2694,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <span className="flex items-center gap-1.5">
               <DollarSign className="w-3.5 h-3.5" />
-              <span>3. Preços & Produtos ({formData.products.length})</span>
+              <span>{interpolate(t('kbTab3'), { count: formData.products.length })}</span>
             </span>
             {openSections.s3 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
@@ -2704,10 +2705,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-emerald-400" />
-                  Catálogo de Produtos, Serviços & Tabela de Preços
+                  {t('kbSec3Heading')}
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Permite ao Gemini consultar preços e especificações exatas durante o atendimento comercial. Foto e vídeo de exemplo (qualquer formato, inclusive .MOV do iPhone — convertido automaticamente; até {MAX_VIDEO_INPUT_SIZE_MB}MB, geralmente até ~1 minuto) o agente manda de verdade pro cliente quando perguntarem sobre o serviço.
+                  {interpolate(t('kbSec3Description'), { maxMb: MAX_VIDEO_INPUT_SIZE_MB })}
                 </p>
               </div>
               <button
@@ -2716,7 +2717,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 className="px-3.5 py-2 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Criar item</span>
+                <span>{t('kbProductCreateButton')}</span>
               </button>
             </div>
 
@@ -2726,8 +2727,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   <div className="flex items-center gap-2">
                     <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300"><Sparkles className="h-3.5 w-3.5" /></span>
                     <div>
-                      <p className="text-xs font-bold text-white">Catálogo pronto para a operação</p>
-                      <p className="mt-0.5 text-[11px] text-slate-400">A IA usa somente itens ativos e aprovados para responder, cotar e agendar.</p>
+                      <p className="text-xs font-bold text-white">{t('kbCatalogReadyTitle')}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">{t('kbCatalogReadyDesc')}</p>
                     </div>
                   </div>
                 </div>
@@ -2737,14 +2738,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2.5 py-1.5 text-[10px] font-bold text-amber-200 transition-colors hover:bg-amber-400/15"
                 >
                   <ShieldAlert className="h-3 w-3" />
-                  {productStats.pending > 0 ? `Revisar ${productStats.pending} pendência(s)` : 'Catálogo revisado'}
+                  {productStats.pending > 0 ? interpolate(t('kbCatalogReviewPending'), { count: productStats.pending }) : t('kbCatalogReviewed')}
                 </button>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Itens ativos</p><p className="mt-0.5 text-lg font-extrabold text-emerald-300">{productStats.active}<span className="ml-1 text-[10px] font-medium text-slate-500">/ {formData.products.length}</span></p></div>
-                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Categorias</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productCategories.length}</p></div>
-                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com variantes</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productStats.withVariants}</p></div>
-                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com mídia</p><p className="mt-0.5 text-lg font-extrabold text-sky-300">{productStats.withMedia}</p></div>
+                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">{t('kbCatalogActiveItems')}</p><p className="mt-0.5 text-lg font-extrabold text-emerald-300">{productStats.active}<span className="ml-1 text-[10px] font-medium text-slate-500">/ {formData.products.length}</span></p></div>
+                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">{t('kbCatalogCategories')}</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productCategories.length}</p></div>
+                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">{t('kbCatalogWithVariants')}</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productStats.withVariants}</p></div>
+                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">{t('kbCatalogWithMedia')}</p><p className="mt-0.5 text-lg font-extrabold text-sky-300">{productStats.withMedia}</p></div>
               </div>
             </div>
 
@@ -2757,7 +2758,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   type="text"
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
-                  placeholder="Buscar por nome, descrição ou categoria..."
+                  placeholder={t('kbProductSearchPlaceholder')}
                   className="flex-1 min-w-[180px] px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
                 />
                 {productCategories.length > 0 && (
@@ -2766,7 +2767,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     onChange={(e) => setProductCategoryFilter(e.target.value)}
                     className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
                   >
-                    <option value="">Todas as categorias</option>
+                    <option value="">{t('kbProductAllCategories')}</option>
                     {productCategories.map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
@@ -2776,12 +2777,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   value={productQualityFilter}
                   onChange={(e) => setProductQualityFilter(e.target.value as 'all' | 'pending' | 'active' | 'inactive')}
                   className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                  title="Organize o catálogo por estado e complete os itens pendentes antes de salvar"
+                  title={t('kbProductQualityFilterTitle')}
                 >
-                  <option value="all">Todos os itens</option>
-                  <option value="pending">Com pendências ({knowledgeAudit.actionableProductIds.size})</option>
-                  <option value="active">Somente ativos</option>
-                  <option value="inactive">Somente inativos</option>
+                  <option value="all">{t('kbProductAllItems')}</option>
+                  <option value="pending">{interpolate(t('kbProductWithPending'), { count: knowledgeAudit.actionableProductIds.size })}</option>
+                  <option value="active">{t('kbProductOnlyActive')}</option>
+                  <option value="inactive">{t('kbProductOnlyInactive')}</option>
                 </select>
               </div>
             )}
@@ -2796,12 +2797,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div className="lg:col-span-2 space-y-1 max-h-[70vh] overflow-y-auto pr-1">
                 {formData.products.length === 0 && (
                   <div className="p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-slate-800/60">
-                    Nenhum produto cadastrado ainda. Use "Criar item" acima pra começar.
+                    {t('kbProductEmptyList')}
                   </div>
                 )}
                 {formData.products.length > 0 && productGroups.categorized.length === 0 && productGroups.uncategorized.length === 0 && (
                   <div className="p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-slate-800/60">
-                    Nenhum produto encontrado com esse filtro.
+                    {t('kbProductEmptyFiltered')}
                   </div>
                 )}
                 {(() => {
@@ -2811,7 +2812,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     for (const p of items) orderedRows.push({ type: 'product', product: p });
                   }
                   if (productGroups.uncategorized.length) {
-                    if (productGroups.categorized.length) orderedRows.push({ type: 'header', label: 'Sem categoria' });
+                    if (productGroups.categorized.length) orderedRows.push({ type: 'header', label: t('kbProductUncategorized') });
                     for (const p of productGroups.uncategorized) orderedRows.push({ type: 'product', product: p });
                   }
                   return orderedRows.map((row, rowIdx) => {
@@ -2839,8 +2840,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
                               <span className="text-xs font-bold text-white truncate">{prod.name}</span>
-                              {prod.active === false && <span className="text-[9px] text-slate-500 shrink-0">inativo</span>}
-                              {knowledgeAudit.actionableProductIds.has(prod.id) && <span className="text-[9px] text-amber-300 shrink-0">atenção</span>}
+                              {prod.active === false && <span className="text-[9px] text-slate-500 shrink-0">{t('kbProductInactiveTag')}</span>}
+                              {knowledgeAudit.actionableProductIds.has(prod.id) && <span className="text-[9px] text-amber-300 shrink-0">{t('kbProductAttentionTag')}</span>}
                             </div>
                             <div className="flex items-center gap-2 mt-0.5 text-[10.5px] text-slate-400 flex-wrap">
                               <span className="text-emerald-400 font-semibold">{prod.price}</span>
@@ -2850,7 +2851,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                   {prod.durationMinutes}min
                                 </span>
                               )}
-                              {!!prod.variants?.length && <span className="text-cyan-400">{prod.variants.length} variantes</span>}
+                              {!!prod.variants?.length && <span className="text-cyan-400">{interpolate(t('kbProductVariantsCount'), { count: prod.variants.length })}</span>}
                             </div>
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -2861,7 +2862,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                 handleDuplicateProduct(prod.id);
                               }}
                               className="text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer p-1"
-                              title="Duplicar produto"
+                              title={t('kbProductDuplicate')}
                             >
                               <FileCheck className="w-3.5 h-3.5" />
                             </button>
@@ -2872,7 +2873,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                 handleDeleteProduct(prod.id);
                               }}
                               className="text-slate-500 hover:text-red-400 transition-colors cursor-pointer p-1"
-                              title="Excluir produto"
+                              title={t('kbProductDelete')}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -2887,7 +2888,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div className={selectedProduct ? 'fixed inset-x-0 bottom-0 top-16 z-50 overflow-y-auto border-t border-emerald-400/25 bg-slate-950 p-3 shadow-2xl lg:static lg:z-auto lg:col-span-3 lg:overflow-visible lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none' : 'lg:col-span-3'}>
                 {!selectedProduct ? (
                   <div className="h-full min-h-[280px] flex items-center justify-center p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-dashed border-slate-800">
-                    Selecione um item na lista ao lado pra editar, ou crie um novo com "Criar item".
+                    {t('kbProductSelectPrompt')}
                   </div>
                 ) : (
                   <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 relative group">
@@ -2901,7 +2902,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       type="button"
                       onClick={() => handleDuplicateProduct(prod.id)}
                       className="text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer p-1"
-                      title="Duplicar produto"
+                      title={t('kbProductDuplicate')}
                     >
                       <FileCheck className="w-3.5 h-3.5" />
                     </button>
@@ -2909,7 +2910,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       type="button"
                       onClick={() => handleDeleteProduct(prod.id)}
                       className="text-slate-500 hover:text-red-400 transition-colors cursor-pointer p-1"
-                      title="Excluir produto"
+                      title={t('kbProductDelete')}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -3179,7 +3180,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <span className="flex items-center gap-1.5">
               <HelpCircle className="w-3.5 h-3.5" />
-              <span>4. FAQ e Dúvidas ({formData.faqs.length})</span>
+              <span>{interpolate(t('kbTab4'), { count: formData.faqs.length })}</span>
             </span>
             {openSections.s4 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
@@ -3190,17 +3191,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <HelpCircle className="w-4 h-4 text-blue-400" />
-                  Base de Perguntas Frequentes (FAQs)
+                  {t('kbSec4Heading')}
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Forneça respostas oficiais para as dúvidas mais comuns dos seus clientes.
+                  {t('kbSec4Description')}
                 </p>
               </div>
             </div>
 
             {/* Add FAQ Form */}
             <form onSubmit={handleAddFaq} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-              <span className="text-xs font-bold text-blue-400 block">Adicionar Pergunta & Resposta Padrão:</span>
+              <span className="text-xs font-bold text-blue-400 block">{t('kbFaqAddLabel')}</span>
               <input
                 type="text"
                 value={newFaqQuestion}
@@ -3220,7 +3221,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer ml-auto"
               >
                 <Plus className="w-4 h-4" />
-                <span>Salvar FAQ</span>
+                <span>{t('kbFaqSaveButton')}</span>
               </button>
             </form>
 
@@ -3231,7 +3232,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   <button
                     onClick={() => handleDeleteFaq(faq.id)}
                     className="absolute top-4 right-4 text-slate-500 hover:text-red-400 transition-colors cursor-pointer"
-                    title="Excluir FAQ"
+                    title={t('kbFaqDelete')}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -3255,7 +3256,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <span className="flex items-center gap-1.5">
               <FileText className="w-3.5 h-3.5" />
-              <span>5. Documentos Anexados ({formData.documents.length})</span>
+              <span>{interpolate(t('kbTab5'), { count: formData.documents.length })}</span>
             </span>
             {openSections.s5 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
@@ -3266,10 +3267,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <FileText className="w-4 h-4 text-sky-400" />
-                  Documentos & Manuais de Treinamento
+                  {t('kbSec5Heading')}
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Anexe arquivos PDF, manuais, termos de uso ou catálogos como referência do que a IA deve saber. Documentos PDF, TXT, CSV, JSON e MD têm o conteúdo lido pelo agente automaticamente (com um limite de tamanho); outros formatos (ex: DOCX) ficam salvos e disponíveis pra baixar, mas o texto não entra no prompt da IA.
+                  {t('kbSec5Description')}
                 </p>
               </div>
             </div>
@@ -3277,10 +3278,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             {/* Usage indicator — teto por tenant (MAX_DOCUMENTS_PER_TENANT / MAX_TOTAL_BYTES_PER_TENANT em conversations.ts), pra ninguém ser pego de surpresa pelo limite só quando o upload já falhar */}
             <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2">
               <span>
-                {formData.documents.length}/{MAX_DOCUMENTS_PER_TENANT} documentos
+                {interpolate(t('kbDocsUsageCount'), { count: formData.documents.length, max: MAX_DOCUMENTS_PER_TENANT })}
               </span>
               <span>
-                {(formData.documents.reduce((sum, d) => sum + (d.sizeBytes || 0), 0) / (1024 * 1024)).toFixed(1)}MB / {MAX_TOTAL_MB_PER_TENANT}MB usados
+                {interpolate(t('kbDocsUsageSize'), { used: (formData.documents.reduce((sum, d) => sum + (d.sizeBytes || 0), 0) / (1024 * 1024)).toFixed(1), max: MAX_TOTAL_MB_PER_TENANT })}
               </span>
             </div>
 
@@ -3304,11 +3305,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div>
                 <span className="text-xs font-bold text-white block">
                   {uploadingDocNames.length > 0
-                    ? `Enviando ${uploadingDocNames.join(', ')}...`
-                    : 'Arraste e solte arquivos aqui ou clique para selecionar'}
+                    ? interpolate(t('kbDocsUploading'), { names: uploadingDocNames.join(', ') })
+                    : t('kbDocsDropHint')}
                 </span>
                 <span className="text-[11px] text-slate-400 block mt-1">
-                  Formatos aceitos: PDF, DOCX, TXT, CSV, JSON (Até 15MB cada)
+                  {t('kbDocsFormats')}
                 </span>
               </div>
             </div>
@@ -3316,7 +3317,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             {/* File List */}
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-300 block">
-                Arquivos Processados na Base de Conhecimento ({formData.documents.length}):
+                {interpolate(t('kbDocsListHeading'), { count: formData.documents.length })}
               </span>
 
               {formData.documents.map((doc) => (
@@ -3339,17 +3340,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     {doc.extractedText ? (
                       <span
                         className="px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 text-[10px] font-bold border border-sky-800/60 flex items-center gap-1"
-                        title="O agente lê o conteúdo deste arquivo"
+                        title={t('kbDocReadByAiTitle')}
                       >
                         <BrainCircuit className="w-3 h-3 text-sky-400" />
-                        Lido pela IA
+                        {t('kbDocReadByAi')}
                       </span>
                     ) : (
                       <span
                         className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-bold border border-slate-700"
-                        title="Formato sem leitura automática — só arquivo/registro"
+                        title={t('kbDocFileOnlyTitle')}
                       >
-                        Somente arquivo
+                        {t('kbDocFileOnly')}
                       </span>
                     )}
                     <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 text-[10px] font-bold border border-emerald-800/60 flex items-center gap-1">
@@ -3360,7 +3361,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       onClick={() => handleDownloadDoc(doc)}
                       disabled={downloadingDocId === doc.id}
                       className="text-slate-500 hover:text-sky-400 p-1 transition-colors cursor-pointer disabled:opacity-50"
-                      title="Baixar documento"
+                      title={t('kbDocDownload')}
                     >
                       {downloadingDocId === doc.id ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -3371,7 +3372,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     <button
                       onClick={() => handleDeleteDoc(doc.id)}
                       className="text-slate-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
-                      title="Excluir documento"
+                      title={t('kbDocDelete')}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -3399,7 +3400,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <span className="flex items-center gap-1.5">
               <Send className="w-3.5 h-3.5" />
-              <span>6. Mensagem Inicial</span>
+              <span>{t('kbTab6')}</span>
             </span>
             {openSections.s6 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
@@ -3410,17 +3411,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Send className="w-4 h-4 text-pink-400" />
-                  Mensagem Inicial Programada de Primeiro Contato
+                  {t('kbSec6Heading')}
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Monte a sequência que a PRIMEIRA mensagem de uma conversa nova recebe, na ordem exata dos blocos abaixo (ex: texto → vídeo → texto), em vez da pergunta de triagem padrão da IA — a negociação com a IA só começa a partir da próxima mensagem do cliente. Sem nenhum bloco, mantém o comportamento normal (a IA responde a 1ª mensagem sozinha).
+                  {t('kbSec6Description')}
                 </p>
               </div>
             </div>
 
             {(!formData.firstContactBlocks || formData.firstContactBlocks.length === 0) && (
               <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center text-xs text-slate-500">
-                Nenhum bloco adicionado ainda. Use os botões abaixo pra começar a sequência.
+                {t('kbSec6Empty')}
               </div>
             )}
 
@@ -3444,15 +3445,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                         <span className={`text-xs font-bold flex items-center gap-1.5 ${meta.color}`}>
                           <GripVertical className="w-3.5 h-3.5 text-slate-700" />
                           {meta.icon}
-                          {meta.label}
-                          <span className="text-slate-500 font-normal">· passo {idx + 1}</span>
+                          {t(meta.labelKey)}
+                          <span className="text-slate-500 font-normal">· {interpolate(t('kbBlockStep'), { n: idx + 1 })}</span>
                         </span>
                         <div className="flex items-center gap-0.5">
                           <button
                             type="button"
                             onClick={() => handleMoveFirstContactBlock(block.id, 'up')}
                             disabled={isFirst}
-                            title="Mover pra cima"
+                            title={t('kbBlockMoveUp')}
                             className="p-1 text-slate-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
                           >
                             <ChevronUp className="w-4 h-4" />
@@ -3461,7 +3462,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                             type="button"
                             onClick={() => handleMoveFirstContactBlock(block.id, 'down')}
                             disabled={isLast}
-                            title="Mover pra baixo"
+                            title={t('kbBlockMoveDown')}
                             className="p-1 text-slate-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
                           >
                             <ChevronDown className="w-4 h-4" />
@@ -3469,7 +3470,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           <button
                             type="button"
                             onClick={() => handleRemoveFirstContactBlock(block.id)}
-                            title="Remover bloco"
+                            title={t('kbBlockRemove')}
                             className="p-1 text-slate-500 hover:text-red-400 cursor-pointer transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -3494,11 +3495,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           ) : (block.imageId || block.imageBase64) ? (
                             <KnowledgeBaseImagePreview imageId={block.imageId} fallbackSrc={block.imageBase64} alt="Bloco de imagem" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
                           ) : (
-                            <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem imagem</div>
+                            <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">{t('kbBlockImageEmpty')}</div>
                           )}
                           <div className="flex flex-col gap-1.5">
                             <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
-                              {uploadingImageForId === block.id ? 'Enviando…' : (block.imageId || block.imageBase64) ? 'Trocar imagem' : 'Adicionar imagem'}
+                              {uploadingImageForId === block.id ? t('kbBlockImageUploading') : (block.imageId || block.imageBase64) ? t('kbBlockImageChange') : t('kbBlockImageAdd')}
                               <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === block.id} onChange={(e) => handleFirstContactBlockImageChange(block.id, e)} />
                             </label>
                             {(block.imageId || block.imageBase64) && (
@@ -3508,7 +3509,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                 className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
                               >
                                 <X className="w-3 h-3" />
-                                Remover
+                                {t('kbBlockRemoveAction')}
                               </button>
                             )}
                           </div>
@@ -3523,25 +3524,25 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                 type="button"
                                 onClick={() => handlePreviewFirstContactBlockVideo(block.videoId!)}
                                 disabled={previewingBlockMediaId === block.videoId}
-                                title={block.videoFileName || 'Ver vídeo'}
+                                title={block.videoFileName || t('kbBlockVideoView')}
                                 className="w-14 h-14 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
                               >
                                 {previewingBlockMediaId === block.videoId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                               </button>
                             ) : (
-                              <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem vídeo</div>
+                              <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">{t('kbBlockVideoEmpty')}</div>
                             )}
                             <div className="flex flex-col gap-1.5">
                               <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold flex items-center gap-1 w-fit">
                                 {uploadingBlockId === block.id ? (
                                   <>
                                     <Loader2 className="w-3 h-3 animate-spin" />
-                                    Enviando...
+                                    {t('kbBlockVideoUploading')}
                                   </>
                                 ) : (
                                   <>
                                     <Video className="w-3 h-3" />
-                                    {block.videoId ? 'Trocar vídeo' : 'Adicionar vídeo'}
+                                    {block.videoId ? t('kbBlockVideoChange') : t('kbBlockVideoAdd')}
                                   </>
                                 )}
                                 <input
@@ -3559,13 +3560,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                   className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
                                 >
                                   <X className="w-3 h-3" />
-                                  Remover
+                                  {t('kbBlockRemoveAction')}
                                 </button>
                               )}
                             </div>
                           </div>
                           <span className="text-[9px] text-slate-500 block">
-                            Até {MAX_VIDEO_INPUT_SIZE_MB}MB, qualquer formato — convertido automaticamente.
+                            {interpolate(t('kbBlockVideoMaxSize'), { maxMb: MAX_VIDEO_INPUT_SIZE_MB })}
                             {block.videoSizeBytes ? ` (${(block.videoSizeBytes / (1024 * 1024)).toFixed(1)} MB)` : ''}
                           </span>
                           <input
@@ -3586,25 +3587,25 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                 type="button"
                                 onClick={() => handlePreviewFirstContactBlockFile(block.fileId!)}
                                 disabled={previewingBlockMediaId === block.fileId}
-                                title={block.fileName || 'Ver arquivo'}
+                                title={block.fileName || t('kbBlockFileView')}
                                 className="w-14 h-14 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-sky-400 hover:text-sky-300 disabled:opacity-50 cursor-pointer"
                               >
                                 {previewingBlockMediaId === block.fileId ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                               </button>
                             ) : (
-                              <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem arquivo</div>
+                              <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">{t('kbBlockFileEmpty')}</div>
                             )}
                             <div className="flex flex-col gap-1.5">
                               <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold flex items-center gap-1 w-fit">
                                 {uploadingBlockId === block.id ? (
                                   <>
                                     <Loader2 className="w-3 h-3 animate-spin" />
-                                    Enviando...
+                                    {t('kbBlockVideoUploading')}
                                   </>
                                 ) : (
                                   <>
                                     <Paperclip className="w-3 h-3" />
-                                    {block.fileId ? 'Trocar arquivo' : 'Adicionar arquivo'}
+                                    {block.fileId ? t('kbBlockFileChange') : t('kbBlockFileAdd')}
                                   </>
                                 )}
                                 <input
@@ -3621,13 +3622,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                   className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
                                 >
                                   <X className="w-3 h-3" />
-                                  Remover
+                                  {t('kbBlockRemoveAction')}
                                 </button>
                               )}
                             </div>
                           </div>
                           <span className="text-[9px] text-slate-500 block">
-                            Até {MAX_FIRST_CONTACT_FILE_SIZE_MB}MB (ex: catálogo em PDF).
+                            {interpolate(t('kbBlockFileMaxSize'), { maxMb: MAX_FIRST_CONTACT_FILE_SIZE_MB })}
                             {block.fileName ? ` ${block.fileName}` : ''}
                             {block.fileSizeBytes ? ` (${(block.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB)` : ''}
                           </span>
@@ -3640,7 +3641,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800">
-              <span className="text-xs font-bold text-slate-400 pt-3">Adicionar bloco:</span>
+              <span className="text-xs font-bold text-slate-400 pt-3">{t('kbAddBlockLabel')}</span>
               <div className="flex flex-wrap gap-2 pt-3">
                 <button
                   type="button"
@@ -3648,7 +3649,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
-                  Texto
+                  {t('kbBlockTypeText')}
                 </button>
                 <button
                   type="button"
@@ -3656,7 +3657,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <ImageIcon className="w-3.5 h-3.5" />
-                  Imagem
+                  {t('kbBlockTypeImage')}
                 </button>
                 <button
                   type="button"
@@ -3664,7 +3665,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <Video className="w-3.5 h-3.5" />
-                  Vídeo
+                  {t('kbBlockTypeVideo')}
                 </button>
                 <button
                   type="button"
@@ -3672,7 +3673,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-sky-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <Paperclip className="w-3.5 h-3.5" />
-                  Arquivo
+                  {t('kbBlockTypeFile')}
                 </button>
               </div>
             </div>
@@ -3700,17 +3701,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Plus className="w-4 h-4 text-emerald-400" />
-                  Novo Produto ou Serviço
+                  {t('kbWizardTitle')}
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Passo {productWizardStep + 1} de {PRODUCT_WIZARD_STEPS.length}: {PRODUCT_WIZARD_STEPS[productWizardStep]}
+                  {interpolate(t('kbWizardStepOf'), { step: productWizardStep + 1, total: PRODUCT_WIZARD_STEPS.length, label: PRODUCT_WIZARD_STEPS[productWizardStep] })}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleCloseProductWizard}
                 className="text-slate-500 hover:text-white p-1 cursor-pointer"
-                title="Cancelar"
+                title={t('kbWizardCancel')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3737,7 +3738,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               {productWizardStep === 0 && (
                 <>
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-1">Nome*</label>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">{t('kbWizardFieldName')}</label>
                     <input
                       autoFocus
                       value={productDraft.name}
@@ -3747,7 +3748,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-1">Categoria</label>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">{t('kbWizardFieldCategory')}</label>
                     <input
                       value={productDraft.category}
                       onChange={(e) => updateProductDraft('category', e.target.value)}
@@ -3756,7 +3757,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-1">Descrição</label>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">{t('kbWizardFieldDescription')}</label>
                     <AutoResizeTextarea
                       minRows={2}
                       value={productDraft.description}
@@ -3772,7 +3773,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-slate-300 mb-1">Preço (texto)</label>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">{t('kbWizardFieldPrice')}</label>
                       <input
                         value={productDraft.price}
                         onChange={(e) => updateProductDraft('price', e.target.value)}
@@ -3781,22 +3782,22 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-300 mb-1">Duração (min)</label>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">{t('kbWizardFieldDuration')}</label>
                       <input
                         type="number"
                         min="0"
                         value={productDraft.durationMinutes}
                         onChange={(e) => updateProductDraft('durationMinutes', e.target.value)}
                         placeholder="Ex: 90"
-                        title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
+                        title={t('kbWizardDurationTitle')}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
                       />
                     </div>
                   </div>
                   <div className="space-y-2 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3">
-                    <p className="text-[11px] leading-4 text-emerald-100">O valor usado no financeiro será calculado automaticamente a partir do preço que você informar acima. Não há um segundo campo editável, evitando divergência entre o preço exibido e o valor cobrado.</p>
+                    <p className="text-[11px] leading-4 text-emerald-100">{t('kbWizardFinancialNote')}</p>
                     <div>
-                      <label className="block text-xs font-bold text-slate-300 mb-1">Moeda</label>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">{t('kbWizardFieldCurrency')}</label>
                       <input
                         value={productDraft.currency}
                         onChange={(e) => updateProductDraft('currency', e.target.value)}
@@ -3812,7 +3813,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       onChange={(e) => updateProductDraft('bookable', e.target.checked)}
                       className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
                     />
-                    Agendável diretamente pelo agente (desmarque pra itens como retoque, que só a operadora decide depois de avaliar)
+                    {t('kbWizardBookableLabel')}
                   </label>
                 </>
               )}
@@ -3826,19 +3827,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       onChange={(e) => updateProductDraft('active', e.target.checked)}
                       className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
                     />
-                    Item ativo (visível pro agente — desmarque pra pausar/descontinuar sem apagar)
+                    {t('kbWizardActiveLabel')}
                   </label>
                   <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
                     <p>
-                      <span className="text-slate-300 font-semibold">{productDraft.name || 'Sem nome'}</span>
+                      <span className="text-slate-300 font-semibold">{productDraft.name || t('kbWizardNoName')}</span>
                       {productDraft.category ? ` · ${productDraft.category}` : ''}
                     </p>
                     <p>
-                      {productDraft.price || 'Sob Consulta'}
+                      {productDraft.price || t('kbWizardOnRequest')}
                       {productDraft.durationMinutes ? ` · ${productDraft.durationMinutes} min` : ''}
                     </p>
                     <p>
-                      {productDraft.bookable ? 'Agendável' : 'Não agendável diretamente'} · {productDraft.active ? 'Ativo' : 'Inativo'}
+                      {productDraft.bookable ? t('kbWizardBookableYes') : t('kbWizardBookableNo')} · {productDraft.active ? t('kbWizardActiveYes') : t('kbWizardActiveNo')}
                     </p>
                   </div>
                 </>
@@ -3851,7 +3852,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 onClick={productWizardStep === 0 ? handleCloseProductWizard : () => setProductWizardStep((s) => s - 1)}
                 className="px-3.5 py-2 rounded-lg text-slate-400 hover:text-white text-xs font-semibold cursor-pointer"
               >
-                {productWizardStep === 0 ? 'Cancelar' : 'Voltar'}
+                {productWizardStep === 0 ? t('kbWizardCancel') : t('kbWizardBack')}
               </button>
               {productWizardStep < PRODUCT_WIZARD_STEPS.length - 1 ? (
                 <button
@@ -3860,7 +3861,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   onClick={() => setProductWizardStep((s) => s + 1)}
                   className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
                 >
-                  <span>Próximo</span>
+                  <span>{t('kbWizardNext')}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               ) : (
@@ -3870,7 +3871,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  <span>Criar item</span>
+                  <span>{t('kbProductCreateButton')}</span>
                 </button>
               )}
             </div>
@@ -3885,31 +3886,31 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <div className="flex gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-500/10 text-emerald-200"><Clock className="h-5 w-5" /></div>
                 <div>
-                  <h3 id="business-hours-title" className="text-sm font-bold text-white">Horários de atendimento</h3>
-                  <p className="mt-1 text-[11px] leading-5 text-slate-400">Esta configuração alimenta a agenda real. O agente não oferece nem confirma horários fora do expediente cadastrado.</p>
+                  <h3 id="business-hours-title" className="text-sm font-bold text-white">{t('kbHoursModalTitle')}</h3>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-400">{t('kbHoursModalDesc')}</p>
                 </div>
               </div>
-              <button type="button" onClick={() => setShowHoursEditor(false)} className="rounded-lg border border-slate-700 p-2 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white" aria-label="Fechar horários de atendimento"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={() => setShowHoursEditor(false)} className="rounded-lg border border-slate-700 p-2 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white" aria-label={t('kbHoursModalClose')}><X className="h-4 w-4" /></button>
             </header>
             <div className="space-y-2 p-5">
-              <p className="mb-3 text-xs text-slate-400">Marque os dias com atendimento e informe abertura e encerramento. Dias desmarcados permanecem como <strong className="font-semibold text-slate-200">sem atendimento</strong>.</p>
-              {WEEKDAY_LABELS.map(({ key, label }) => {
+              <p className="mb-3 text-xs text-slate-400">{t('kbHoursModalHintPrefix')} <strong className="font-semibold text-slate-200">{t('kbHoursNoService')}</strong>.</p>
+              {WEEKDAY_LABELS.map(({ key, labelKey }) => {
                 const dayHours = hoursForm[key];
                 const enabled = !!dayHours;
                 return (
                   <div key={key} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/75 p-3 text-xs">
                     <label className="flex w-32 items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={enabled} onChange={(event) => handleToggleDay(key, event.target.checked)} className="h-3.5 w-3.5 accent-emerald-500 cursor-pointer" />
-                      <span className={enabled ? 'font-semibold text-white' : 'text-slate-500'}>{label}</span>
+                      <span className={enabled ? 'font-semibold text-white' : 'text-slate-500'}>{t(labelKey)}</span>
                     </label>
-                    {enabled ? <div className="flex items-center gap-2"><input type="time" value={dayHours!.open} onChange={(event) => handleDayTimeChange(key, 'open', event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none" /><span className="text-slate-500">até</span><input type="time" value={dayHours!.close} onChange={(event) => handleDayTimeChange(key, 'close', event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none" /></div> : <span className="italic text-slate-600">sem atendimento</span>}
+                    {enabled ? <div className="flex items-center gap-2"><input type="time" value={dayHours!.open} onChange={(event) => handleDayTimeChange(key, 'open', event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none" /><span className="text-slate-500">{t('kbHoursUntil')}</span><input type="time" value={dayHours!.close} onChange={(event) => handleDayTimeChange(key, 'close', event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none" /></div> : <span className="italic text-slate-600">{t('kbHoursNoService')}</span>}
                   </div>
                 );
               })}
             </div>
             <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-800 bg-slate-900/95 px-5 py-4 backdrop-blur">
-              <button type="button" onClick={() => setShowHoursEditor(false)} disabled={isSavingHours} className="rounded-xl border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 disabled:opacity-50">Cancelar</button>
-              <button type="button" onClick={() => void handleSaveHours()} disabled={isSavingHours} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">{isSavingHours ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{isSavingHours ? 'Salvando…' : 'Salvar horário'}</button>
+              <button type="button" onClick={() => setShowHoursEditor(false)} disabled={isSavingHours} className="rounded-xl border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 disabled:opacity-50">{t('kbWizardCancel')}</button>
+              <button type="button" onClick={() => void handleSaveHours()} disabled={isSavingHours} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">{isSavingHours ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{isSavingHours ? t('kbSavingGeneric') : t('kbHoursModalSave')}</button>
             </footer>
           </section>
         </div>
@@ -3918,12 +3919,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-md">
         {saveError && <div className="mb-3 rounded-xl border border-rose-500/40 bg-rose-950/70 px-3 py-2 text-[11px] text-rose-100">{saveError}</div>}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="max-w-2xl text-xs leading-5 text-slate-400">{usesPublishedKnowledgeBase ? 'Primeiro salve o rascunho. Depois revise e publique as alterações pendentes; somente a publicação muda a próxima resposta do agente e o catálogo público.' : 'Salve as alterações para atualizar a Base de Conhecimento do agente.'}</p>
+          <p className="max-w-2xl text-xs leading-5 text-slate-400">{usesPublishedKnowledgeBase ? t('kbSaveHintPublished') : t('kbSaveHintUnpublished')}</p>
           <div className="flex shrink-0 flex-wrap gap-2">
-            {usesPublishedKnowledgeBase && <button type="button" onClick={handlePublishTypedDrafts} disabled={!typedDraftDocumentTypes.length || isPublishingTypedDocuments || isLoadingTypedDocuments} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-bold text-emerald-100 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50">{isPublishingTypedDocuments ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCheck className="h-4 w-4" />}Publicar alterações{typedDraftDocumentTypes.length ? ` (${typedDraftDocumentTypes.length})` : ''}</button>}
+            {usesPublishedKnowledgeBase && <button type="button" onClick={handlePublishTypedDrafts} disabled={!typedDraftDocumentTypes.length || isPublishingTypedDocuments || isLoadingTypedDocuments} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-bold text-emerald-100 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50">{isPublishingTypedDocuments ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCheck className="h-4 w-4" />}{t('kbPublishChangesButton')}{typedDraftDocumentTypes.length ? ` (${typedDraftDocumentTypes.length})` : ''}</button>}
             <button type="button" onClick={handleSave} disabled={isSavingKnowledgeBase || isLoadingTypedDocuments} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-950/40 transition-all hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">
               {isSavingKnowledgeBase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              <span>{isSavingKnowledgeBase ? 'Salvando…' : usesPublishedKnowledgeBase ? 'Salvar rascunho' : 'Salvar alterações'}</span>
+              <span>{isSavingKnowledgeBase ? t('kbSavingGeneric') : usesPublishedKnowledgeBase ? t('kbSaveDraftButton') : t('kbSaveChangesButton')}</span>
             </button>
           </div>
         </div>
@@ -3934,9 +3935,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         <div className="fixed bottom-20 right-5 z-50 bg-emerald-900 border border-emerald-500 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 text-xs font-bold">
           <CheckCircle2 className="w-5 h-5 text-emerald-300" />
           <div>
-            <span>Base de Conhecimento Salva com Sucesso!</span>
+            <span>{t('kbSaveToastTitle')}</span>
             <p className="text-[10px] text-emerald-200 font-normal">
-              O Agente Gemini utilizará estas regras atualizadas em todos os atendimentos.
+              {t('kbSaveToastDesc')}
             </p>
           </div>
         </div>
@@ -3947,14 +3948,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         <div className="flex items-center space-x-3">
           <Sparkles className="w-5 h-5 text-emerald-400" />
           <span className="text-xs text-slate-300 font-medium">
-            Tudo configurado? Teste o comportamento do seu agente na simulação do WhatsApp.
+            {t('kbFooterPrompt')}
           </span>
         </div>
         <button
           onClick={onGoToWhatsAppSim}
           className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-emerald-950"
         >
-          <span>Testar Agente no WhatsApp</span>
+          <span>{t('kbFooterButton')}</span>
           <ArrowRight className="w-4 h-4" />
         </button>
       </div>
