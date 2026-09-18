@@ -30,15 +30,21 @@ export function labelColorClasses(label: string): string {
 // tem avatarUrl e caía num <img> quebrado; mock/demo tinha o problema
 // inverso, todo lead com a mesma foto de stock. Cor determinística por hash
 // do nome/telefone — mesmo padrão de labelColorClasses acima.
+// Achado real, pedido direto (17/09/2026, print anotado): "os círculos
+// coloridos da lista chamam bastante atenção e competem com o conteúdo" —
+// eram classes `bg-*-600` cruas do Tailwind, saturadas em qualquer tema.
+// Classes próprias (`avatar-tone-*`, index.css) preservam a mesma cor de
+// hoje no escuro/azul e ganham um par pastel-fundo/texto-escuro no
+// claro/limpo, mantendo as 8 cores distinguíveis entre si.
 const AVATAR_COLOR_PALETTE = [
-  'bg-emerald-600',
-  'bg-blue-600',
-  'bg-amber-600',
-  'bg-rose-600',
-  'bg-sky-600',
-  'bg-cyan-600',
-  'bg-pink-600',
-  'bg-lime-600',
+  'avatar-tone-emerald',
+  'avatar-tone-blue',
+  'avatar-tone-amber',
+  'avatar-tone-rose',
+  'avatar-tone-sky',
+  'avatar-tone-cyan',
+  'avatar-tone-pink',
+  'avatar-tone-lime',
 ];
 
 export function avatarColorClasses(seed: string): string {
