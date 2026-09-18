@@ -1950,16 +1950,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           if (phone && phone === activeLeadPhoneRef.current) {
             void loadNewerMessages(phone, `real-${phone}`);
           }
-          const status: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | 'skipped_out_of_scope' | undefined = payload?.aiReplyStatus;
+          const status: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | 'skipped_out_of_scope' | 'skipped_operator_active' | undefined = payload?.aiReplyStatus;
           if (!phone || !status) return;
           if (status === 'generating' || status === 'drafted') {
             setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'generating' }));
-          } else if (status === 'sent' || status === 'template_sent' || status === 'skipped_out_of_scope') {
+          } else if (status === 'sent' || status === 'template_sent' || status === 'skipped_out_of_scope' || status === 'skipped_operator_active') {
             // TASK-0411 — a IA decidiu de propósito não responder (fora do
             // escopo definido nas Regras de negócio do tenant); limpa o
             // spinner de "gerando" na hora, sem passar pelo alerta amarelo
             // de "aguardando humano" (que sugeriria uma falha/escalonamento
-            // real, o que isso não é).
+            // real, o que isso não é). TASK-0428: mesmo tratamento quando a
+            // IA cedeu a vez porque o operador respondeu manualmente
+            // enquanto a resposta ainda estava sendo gerada.
             setAiReplyStatusByPhone((prev) => {
               if (!(phone in prev)) return prev;
               const { [phone]: _removed, ...rest } = prev;
