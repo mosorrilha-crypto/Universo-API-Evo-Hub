@@ -2602,7 +2602,7 @@ html[data-theme='clean'] .knowledge-workspace__finding {
 
 html[data-theme='light'] .atendimento-payment-verification {
   color: #5F3B00 !important;
-  background: #FFF4D8 !important;
+  background: #FFFBEB !important;
   border-color: #E7BC58 !important;
 }
 
@@ -3014,7 +3014,7 @@ html[data-theme='light'] button[class~='bg-sky-500/20'],
 html[data-theme='light'] [role='button'][class~='bg-sky-500/5'],
 html[data-theme='light'] [role='button'][class~='bg-sky-500/10'],
 html[data-theme='light'] [role='button'][class~='bg-sky-500/15'],
-html[data-theme='light'] [role='button'][class~='bg-sky-500/20'] { background-color: #E7F4F6 !important; border-color: #9BCFD6 !important; }
+html[data-theme='light'] [role='button'][class~='bg-sky-500/20'] { background-color: #F0F9FF !important; border-color: #9BCFD6 !important; }
 
 html[data-theme='clean'] button[class~='bg-sky-500/5'],
 html[data-theme='clean'] button[class~='bg-sky-500/10'],
@@ -3030,7 +3030,7 @@ html[data-theme='light'] button[class~='bg-amber-500/10'],
 html[data-theme='light'] button[class~='bg-amber-500/15'],
 html[data-theme='light'] [role='button'][class~='bg-amber-500/5'],
 html[data-theme='light'] [role='button'][class~='bg-amber-500/10'],
-html[data-theme='light'] [role='button'][class~='bg-amber-500/15'] { background-color: #FFF4D8 !important; border-color: #E6BB58 !important; }
+html[data-theme='light'] [role='button'][class~='bg-amber-500/15'] { background-color: #FFFBEB !important; border-color: #E6BB58 !important; }
 
 html[data-theme='clean'] button[class~='bg-amber-500/5'],
 html[data-theme='clean'] button[class~='bg-amber-500/10'],
@@ -3044,7 +3044,7 @@ html[data-theme='light'] button[class~='bg-rose-500/10'],
 html[data-theme='light'] button[class~='bg-rose-500/15'],
 html[data-theme='light'] [role='button'][class~='bg-rose-500/5'],
 html[data-theme='light'] [role='button'][class~='bg-rose-500/10'],
-html[data-theme='light'] [role='button'][class~='bg-rose-500/15'] { background-color: #FCEEEA !important; border-color: #E6B8AC !important; }
+html[data-theme='light'] [role='button'][class~='bg-rose-500/15'] { background-color: #FEF2F2 !important; border-color: #E6B8AC !important; }
 
 html[data-theme='clean'] button[class~='bg-rose-500/5'],
 html[data-theme='clean'] button[class~='bg-rose-500/10'],
@@ -3246,7 +3246,7 @@ html[data-theme='clean'] .knowledge-workspace__audit .bg-emerald-500\/10 { backg
 
 html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/5,
 html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/10,
-html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/15 { background-color: #FFF4D8 !important; }
+html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/15 { background-color: #FFFBEB !important; }
 
 html[data-theme='clean'] .knowledge-workspace__audit .bg-amber-400\/5,
 html[data-theme='clean'] .knowledge-workspace__audit .bg-amber-400\/10,
@@ -3334,7 +3334,7 @@ html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-emerald-500\/
 
 html[data-theme='clean'] .knowledge-workspace__catalog-summary .bg-emerald-500\/15 { background-color: #EFF6FF !important; }
 html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/10,
-html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/15 { background-color: #FFF4D8 !important; }
+html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/15 { background-color: #FFFBEB !important; }
 
 html[data-theme='clean'] .knowledge-workspace__catalog-summary .bg-amber-400\/10,
 html[data-theme='clean'] .knowledge-workspace__catalog-summary .bg-amber-400\/15 { background-color: #FFFBEB !important; }
@@ -3775,6 +3775,20 @@ html[data-theme='clean'] .bg-emerald-950\/60,
 html[data-theme='clean'] .bg-emerald-950\/80,
 html[data-theme='clean'] .bg-emerald-950\/90 { background-color: #EFF6FF !important; }
 
+/* Achado real, pedido direto (17/09/2026, continuação da TASK-0422/0424):
+   "completa o resultado do mockup, os badges e avatares também" — os 3
+   fundos pastel do tema claro usados por badges/banners semânticos (a barra
+   "CONTEXTO SUPERVISIONADO" azul, o alerta de 24h âmbar, tags de bloqueio
+   vermelhas) ainda eram os valores de ANTES da TASK-0422 esfriar a base
+   neutra (#E7F4F6/#FFF4D8/#FCEEEA, com undertone quente) — cada um
+   reaproveitado em ~5-10 lugares diferentes no arquivo (troca única aqui:
+   sed global pelas 3 constantes exatas, todas já confirmadas restritas ao
+   tema claro). Cooled pros mesmos valores já usados no tema 'clean'
+   (#F0F9FF/#FFFBEB/#FEF2F2) — que já tem exatamente o undertone frio
+   buscado — mantendo a distinção semântica de matiz (azul/âmbar/vermelho),
+   só menos saturado. Texto (--danger/--pending/.text-sky-300/etc.) e bordas
+   (--app-*-border) ficam intocados — já são escuros o bastante pra não
+   "competir" visualmente, o problema era só o preenchimento. */
 html[data-theme='light'] .bg-blue-950,
 html[data-theme='light'] .bg-blue-950\/20,
 html[data-theme='light'] .bg-blue-950\/25,
@@ -3786,7 +3800,7 @@ html[data-theme='light'] .bg-sky-950\/15,
 html[data-theme='light'] .bg-sky-950\/20,
 html[data-theme='light'] .bg-sky-950\/60,
 html[data-theme='light'] .bg-sky-950\/80,
-html[data-theme='light'] .bg-indigo-950\/30 { background-color: #E7F4F6 !important; }
+html[data-theme='light'] .bg-indigo-950\/30 { background-color: #F0F9FF !important; }
 
 html[data-theme='clean'] .bg-blue-950,
 html[data-theme='clean'] .bg-blue-950\/20,
@@ -3804,7 +3818,7 @@ html[data-theme='clean'] .bg-indigo-950\/30 { background-color: #F0F9FF !importa
 html[data-theme='light'] .bg-amber-950,
 html[data-theme='light'] .bg-amber-950\/20,
 html[data-theme='light'] .bg-amber-950\/25,
-html[data-theme='light'] .bg-amber-950\/40 { background-color: #FFF4D8 !important; }
+html[data-theme='light'] .bg-amber-950\/40 { background-color: #FFFBEB !important; }
 
 html[data-theme='clean'] .bg-amber-950,
 html[data-theme='clean'] .bg-amber-950\/20,
@@ -3820,7 +3834,7 @@ html[data-theme='light'] .bg-rose-950\/50,
 html[data-theme='light'] .bg-rose-950\/60,
 html[data-theme='light'] .bg-rose-950\/80,
 html[data-theme='light'] .bg-red-950\/40,
-html[data-theme='light'] .bg-red-950\/60 { background-color: #FCEEEA !important; }
+html[data-theme='light'] .bg-red-950\/60 { background-color: #FEF2F2 !important; }
 
 html[data-theme='clean'] .bg-rose-950,
 html[data-theme='clean'] .bg-rose-950\/20,
@@ -3833,6 +3847,45 @@ html[data-theme='clean'] .bg-rose-950\/80,
 html[data-theme='clean'] .bg-red-950\/40,
 html[data-theme='clean'] .bg-red-950\/60 { background-color: #FEF2F2 !important; }
 
+/* Avatares de iniciais (achado real, pedido direto, 17/09/2026, mesmo print
+   anotado das TASK-0422/0424: "os círculos coloridos da lista chamam
+   bastante atenção e competem com o conteúdo... usar tons suaves/pastéis").
+   `avatarColorClasses` (src/utils/leadDisplay.ts) escolhe uma destas 8
+   classes por hash determinístico do nome/telefone — nunca eram tokens de
+   tema, sempre a mesma cor `bg-*-600` saturada do Tailwind em qualquer
+   tema. Base abaixo (sem seletor de tema) preserva EXATAMENTE a aparência
+   atual pro escuro/azul (mesmos hex das classes `bg-*-600` que
+   substituíram, `text-white` continua igual) — só o tema claro ganha um
+   par pastel-fundo/texto-escuro por matiz (mesma técnica de "superfície +
+   texto" já usada em --app-success/--app-success-soft etc.), mantendo as 8
+   cores distinguíveis entre si (o objetivo do hash é reconhecer contatos
+   pela cor, não teria sentido achatar tudo pro mesmo cinza). */
+.avatar-tone-emerald { background-color: #059669; }
+.avatar-tone-blue { background-color: #2563EB; }
+.avatar-tone-amber { background-color: #D97706; }
+.avatar-tone-rose { background-color: #E11D48; }
+.avatar-tone-sky { background-color: #0284C7; }
+.avatar-tone-cyan { background-color: #0891B2; }
+.avatar-tone-pink { background-color: #DB2777; }
+.avatar-tone-lime { background-color: #65A30D; }
+
+html[data-theme='light'] .avatar-tone-emerald.text-white,
+html[data-theme='clean'] .avatar-tone-emerald.text-white { background-color: #D3F0E3 !important; color: #0F7A5C !important; }
+html[data-theme='light'] .avatar-tone-blue.text-white,
+html[data-theme='clean'] .avatar-tone-blue.text-white { background-color: #DCE7FB !important; color: #2C4E9E !important; }
+html[data-theme='light'] .avatar-tone-amber.text-white,
+html[data-theme='clean'] .avatar-tone-amber.text-white { background-color: #F7E4C2 !important; color: #92600A !important; }
+html[data-theme='light'] .avatar-tone-rose.text-white,
+html[data-theme='clean'] .avatar-tone-rose.text-white { background-color: #F8D9E0 !important; color: #B5324B !important; }
+html[data-theme='light'] .avatar-tone-sky.text-white,
+html[data-theme='clean'] .avatar-tone-sky.text-white { background-color: #D6ECF7 !important; color: #0F6FA3 !important; }
+html[data-theme='light'] .avatar-tone-cyan.text-white,
+html[data-theme='clean'] .avatar-tone-cyan.text-white { background-color: #D2F0F2 !important; color: #0E7C82 !important; }
+html[data-theme='light'] .avatar-tone-pink.text-white,
+html[data-theme='clean'] .avatar-tone-pink.text-white { background-color: #F9DCEC !important; color: #B32E7A !important; }
+html[data-theme='light'] .avatar-tone-lime.text-white,
+html[data-theme='clean'] .avatar-tone-lime.text-white { background-color: #E6F0CB !important; color: #5C7A0F !important; }
+
 /* TASK-0246 (pedido direto, 03/09/2026): `ContactContextPanel.tsx` ("Ficha
    do Contato", adicionada um dia antes desta correção) usa variantes
    -500/-600 cruas de sky/amber/rose que nunca tinham entrado nesta
@@ -3844,11 +3897,11 @@ html[data-theme='clean'] .bg-red-950\/60 { background-color: #FEF2F2 !important;
    inclui `bg-sky-600`/`hover:bg-sky-500`/`focus:border-sky-500` (botão
    sólido com texto branco fixo e anel de foco: legíveis em qualquer tema
    sem remapear). */
-html[data-theme='light'] .bg-amber-500\/10 { background-color: #FFF4D8 !important; }
+html[data-theme='light'] .bg-amber-500\/10 { background-color: #FFFBEB !important; }
 html[data-theme='clean'] .bg-amber-500\/10 { background-color: #FFFBEB !important; }
 
 html[data-theme='light'] .bg-sky-500\/10,
-html[data-theme='light'] .bg-sky-500\/20 { background-color: #E7F4F6 !important; }
+html[data-theme='light'] .bg-sky-500\/20 { background-color: #F0F9FF !important; }
 html[data-theme='clean'] .bg-sky-500\/10,
 html[data-theme='clean'] .bg-sky-500\/20 { background-color: #F0F9FF !important; }
 
