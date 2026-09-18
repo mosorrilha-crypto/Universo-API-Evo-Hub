@@ -2383,7 +2383,19 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // mesmo desacoplamento já usado pro upload — só persiste de fato quando a
   // KB inteira é salva. Melhor esforço (deleteKnowledgeBaseImage nunca
   // lança), por isso sempre responde sucesso.
+  //
+  // Achado do CodeQL (path/object injection): mesmo com storagePath já
+  // aplicando encodeURIComponent (isolamento por tenant já coberto pelos
+  // testes de isolamento multi-tenant), o CodeQL não reconhece encoding como
+  // sanitização suficiente pra um valor de :imageId usado numa chamada de
+  // delete no Storage. Allowlist explícita batendo com o formato real gerado
+  // no upload (`image-${Date.now()}-${random}`) fecha o alerta e rejeita
+  // qualquer id malformado antes de chegar perto do Storage.
+  const IMAGE_ID_PATTERN = /^image-[0-9a-z]+-[0-9a-z]+$/;
   router.delete('/api/knowledge-base/images/:imageId', knowledgeBaseImageDeleteRateLimiter, authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (!IMAGE_ID_PATTERN.test(req.params.imageId)) {
+      return res.status(400).json({ error: 'imageId inválido.' });
+    }
     await deleteKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantOf(req), req.params.imageId);
     res.json({ success: true });
   }));
