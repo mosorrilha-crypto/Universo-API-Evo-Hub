@@ -70,7 +70,7 @@ import { extractPaymentProofDataWithGemini } from '../services/paymentReceiptAna
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
 import { queueLeadSheetSync } from '../services/googleSheetsSync';
-import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, listUpcomingEvents, type CalendarConfig } from '../services/googleCalendar';
+import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, listUpcomingEvents, localNaiveToUtcIso, type CalendarConfig } from '../services/googleCalendar';
 import { getNowLocalNaive, getPromptAuditView, type AgentType } from '../services/autoReply';
 import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
 import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
@@ -1367,7 +1367,36 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(502).json({ error: `Falha ao verificar disponibilidade na agenda: ${err.message}` });
     }
     if (!disponivel) {
-      return res.status(409).json({ error: 'Esse horário já está ocupado na agenda.' });
+      // TASK-0433 (achado real, pedido direto: "o botão de registrar agora
+      // não funciona se já existe o agendamento manual pois ele aparece já
+      // agendado mas não tem como marcar que é deste serviço o
+      // comprovante"): até aqui, o operador batia nesse 409 e ficava sem
+      // nenhum caminho — o evento real que ocupa o horário já existe na
+      // agenda (criado manualmente, pela IA, ou direto no Google Calendar),
+      // mas nada aqui contava o QUE é esse evento. Busca best-effort o
+      // evento que realmente colide (mesma lógica de comparação usada no
+      // resync acima) pra o frontend oferecer "vincular a este agendamento
+      // existente" (POST link-appointment) em vez de um beco sem saída —
+      // nunca deixa essa busca extra derrubar o 409 original.
+      let conflictingEvent: { eventId: string; summary: string; startIso: string; endIso: string } | undefined;
+      try {
+        const startUtcMs = Date.parse(localNaiveToUtcIso(startIso, BUSINESS_TIMEZONE));
+        const endUtcMs = Date.parse(localNaiveToUtcIso(endIso, BUSINESS_TIMEZONE));
+        const windowMinIso = new Date(startUtcMs - 24 * 60 * 60 * 1000).toISOString();
+        const windowMaxIso = new Date(endUtcMs + 24 * 60 * 60 * 1000).toISOString();
+        const nearbyEvents = await listUpcomingEvents(tenantId, calendarConfig, windowMinIso, windowMaxIso);
+        const overlapping = nearbyEvents.find((ev) => {
+          const evStartMs = Date.parse(ev.startIso);
+          const evEndMs = ev.endIso ? Date.parse(ev.endIso) : evStartMs;
+          return evStartMs < endUtcMs && evEndMs > startUtcMs;
+        });
+        if (overlapping) {
+          conflictingEvent = { eventId: overlapping.id, summary: overlapping.summary, startIso: overlapping.startIso, endIso: overlapping.endIso || overlapping.startIso };
+        }
+      } catch {
+        // melhor esforço — o operador ainda recebe o 409 original, só sem a opção de vincular.
+      }
+      return res.status(409).json({ error: 'Esse horário já está ocupado na agenda.', conflictingEvent });
     }
 
     // Observação livre do operador (ex: "cliente pediu produto X junto",

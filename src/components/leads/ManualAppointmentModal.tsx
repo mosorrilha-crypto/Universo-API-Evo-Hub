@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CalendarPlus, Sparkles, Loader2, Pencil, X } from 'lucide-react';
+import { CalendarPlus, Sparkles, Loader2, Pencil, X, Link2 } from 'lucide-react';
 import { AutoResizeTextarea } from '../AutoResizeTextarea';
 
 interface ManualAppointmentModalProps {
@@ -39,10 +39,19 @@ interface ManualAppointmentModalProps {
   isCreating: boolean;
   onSubmit: (e: React.FormEvent) => void;
   onClose: () => void;
+  /** TASK-0433 (achado real, pedido direto: "o botão de registrar agora não
+   * funciona se já existe o agendamento manual pois ele aparece já agendado
+   * mas não tem como marcar que é deste serviço o comprovante") — quando o
+   * 409 de "horário ocupado" traz o evento real que colide, oferece
+   * vincular esse agendamento existente ao contato em vez de um beco sem
+   * saída (mesmo endpoint que a aba Agenda já usa, POST link-appointment). */
+  conflictingEvent?: { eventId: string; summary: string; startIso: string; endIso: string } | null;
+  isLinkingConflictingEvent?: boolean;
+  onLinkConflictingEvent?: () => void;
 }
 
 export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
-  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, isCustomService, onIsCustomServiceChange, customDurationMinutes, onCustomDurationMinutesChange, date, onDateChange, time, onTimeChange, freeSlots, isLoadingFreeSlots, freeSlotsError, notes, onNotesChange, paymentReceived, onPaymentReceivedChange, paymentAmountReceived, onPaymentAmountReceivedChange, error, isCreating, onSubmit, onClose,
+  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, isCustomService, onIsCustomServiceChange, customDurationMinutes, onCustomDurationMinutesChange, date, onDateChange, time, onTimeChange, freeSlots, isLoadingFreeSlots, freeSlotsError, notes, onNotesChange, paymentReceived, onPaymentReceivedChange, paymentAmountReceived, onPaymentAmountReceivedChange, error, isCreating, onSubmit, onClose, conflictingEvent, isLinkingConflictingEvent, onLinkConflictingEvent,
 }) => {
   // Mesmo quando os horários livres carregam certinho, o operador às vezes
   // precisa digitar um horário fora da amostra (exceção combinada com a
@@ -102,8 +111,27 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
           </div>
         )}
 
-        {error && (
+        {error && !conflictingEvent && (
           <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{error}</div>
+        )}
+
+        {error && conflictingEvent && (
+          <div className="bg-amber-950/40 border border-amber-800 rounded-lg p-3 space-y-2">
+            <p className="text-xs text-amber-300">{error}</p>
+            <p className="text-xs text-slate-300">
+              Já existe um evento na agenda pra esse horário: <strong className="text-slate-100">{conflictingEvent.summary}</strong>
+              {' '}em {new Date(conflictingEvent.startIso).toLocaleString('pt-BR')}.
+            </p>
+            <button
+              type="button"
+              onClick={onLinkConflictingEvent}
+              disabled={isLinkingConflictingEvent}
+              className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-amber-500/90 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-wait cursor-pointer"
+            >
+              {isLinkingConflictingEvent ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+              <span>{isLinkingConflictingEvent ? 'Vinculando...' : 'Vincular este agendamento já existente ao contato'}</span>
+            </button>
+          </div>
         )}
 
         <form onSubmit={onSubmit} className="space-y-3">
