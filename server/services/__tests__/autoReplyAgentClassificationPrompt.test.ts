@@ -95,4 +95,39 @@ describe('classifyAgent — prompt do roteador orienta pergunta de endereço pra
     expect(specialistInstruction).toContain('Quando pedir preço e localização juntos, responda ambos no mesmo turno');
     expect(result?.bubbles.join(' ')).toContain('Gs 850.000');
   });
+
+  // TASK-0427 — achado real (análise de conversas do tenant Dr. Daniel
+  // Oliveira, fisioterapia): um paciente novo descrevendo "Estou com uma
+  // perna minha, posterior de coxa" (dor como motivo de buscar consulta) foi
+  // classificado como "reclamacao" — categoria que, por política
+  // deliberada (Epic 4.5.8, webhooks.ts), NUNCA envia resposta automática,
+  // só escala em silêncio. A definição antiga de reclamacao (parêntese
+  // "dor, alergia, reação") foi escrita pensando em negócio de estética
+  // (dor pós-procedimento = algo deu errado), mas numa clínica "dor" é o
+  // motivo normal de contato, não uma reclamação. Roteador agora distingue
+  // "dor como sintoma novo" de "reclamação sobre atendimento que o próprio
+  // negócio já realizou".
+  it('inclui instrução explícita: dor/sintoma como motivo de consulta nova não é "reclamacao", só quando o negócio causou', async () => {
+    let routerPrompt = '';
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          const text = req.contents?.[0]?.text as string;
+          if (text?.includes('Classifique a intenção principal')) {
+            routerPrompt = text;
+            return { text: JSON.stringify({ agent: 'triagem' }) } as any;
+          }
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Entendi, me conta mais sobre essa dor.'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'Estou com uma dor na perna, posterior de coxa', 'Cliente', undefined, undefined,
+      '595981234567'
+    );
+
+    expect(routerPrompt.toLowerCase()).toContain('não é reclamação quando o cliente só descreve um sintoma/dor');
+    expect(routerPrompt).toContain('PRÓPRIO NEGÓCIO');
+  });
 });

@@ -142,6 +142,22 @@ describe('GET /api/tenant-prompt-audit', () => {
     expect(body.systemInstruction).not.toContain('FAQ/ESPECIALISTA');
   });
 
+  // TASK-0426 — achado real (avaliação automática, tenant Monique):
+  // "che, me cancelaron el turno de la nada y necesito hacerme las pestañas
+  // urgente hoy" foi roteado (corretamente, pela própria definição do
+  // router) pra "agendamento", mas o rascunho tentou "consultar o que
+  // ocorreu com o turno" como se tivesse acesso a um sistema pra investigar
+  // um cancelamento feito pelo negócio — reprovado pelo revisor de
+  // segurança. AGENT_INSTRUCTIONS.agendamento ganhou uma seção nova
+  // distinguindo isso (reclamação sobre o negócio) de DESISTÊNCIA/CANCELAMENTO
+  // (o cliente querendo cancelar).
+  it('agendamento inclui a orientação pra cancelamento feito pelo negócio (não investigar sozinho, escalar)', async () => {
+    const res = await fetch(`${baseUrl}/api/tenant-prompt-audit?agent=agendamento`);
+    const body = await res.json();
+    expect(body.systemInstruction).toContain('AGENDAMENTO CANCELADO PELO NEGÓCIO');
+    expect(body.systemInstruction).toContain('não tem acesso a nenhum sistema pra isso');
+  });
+
   // TASK-0415 — regressão: getPromptAuditView não passava leadsOnly pra
   // buildCachedSystemInstruction, então a auditoria sempre mostrava o ramo
   // "outOfScope é sempre false" mesmo com o toggle "somente leads" ligado

@@ -1278,6 +1278,48 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }
   };
 
+  // Pedido direto do dono do produto: o painel só tinha "Trocar foto", nunca
+  // um jeito de tirar a foto de um produto/variante sem colocar outra no
+  // lugar. Apaga o binário no Storage em melhor esforço (a rota DELETE nunca
+  // falha) e limpa os campos locais — o formData só persiste de fato quando
+  // a KB inteira é salva/publicada, mesmo padrão do upload.
+  const handleRemoveProductImage = async (id: string, imageId: string | undefined) => {
+    if (!window.confirm('Remover a foto deste produto?')) return;
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) =>
+        p.id === id ? { ...p, exampleImageId: undefined, exampleImageMimeType: undefined, exampleImageFileName: undefined, exampleImageSizeBytes: undefined, exampleImageBase64: undefined } : p
+      ),
+    }));
+    if (imageId) {
+      try {
+        await apiFetch(`/api/knowledge-base/images/${imageId}`, { method: 'DELETE' });
+      } catch (err) {
+        console.error('Falha ao apagar imagem do Storage (referência local já removida):', err);
+      }
+    }
+  };
+
+  const handleRemoveVariantImage = async (productId: string, index: number, imageId: string | undefined) => {
+    if (!window.confirm('Remover a foto desta variação?')) return;
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((product) => product.id !== productId || !product.variants ? product : {
+        ...product,
+        variants: product.variants.map((variant, variantIndex) => variantIndex === index
+          ? { ...variant, exampleImageId: undefined, exampleImageMimeType: undefined, exampleImageFileName: undefined, exampleImageSizeBytes: undefined, exampleImageBase64: undefined }
+          : variant),
+      }),
+    }));
+    if (imageId) {
+      try {
+        await apiFetch(`/api/knowledge-base/images/${imageId}`, { method: 'DELETE' });
+      } catch (err) {
+        console.error('Falha ao apagar imagem da variação no Storage (referência local já removida):', err);
+      }
+    }
+  };
+
   const handleVariantImageChange = async (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -3048,6 +3090,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                             <ImageIcon className="h-3 w-3" /> {uploadingImageForId === `variant:${prod.id}:${vIndex}` ? 'Enviando foto…' : (variant.exampleImageId || variant.exampleImageBase64) ? 'Trocar foto' : 'Foto desta variação'}
                             <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === `variant:${prod.id}:${vIndex}`} onChange={(e) => handleVariantImageChange(prod.id, vIndex, e)} />
                           </label>
+                          {(variant.exampleImageId || variant.exampleImageBase64) && (
+                            <button type="button" onClick={() => handleRemoveVariantImage(prod.id, vIndex, variant.exampleImageId)} className="inline-flex items-center gap-1 text-[9px] font-semibold text-red-400 hover:text-red-300" title="Remover foto desta variação">
+                              <Trash2 className="h-3 w-3" /> Remover foto
+                            </button>
+                          )}
                           <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-emerald-300 hover:text-emerald-200">
                             <Video className="h-3 w-3" /> {uploadingVideoForId === `variant:${prod.id}:${vIndex}` ? 'Enviando vídeo…' : variant.exampleVideoId ? 'Trocar vídeo' : 'Vídeo desta variação'}
                             <input type="file" accept="video/*" className="hidden" disabled={uploadingVideoForId === `variant:${prod.id}:${vIndex}`} onChange={(e) => handleVariantVideoUpload(prod.id, vIndex, e)} />
@@ -3113,6 +3160,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       {uploadingImageForId === prod.id ? 'Enviando foto…' : (prod.exampleImageId || prod.exampleImageBase64) ? 'Trocar foto' : 'Adicionar foto de exemplo'}
                       <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === prod.id} onChange={(e) => handleProductImageChange(prod.id, e)} />
                     </label>
+                    {(prod.exampleImageId || prod.exampleImageBase64) && (
+                      <button type="button" onClick={() => handleRemoveProductImage(prod.id, prod.exampleImageId)} className="text-[10px] text-red-400 hover:text-red-300 font-semibold inline-flex items-center gap-1" title="Remover foto deste produto">
+                        <Trash2 className="w-3 h-3" /> Remover foto
+                      </button>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 pt-1">
                     {prod.exampleVideoId ? (

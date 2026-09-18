@@ -98,6 +98,13 @@ async function downloadAs(tenantHeader: string | undefined, imageId: string) {
   });
 }
 
+async function deleteAs(tenantHeader: string | undefined, imageId: string) {
+  return fetch(`${baseUrl}/api/knowledge-base/images/${imageId}`, {
+    method: 'DELETE',
+    headers: tenantHeader ? { 'x-test-tenant': tenantHeader } : {},
+  });
+}
+
 describe('Isolamento multi-tenant — POST/GET /api/knowledge-base/images', () => {
   it('tenant A consegue baixar a própria imagem que acabou de subir', async () => {
     const uploadRes = await uploadAs(TENANT_A, { fileName: 'foto.jpg', mimeType: 'image/jpeg', base64: Buffer.from('foto-do-tenant-a').toString('base64') });
@@ -157,5 +164,32 @@ describe('Isolamento multi-tenant — POST/GET /api/knowledge-base/images', () =
     // tenantId não-vazio, nunca undefined/string vazia por falta de resolução.
     expect(res.status).toBe(404); // imagem não existe pro tenant-a (storage vazio) — mas resolveu tenant, não quebrou
     expect(getKnowledgeBaseImage).toHaveBeenCalledWith(expect.anything(), expect.anything(), TENANT_A, 'qualquer-id');
+  });
+
+  // TASK-0437 — DELETE /api/knowledge-base/images/:imageId (remover foto sem trocar por outra).
+  it('tenant B NUNCA apaga uma imagem do tenant A, mesmo sabendo o imageId exato — path isolado por tenant', async () => {
+    const uploadRes = await uploadAs(TENANT_A, { fileName: 'foto.jpg', mimeType: 'image/jpeg', base64: Buffer.from('foto-do-tenant-a').toString('base64') });
+    const { imageId } = await uploadRes.json();
+
+    const crossTenantDelete = await deleteAs(TENANT_B, imageId);
+    expect(crossTenantDelete.status).toBe(200); // melhor esforço, sempre "sucesso" — mas nada foi apagado
+    expect(deleteKnowledgeBaseImage).toHaveBeenCalledWith(expect.anything(), expect.anything(), TENANT_B, imageId);
+
+    // A imagem do tenant A continua intacta — o delete do tenant B mexeu só no path dele (vazio).
+    const downloadRes = await downloadAs(TENANT_A, imageId);
+    expect(downloadRes.status).toBe(200);
+    expect(Buffer.from(await downloadRes.arrayBuffer()).toString()).toBe('foto-do-tenant-a');
+  });
+
+  it('tenant A apaga a própria imagem — some do path dele, mas a rota nunca aceita tenantId por body/query', async () => {
+    const uploadRes = await uploadAs(TENANT_A, { fileName: 'foto.jpg', mimeType: 'image/jpeg', base64: Buffer.from('foto-do-tenant-a').toString('base64') });
+    const { imageId } = await uploadRes.json();
+
+    const deleteRes = await deleteAs(TENANT_A, imageId);
+    expect(deleteRes.status).toBe(200);
+    expect(deleteKnowledgeBaseImage).toHaveBeenCalledWith(expect.anything(), expect.anything(), TENANT_A, imageId);
+
+    const downloadRes = await downloadAs(TENANT_A, imageId);
+    expect(downloadRes.status).toBe(404);
   });
 });

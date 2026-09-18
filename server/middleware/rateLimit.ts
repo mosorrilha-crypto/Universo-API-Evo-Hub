@@ -123,3 +123,16 @@ export const conversationsStreamRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Muitas tentativas de conexão. Aguarde um minuto e tente novamente.' },
 });
+
+// TASK-0437 (achado do CodeQL, js/missing-rate-limiting): DELETE
+// /api/knowledge-base/images/:imageId é uma ação administrativa (apaga o
+// binário no Storage) sem nenhum limite de requisições, mesma classe de
+// achado já corrigido em googleCalendarConnectRateLimiter — ação rara e
+// destrutiva, limite baixo por IP não afeta uso legítimo.
+export const knowledgeBaseImageDeleteRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de remoção de imagem. Aguarde um minuto e tente novamente.' },
+});

@@ -137,4 +137,84 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     expect(api.apiFetch).not.toHaveBeenCalledWith('/api/knowledge-base/images', expect.anything());
     alertSpy.mockRestore();
   });
+
+  // TASK-0437 — pedido direto do dono do produto: antes só existia "Trocar
+  // foto" (upload substitui upload), nunca um jeito de remover a foto de um
+  // produto e deixá-lo sem nenhuma.
+  it('remove a foto do produto (após confirmação) e chama DELETE /api/knowledge-base/images/:imageId', async () => {
+    api.apiFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.startsWith('/api/knowledge-base/images/') && options?.method === 'DELETE') {
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      if (url.startsWith('/api/knowledge-base/images/')) {
+        return { ok: true, blob: async () => new Blob(['fake'], { type: 'image/png' }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const user = userEvent.setup();
+    const knowledgeBase = {
+      ...emptyKnowledgeBase,
+      products: [{ id: 'prod-1', name: 'Microlips', price: 'Gs 500.000', description: '', exampleImageId: 'image-existing-1' }],
+    };
+
+    render(
+      <AgentKnowledgeBaseView
+        knowledgeBase={knowledgeBase}
+        businessHours={{}}
+        onSaveBusinessHours={vi.fn(async () => true)}
+        onGoToWhatsAppSim={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /Preços & Produtos/ }));
+    await user.click(await screen.findByText('Microlips'));
+
+    await screen.findByText('Trocar foto');
+    await user.click(screen.getByRole('button', { name: /Remover foto/ }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    await waitFor(() => expect(api.apiFetch).toHaveBeenCalledWith('/api/knowledge-base/images/image-existing-1', expect.objectContaining({ method: 'DELETE' })));
+    await screen.findByText('Adicionar foto de exemplo');
+    expect(screen.queryByText('Trocar foto')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Remover foto/ })).toBeNull();
+    confirmSpy.mockRestore();
+  });
+
+  it('cancelar a confirmação mantém a foto do produto intacta', async () => {
+    api.apiFetch.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/knowledge-base/images/')) {
+        return { ok: true, blob: async () => new Blob(['fake'], { type: 'image/png' }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    const user = userEvent.setup();
+    const knowledgeBase = {
+      ...emptyKnowledgeBase,
+      products: [{ id: 'prod-1', name: 'Microlips', price: 'Gs 500.000', description: '', exampleImageId: 'image-existing-1' }],
+    };
+
+    render(
+      <AgentKnowledgeBaseView
+        knowledgeBase={knowledgeBase}
+        businessHours={{}}
+        onSaveBusinessHours={vi.fn(async () => true)}
+        onGoToWhatsAppSim={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /Preços & Produtos/ }));
+    await user.click(await screen.findByText('Microlips'));
+
+    await screen.findByText('Trocar foto');
+    await user.click(screen.getByRole('button', { name: /Remover foto/ }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(api.apiFetch).not.toHaveBeenCalledWith(expect.stringContaining('/api/knowledge-base/images/'), expect.objectContaining({ method: 'DELETE' }));
+    expect(screen.getByText('Trocar foto')).not.toBeNull();
+    confirmSpy.mockRestore();
+  });
 });
