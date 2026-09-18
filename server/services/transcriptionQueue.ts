@@ -18,6 +18,7 @@ import { isPlausiblePersonalName } from './contactNameGuard';
 import { runWithTenantDbContext } from './tenantDbContext';
 import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
+import { bufferIncomingAudioText, startAudioBufferRecoverySweeper } from './audioMessageBuffer';
 
 export interface TranscriptionJob {
   message: ParsedIncomingMessage;
@@ -83,6 +84,12 @@ export function startTranscriptionWorker(deps: TranscriptionQueueDeps) {
   if (workerStarted) return;
   workerStarted = true;
   void processLoop(deps);
+  // TASK-0430 — recupera lotes de áudio presos por um restart de deploy no
+  // meio da janela de silêncio, mesmo princípio de
+  // webhooks.ts/startBufferRecoverySweeper pro caminho de texto.
+  startAudioBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, resolvedTenant, firstMessageId) =>
+    generateAndSendAudioReply(resolvedTenant, deps, phone, combinedText, bufferedContactName, lastMessageId, messageCount, firstMessageId)
+  );
 }
 
 async function processLoop(deps: TranscriptionQueueDeps) {
@@ -121,14 +128,174 @@ export async function processJob(job: TranscriptionJob, deps: TranscriptionQueue
   return runWithTenantDbContext({ tenantId: resolvedTenant.tenantId, source: 'job' }, () => processJobWithTenantContext(job, deps));
 }
 
-async function processJobWithTenantContext(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
-  const startedAt = Date.now();
-  const { message, resolvedTenant } = job;
+/**
+ * TASK-0430 — corpo da geração+envio da resposta automática pro lote
+ * (combinado pelo buffer de áudio, audioMessageBuffer.ts) já agrupado de um
+ * ou mais áudios da mesma janela de silêncio. Extraído numa função própria
+ * pra ser reaproveitado tanto pelo flush normal (dentro de
+ * processJobWithTenantContext, logo abaixo) quanto pelo sweeper de
+ * recuperação pós-restart (startTranscriptionWorker) — mesmo princípio de
+ * webhooks.ts/triggerAutoReply pro caminho de texto.
+ */
+async function generateAndSendAudioReply(
+  resolvedTenant: ResolvedTenant,
+  deps: TranscriptionQueueDeps,
+  phone: string,
+  combinedText: string,
+  bufferedContactName: string | undefined,
+  lastMessageId: string,
+  messageCount: number,
+  firstMessageId: string
+): Promise<void> {
   const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
   const isEvolution = resolvedTenant.provider === 'evolution';
   const channel: OutboundChannel = isEvolution
     ? { provider: 'evolution', evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey }
     : { provider: 'meta', phoneNumberId, accessToken: token };
+  await runExclusive(phone, async () => {
+    if (await isAgentPaused(tenantId)) return;
+    const conversation = await getConversation(tenantId, phone);
+    // Mesmo bloqueio por lead individual do caminho de texto (ver
+    // webhooks.ts triggerAutoReply) — um lead bloqueado não deve
+    // receber resposta automática nem quando manda áudio.
+    if (conversation?.aiBlockedAt) return;
+    // Mesmo gate do caminho de texto (ver webhooks.ts triggerAutoReply) —
+    // modo "somente anúncios" também vale pra áudio, usando a
+    // transcrição (já combinada, se houve rajada) como o texto a
+    // comparar com os gatilhos configurados.
+    await attachCatalogClickIfMatched(tenantId, phone, combinedText);
+    if (await shouldBlockForAdsOnlyMode(tenantId, phone, combinedText)) return;
+    const kbContext = formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase);
+    const segment = await getTenantSegment(tenantId);
+    // TASK-0209/TASK-0430 — corta por IDENTIDADE (o messageId do PRIMEIRO
+    // áudio deste lote, não mais o de um áudio isolado) — permanece
+    // correto mesmo com mensagem nova chegando enquanto o lote esperava a
+    // janela de silêncio; cai no corte antigo por posição só se o id não
+    // for encontrado.
+    const allMessages = conversation?.messages;
+    const cutoffIndex = allMessages ? allMessages.findIndex((m) => m.id === firstMessageId) : -1;
+    const history = !allMessages ? undefined : cutoffIndex !== -1 ? allMessages.slice(0, cutoffIndex) : allMessages.slice(0, -messageCount);
+    // Mesmo sinal pro painel do caminho de texto (ver triggerAutoReply em webhooks.ts).
+    emitAiReplyStatus(tenantId, phone, 'generating');
+    // TASK-0416 — ver StoredConversation.specialistInvokedAt em
+    // conversationStore.ts: history vazio não basta pra saber se é a 1ª
+    // vez que o especialista roda de verdade.
+    const specialistInvokedBefore = !!conversation?.specialistInvokedAt;
+    try {
+      const result = await generateAutoReplyForText(
+        tenantId,
+        deps.getAi(),
+        combinedText,
+        bufferedContactName,
+        kbContext,
+        history,
+        phone,
+        undefined,
+        segment,
+        isEvolution ? undefined : { phoneNumberId, accessToken: token },
+        undefined,
+        undefined,
+        undefined,
+        deps.groqApiKey,
+        messageCount,
+        undefined,
+        specialistInvokedBefore
+      );
+      await markSpecialistInvoked(tenantId, phone);
+      if (!result) {
+        await logEscalation(tenantId, phone, bufferedContactName, 'IA não conseguiu gerar resposta automática pro áudio', combinedText);
+        emitAiReplyStatus(tenantId, phone, 'failed');
+        return;
+      }
+      // TASK-0411 — mesmo tratamento do caminho de texto (webhooks.ts):
+      // decisão deliberada de não responder (fora do escopo definido nas
+      // Regras de negócio do tenant), nunca uma falha.
+      if (result.outOfScope) {
+        emitAiReplyStatus(tenantId, phone, 'skipped_out_of_scope');
+        return;
+      }
+      const safety = await reviewAutoReplyBeforeSend({
+        customerMessage: combinedText,
+        draftBubbles: result.bubbles,
+        history,
+        knowledgeContext: kbContext,
+        isBookingFlow: result.agent === 'agendamento',
+        needsHumanConfirmation: result.needsHumanConfirmation,
+        plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
+        contactName: isPlausiblePersonalName(bufferedContactName) ? bufferedContactName : undefined,
+      }, { ai: deps.getAi(), groqApiKey: deps.groqApiKey });
+      if (!safety.approved) {
+        const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
+        await logEscalation(
+          tenantId,
+          phone,
+          bufferedContactName,
+          `Revisor pré-envio bloqueou a resposta automática de áudio (${safety.source}, risco ${safety.severity}): ${safety.reason} Rascunho bloqueado: ${blockedDraft}`,
+          combinedText
+        );
+        console.warn(`🛡️ [Revisor pré-envio] tenant=${tenantId} bloqueou resposta de áudio para ${phone}: ${safety.reason}`);
+        emitAiReplyStatus(tenantId, phone, 'failed');
+        return;
+      }
+      // TASK-0297: quando o revisor corrige em vez de só aprovar/bloquear
+      // (hoje só remove uma bolha isolada de empurrão de agenda depois de
+      // pergunta informativa), envia a versão corrigida — nunca o rascunho
+      // original nesse caso.
+      const bubblesToSend = safety.correctedBubbles ?? result.bubbles;
+      const calendarExecution = await executeApprovedCalendarActions(
+        tenantId,
+        phone,
+        undefined,
+        result.deferredCalendarActions,
+        bufferedContactName,
+        lastMessageId,
+      );
+      if (calendarExecution.hadError) {
+        const reason = calendarExecution.summaries.join(' ');
+        await logEscalation(tenantId, phone, bufferedContactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, combinedText, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(phone) });
+        emitAiReplyStatus(tenantId, phone, 'failed');
+        return;
+      }
+      if (result.agent === 'reclamacao') {
+        await logEscalation(tenantId, phone, bufferedContactName, 'Cliente com reclamação — atendimento humano obrigatório, IA nunca resolve reclamação sozinha', combinedText);
+      } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
+        await logEscalation(tenantId, phone, bufferedContactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', combinedText, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(phone) });
+      }
+      try {
+        await sendBubbles(channel, phone, bubblesToSend, async (bubbleText) => {
+          await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
+          console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
+        }, lastMessageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
+      } catch (sendError: any) {
+        let compensation = 'Não foi possível iniciar a compensação automática.';
+        try {
+          compensation = await compensateApprovedCalendarExecution(tenantId, phone, calendarExecution);
+        } catch (compensationError: any) {
+          compensation = `A compensação automática falhou: ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`;
+        }
+        await logEscalation(tenantId, phone, bufferedContactName, `Falha ao enviar resposta após ação de agenda aprovada: ${sendError instanceof Error ? sendError.message : String(sendError)}. ${compensation}`, combinedText);
+        console.warn(`⚠️ [Agenda pós-envio] tenant=${tenantId} ${compensation}`);
+        emitAiReplyStatus(tenantId, phone, 'failed');
+        return;
+      }
+      emitAiReplyStatus(tenantId, phone, 'sent');
+    } catch (err: any) {
+      emitAiReplyStatus(tenantId, phone, 'failed');
+      if (isGeoRestrictedError(err)) {
+        await markGeoRestricted(tenantId, phone, err.message);
+        await logEscalation(tenantId, phone, bufferedContactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', combinedText);
+      } else {
+        await logEscalation(tenantId, phone, bufferedContactName, `Falha ao responder automaticamente: ${err.message}`, combinedText);
+      }
+      console.warn('❌ [Resposta Automática] Falhou:', err.message);
+    }
+  });
+}
+
+async function processJobWithTenantContext(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
+  const startedAt = Date.now();
+  const { message, resolvedTenant } = job;
+  const { tenantId, metaAccessToken: token } = resolvedTenant;
 
   try {
     let audioBase64: string | undefined;
@@ -201,158 +368,28 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
     // Reaproveita o mesmo motor de bolhas/humanização do caminho de texto
     // (generateAutoReplyForText), passando a transcrição como se fosse a
     // mensagem recebida — evita duplicar a lógica de estilo em dois lugares.
+    //
+    // TASK-0430 — achado real de audit (tenant Monique, cliente "Carmen
+    // Bareiro"): antes desta correção, CADA áudio disparava seu próprio
+    // ciclo completo de resposta assim que terminava de transcrever, sem
+    // nenhum agrupamento (diferente do texto, que já espera ~10s de
+    // silêncio via messageBuffer.ts). Uma cliente que manda vários áudios em
+    // rajada (comum no WhatsApp) recebia uma resposta por áudio — algumas
+    // já desatualizadas pelo tempo que levam pra sair da fila global e
+    // única de transcrição — culminando em respostas redundantes/só de
+    // despedida repetidas em sequência. bufferIncomingAudioText
+    // (audioMessageBuffer.ts) agrupa as transcrições da mesma janela de
+    // silêncio antes de disparar UMA resposta pro lote inteiro, com o mesmo
+    // princípio (e mesma robustez a restart) do buffer de texto — mas
+    // deliberadamente numa tabela/Map próprios, nunca misturando com o
+    // buffer de texto.
     if (isRealTranscriptionSource(outcome.source) && !hasNoDetectedSpeech && !(await isAgentPaused(tenantId))) {
-      runExclusive(message.from, async () => {
-        const conversation = await getConversation(tenantId, message.from);
-        // Mesmo bloqueio por lead individual do caminho de texto (ver
-        // webhooks.ts triggerAutoReply) — um lead bloqueado não deve
-        // receber resposta automática nem quando manda áudio.
-        if (conversation?.aiBlockedAt) return;
-        // Mesmo gate do caminho de texto (ver webhooks.ts triggerAutoReply) —
-        // modo "somente anúncios" também vale pra áudio, usando a
-        // transcrição como o texto a comparar com os gatilhos configurados.
-        await attachCatalogClickIfMatched(tenantId, message.from, outcome.result.transcription);
-        if (await shouldBlockForAdsOnlyMode(tenantId, message.from, outcome.result.transcription)) return;
-        const kbContext = formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase);
-        const segment = await getTenantSegment(tenantId);
-        // TASK-0209 — achado real de auditoria estrutural (mesma classe do
-        // TASK-0172, achada aqui no caminho de ÁUDIO): cortar a última
-        // posição do array (`slice(0, -1)`) supõe que o próprio áudio é
-        // sempre o último item de `conversation.messages`. Mas entre o
-        // cliente mandar o áudio (gravado na hora por recordIncomingMessage,
-        // em webhooks.ts) e este job rodar (fila serial única de
-        // transcrição + download + chamada ao Gemini — latência real de
-        // vários segundos, plausivelmente mais que os 10s de silêncio do
-        // messageBuffer.ts), o MESMO cliente pode mandar uma mensagem nova
-        // — gravada imediatamente, fora desta fila. Quando isso acontece, o
-        // corte por posição pega o item errado: mantém o próprio áudio
-        // dentro do histórico (duplicado com `outcome.result.transcription`,
-        // já passado à parte como a "mensagem atual") e descarta a mensagem
-        // nova de verdade do cliente, perdida do contexto. Corta por
-        // IDENTIDADE (o messageId real do áudio, já em escopo) — permanece
-        // correto mesmo com mensagem nova chegando durante a espera; cai no
-        // corte antigo por posição só se o id não for encontrado (não
-        // deveria acontecer, updateMessageText já rodou pra esta mensagem
-        // logo acima, mas mantém o mesmo fallback do padrão já usado em
-        // webhooks.ts/triggerAutoReply).
-        const allMessages = conversation?.messages;
-        const audioIndex = allMessages ? allMessages.findIndex((m) => m.id === message.messageId) : -1;
-        const history = !allMessages ? undefined : audioIndex !== -1 ? allMessages.slice(0, audioIndex) : allMessages.slice(0, -1);
-        // Mesmo sinal pro painel do caminho de texto (ver triggerAutoReply em webhooks.ts).
-        emitAiReplyStatus(tenantId, message.from, 'generating');
-        // TASK-0416 — ver StoredConversation.specialistInvokedAt em
-        // conversationStore.ts: history vazio não basta pra saber se é a 1ª
-        // vez que o especialista roda de verdade.
-        const specialistInvokedBefore = !!conversation?.specialistInvokedAt;
-        try {
-          const result = await generateAutoReplyForText(
-            tenantId,
-            deps.getAi(),
-            outcome.result.transcription,
-            message.contactName,
-            kbContext,
-            history,
-            message.from,
-            undefined,
-            segment,
-            isEvolution ? undefined : { phoneNumberId, accessToken: token },
-            undefined,
-            undefined,
-            undefined,
-            deps.groqApiKey,
-            undefined,
-            undefined,
-            specialistInvokedBefore
-          );
-          await markSpecialistInvoked(tenantId, message.from);
-          if (!result) {
-            await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
-            emitAiReplyStatus(tenantId, message.from, 'failed');
-            return;
-          }
-          // TASK-0411 — mesmo tratamento do caminho de texto (webhooks.ts):
-          // decisão deliberada de não responder (fora do escopo definido
-          // nas Regras de negócio do tenant), nunca uma falha.
-          if (result.outOfScope) {
-            emitAiReplyStatus(tenantId, message.from, 'skipped_out_of_scope');
-            return;
-          }
-          const safety = await reviewAutoReplyBeforeSend({
-            customerMessage: outcome.result.transcription,
-            draftBubbles: result.bubbles,
-            history,
-            knowledgeContext: kbContext,
-            isBookingFlow: result.agent === 'agendamento',
-            needsHumanConfirmation: result.needsHumanConfirmation,
-            plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
-            contactName: isPlausiblePersonalName(message.contactName) ? message.contactName : undefined,
-          }, { ai: deps.getAi(), groqApiKey: deps.groqApiKey });
-          if (!safety.approved) {
-            const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
-            await logEscalation(
-              tenantId,
-              message.from,
-              message.contactName,
-              `Revisor pré-envio bloqueou a resposta automática de áudio (${safety.source}, risco ${safety.severity}): ${safety.reason} Rascunho bloqueado: ${blockedDraft}`,
-              outcome.result.transcription
-            );
-            console.warn(`🛡️ [Revisor pré-envio] tenant=${tenantId} bloqueou resposta de áudio para ${message.from}: ${safety.reason}`);
-            emitAiReplyStatus(tenantId, message.from, 'failed');
-            return;
-          }
-          // TASK-0297: quando o revisor corrige em vez de só aprovar/bloquear
-          // (hoje só remove uma bolha isolada de empurrão de agenda depois de
-          // pergunta informativa), envia a versão corrigida — nunca o
-          // rascunho original nesse caso.
-          const bubblesToSend = safety.correctedBubbles ?? result.bubbles;
-          const calendarExecution = await executeApprovedCalendarActions(
-            tenantId,
-            message.from,
-            undefined,
-            result.deferredCalendarActions,
-            message.contactName,
-            message.messageId,
-          );
-          if (calendarExecution.hadError) {
-            const reason = calendarExecution.summaries.join(' ');
-            await logEscalation(tenantId, message.from, message.contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, outcome.result.transcription, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(message.from) });
-            emitAiReplyStatus(tenantId, message.from, 'failed');
-            return;
-          }
-          if (result.agent === 'reclamacao') {
-            await logEscalation(tenantId, message.from, message.contactName, 'Cliente com reclamação — atendimento humano obrigatório, IA nunca resolve reclamação sozinha', outcome.result.transcription);
-          } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
-            await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(message.from) });
-          }
-          try {
-            await sendBubbles(channel, message.from, bubblesToSend, async (bubbleText) => {
-              await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
-              console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
-            }, message.messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
-          } catch (sendError: any) {
-            let compensation = 'Não foi possível iniciar a compensação automática.';
-            try {
-              compensation = await compensateApprovedCalendarExecution(tenantId, message.from, calendarExecution);
-            } catch (compensationError: any) {
-              compensation = `A compensação automática falhou: ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`;
-            }
-            await logEscalation(tenantId, message.from, message.contactName, `Falha ao enviar resposta após ação de agenda aprovada: ${sendError instanceof Error ? sendError.message : String(sendError)}. ${compensation}`, outcome.result.transcription);
-            console.warn(`⚠️ [Agenda pós-envio] tenant=${tenantId} ${compensation}`);
-            emitAiReplyStatus(tenantId, message.from, 'failed');
-            return;
-          }
-          emitAiReplyStatus(tenantId, message.from, 'sent');
-        } catch (err: any) {
-          emitAiReplyStatus(tenantId, message.from, 'failed');
-          if (isGeoRestrictedError(err)) {
-            await markGeoRestricted(tenantId, message.from, err.message);
-            await logEscalation(tenantId, message.from, message.contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', outcome.result.transcription);
-          } else {
-            await logEscalation(tenantId, message.from, message.contactName, `Falha ao responder automaticamente: ${err.message}`, outcome.result.transcription);
-          }
-          console.warn('❌ [Resposta Automática] Falhou:', err.message);
-        }
-      });
+      bufferIncomingAudioText(message.from, message.contactName, outcome.result.transcription, message.messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant, firstMessageId) =>
+        runWithTenantDbContext(
+          { tenantId: bufferedTenant.tenantId, source: 'job' },
+          () => generateAndSendAudioReply(bufferedTenant, deps, message.from, combinedText, bufferedContactName, lastMessageId, messageCount, firstMessageId)
+        )
+      );
     }
   } catch (err: any) {
     totalFailed += 1;
