@@ -178,7 +178,7 @@ async function generateAndSendAudioReply(
     const history = !allMessages ? undefined : cutoffIndex !== -1 ? allMessages.slice(0, cutoffIndex) : allMessages.slice(0, -messageCountArg);
     // Mesmo sinal pro painel do caminho de texto (ver triggerAutoReply em webhooks.ts).
     emitAiReplyStatus(tenantId, phone, 'generating');
-    // TASK-0431 — mesmo princípio do caminho de texto (webhooks.ts): marca
+    // TASK-0432 — mesmo princípio do caminho de texto (webhooks.ts): marca
     // que uma geração pro MESMO telefone está em andamento, pra que
     // bufferIncomingAudioText/bufferIncomingText adiem seu próprio flush em
     // vez de disparar por conta própria e virar um ciclo independente e
@@ -213,7 +213,7 @@ async function generateAndSendAudioReply(
       );
       await markSpecialistInvoked(tenantId, phone);
 
-      // TASK-0431 (mesmo princípio de TASK-0418 no caminho de texto): a
+      // TASK-0432 (mesmo princípio de TASK-0418 no caminho de texto): a
       // cliente pode ter mandado mais áudio(s) ENQUANTO esta resposta era
       // gerada — agora que o flush adia enquanto isGenerating for true (ver
       // generatingLock.ts/audioMessageBuffer.ts), esse texto ainda está

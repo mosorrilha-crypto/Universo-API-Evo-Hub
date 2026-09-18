@@ -1,5 +1,5 @@
 /**
- * TASK-0431 — achado real (tenant Monique, contato "😍", telefone
+ * TASK-0432 — achado real (tenant Monique, contato "😍", telefone
  * 595985868809): a cliente mandou "¡Hola! Quiero más información" e, 12s
  * depois, "Precio por favor" — mais que a janela de 10s de silêncio do
  * buffer de texto (messageBuffer.ts), então cada mensagem abriu seu PRÓPRIO

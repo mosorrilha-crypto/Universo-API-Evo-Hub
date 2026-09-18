@@ -30,7 +30,7 @@ import type { ResolvedTenant } from './tenantResolver';
 const SILENCE_MS = 10_000;
 const SWEEP_INTERVAL_MS = 15_000;
 
-/** TASK-0431 — mesmo princípio de messageBuffer.ts: adia o flush enquanto uma resposta pro mesmo telefone ainda está sendo gerada, em vez de disparar por conta própria e virar um ciclo independente e redundante. */
+/** TASK-0432 — mesmo princípio de messageBuffer.ts: adia o flush enquanto uma resposta pro mesmo telefone ainda está sendo gerada, em vez de disparar por conta própria e virar um ciclo independente e redundante. */
 const GENERATION_WAIT_RETRY_MS = 2_000;
 const MAX_GENERATION_WAIT_MS = 3 * 60_000;
 
