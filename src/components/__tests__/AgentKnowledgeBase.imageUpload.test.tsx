@@ -167,12 +167,14 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     };
 
     render(
-      <AgentKnowledgeBaseView
-        knowledgeBase={knowledgeBase}
-        businessHours={{}}
-        onSaveBusinessHours={vi.fn(async () => true)}
-        onGoToWhatsAppSim={vi.fn()}
-      />
+      <AppPreferencesProvider>
+        <AgentKnowledgeBaseView
+          knowledgeBase={knowledgeBase}
+          businessHours={{}}
+          onSaveBusinessHours={vi.fn(async () => true)}
+          onGoToWhatsAppSim={vi.fn()}
+        />
+      </AppPreferencesProvider>
     );
 
     await user.click(screen.getByRole('button', { name: /Preços & Produtos/ }));
@@ -205,12 +207,14 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     };
 
     render(
-      <AgentKnowledgeBaseView
-        knowledgeBase={knowledgeBase}
-        businessHours={{}}
-        onSaveBusinessHours={vi.fn(async () => true)}
-        onGoToWhatsAppSim={vi.fn()}
-      />
+      <AppPreferencesProvider>
+        <AgentKnowledgeBaseView
+          knowledgeBase={knowledgeBase}
+          businessHours={{}}
+          onSaveBusinessHours={vi.fn(async () => true)}
+          onGoToWhatsAppSim={vi.fn()}
+        />
+      </AppPreferencesProvider>
     );
 
     await user.click(screen.getByRole('button', { name: /Preços & Produtos/ }));
