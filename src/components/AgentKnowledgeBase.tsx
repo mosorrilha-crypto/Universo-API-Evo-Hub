@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AgentKnowledgeBase, AgentProduct, ProductVariant, BeforeAfterPair, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
+import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { ReconectarWhatsAppQrCode } from './ReconectarWhatsAppQrCode';
 import {
@@ -114,15 +115,18 @@ const FIRST_CONTACT_BLOCK_META: Record<FirstContactBlockType, { label: string; i
 
 // A Base tem oito documentos tipados; estes atalhos tornam a estrutura
 // explícita sem obrigar o administrador a editar JSON ou conhecer o backend.
+// `labelKey`/`detailKey` (TASK-0436) referenciam chaves de src/i18n/translations.ts
+// em vez de texto fixo — resolvidas com `t()` no ponto de uso, já que este
+// array é uma constante de módulo (sem acesso ao idioma ativo).
 export const TYPED_DOCUMENT_NAVIGATION = [
-  { documentType: 'business_profile', label: 'Perfil do negócio', detail: 'Empresa, objetivo e localização', icon: Building2, sections: ['s1'] },
-  { documentType: 'brand_voice', label: 'Voz da marca', detail: 'Tom, idioma e forma de responder', icon: MessageSquare, sections: ['s1'] },
-  { documentType: 'service_catalog', label: 'Catálogo de serviços', detail: 'Serviços, variações, preços e mídias', icon: DollarSign, sections: ['s3'] },
-  { documentType: 'pricing_policies', label: 'Preços e políticas', detail: 'Pagamento, cancelamento e condições', icon: ShieldAlert, sections: ['s1', 's2'] },
-  { documentType: 'opening_hours', label: 'Horários de atendimento', detail: 'Expediente usado pela agenda real', icon: Clock, sections: [] },
-  { documentType: 'faq', label: 'Perguntas frequentes', detail: 'Dúvidas e respostas aprovadas', icon: HelpCircle, sections: ['s4'] },
-  { documentType: 'human_handoff_rules', label: 'Encaminhamento humano', detail: 'Regras e limites de atendimento', icon: ShieldAlert, sections: ['s2'] },
-  { documentType: 'media_assets', label: 'Mídias e documentos', detail: 'Anexos e primeiro contato', icon: Paperclip, sections: ['s5', 's6'] },
+  { documentType: 'business_profile', labelKey: 'kbDocBusinessProfileLabel', detailKey: 'kbDocBusinessProfileDetail', icon: Building2, sections: ['s1'] },
+  { documentType: 'brand_voice', labelKey: 'kbDocBrandVoiceLabel', detailKey: 'kbDocBrandVoiceDetail', icon: MessageSquare, sections: ['s1'] },
+  { documentType: 'service_catalog', labelKey: 'kbDocServiceCatalogLabel', detailKey: 'kbDocServiceCatalogDetail', icon: DollarSign, sections: ['s3'] },
+  { documentType: 'pricing_policies', labelKey: 'kbDocPricingPoliciesLabel', detailKey: 'kbDocPricingPoliciesDetail', icon: ShieldAlert, sections: ['s1', 's2'] },
+  { documentType: 'opening_hours', labelKey: 'kbDocOpeningHoursLabel', detailKey: 'kbDocOpeningHoursDetail', icon: Clock, sections: [] },
+  { documentType: 'faq', labelKey: 'kbDocFaqLabel', detailKey: 'kbDocFaqDetail', icon: HelpCircle, sections: ['s4'] },
+  { documentType: 'human_handoff_rules', labelKey: 'kbDocHumanHandoffLabel', detailKey: 'kbDocHumanHandoffDetail', icon: ShieldAlert, sections: ['s2'] },
+  { documentType: 'media_assets', labelKey: 'kbDocMediaAssetsLabel', detailKey: 'kbDocMediaAssetsDetail', icon: Paperclip, sections: ['s5', 's6'] },
 ] as const;
 
 function AuditMetric({ label, value, tone }: { label: string; value: string | number; tone: 'emerald' | 'sky' | 'amber' | 'rose' | 'slate' }) {
@@ -148,6 +152,7 @@ function AuditMetric({ label, value, tone }: { label: string; value: string | nu
  * nesse caso o grid existe na página.
  */
 function BackToDocumentListLink({ visible }: { visible: boolean }) {
+  const { t } = useAppPreferences();
   if (!visible) return null;
   return (
     <button
@@ -155,7 +160,7 @@ function BackToDocumentListLink({ visible }: { visible: boolean }) {
       onClick={() => document.getElementById('knowledge-base-document-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
       className="inline-flex items-center gap-1 text-[10px] font-semibold text-cyan-300 hover:text-cyan-100"
     >
-      <ArrowUp className="h-3 w-3" /> Voltar à lista de documentos
+      <ArrowUp className="h-3 w-3" /> {t('kbBackToDocumentList')}
     </button>
   );
 }
@@ -574,6 +579,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   usesPublishedKnowledgeBase = false,
   canManageWhatsAppConnection = false,
 }) => {
+  const { t } = useAppPreferences();
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
     products: ensureUniqueIds(knowledgeBase.products, 'prod'),
@@ -1931,7 +1937,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   };
 
   const handleResetToDefault = () => {
-    if (window.confirm('Tem certeza que deseja restaurar as configurações padrão da base de conhecimento?')) {
+    if (window.confirm(t('kbResetConfirm'))) {
       setFormData(defaultKnowledgeBase);
     }
   };
@@ -1970,15 +1976,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <div>
             <div className="flex items-center space-x-2">
               <h2 className="text-sm font-bold tracking-tight text-white sm:text-base">
-                Base de Conhecimento & Regras do Agente
+                {t('kbHeroTitle')}
               </h2>
               <span className="hidden sm:flex px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40 items-center gap-1">
                 <Sparkles className="w-3 h-3 text-emerald-400" />
-                Agente Gemini Treinado
+                {t('kbHeroBadge')}
               </span>
             </div>
             <p className="text-[11px] text-slate-300 mt-0.5 max-w-2xl leading-relaxed line-clamp-2">
-              Configure contexto, regras, catálogo, FAQs e anexos que orientam o agente nos atendimentos.
+              {t('kbHeroDescription')}
             </p>
           </div>
         </div>
@@ -1989,31 +1995,31 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             type="button"
             onClick={() => setShowKnowledgeBaseDocumentation(true)}
             className="flex items-center gap-1.5 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition-all hover:bg-cyan-500/20"
-            title="Abrir mapa lógico, fluxograma e guia de uso da Base de Conhecimento"
-            aria-label="Abrir documentação da Base de Conhecimento"
+            title={t('kbDocumentationTitle')}
+            aria-label={t('kbDocumentationAriaLabel')}
           >
             <BookOpen className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Documentação</span>
+            <span className="hidden sm:inline">{t('kbDocumentationButton')}</span>
           </button>
           <button
             type="button"
             onClick={() => setShowPromptAudit(true)}
             className="flex items-center gap-1.5 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition-all hover:bg-fuchsia-500/20"
-            title="Ver exatamente o prompt (regras + Base de Conhecimento + conversa) que é mandado ao Gemini"
-            aria-label="Auditar prompt do agente"
+            title={t('kbAuditPromptTitle')}
+            aria-label={t('kbAuditPromptAriaLabel')}
           >
             <Search className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Auditar Prompt</span>
+            <span className="hidden sm:inline">{t('kbAuditPromptButton')}</span>
           </button>
           <button
             type="button"
             onClick={() => setShowHoursEditor(true)}
             className="flex items-center gap-1.5 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-500/20"
-            title="Configurar os horários reais de atendimento e agenda"
-            aria-label="Configurar horários de atendimento"
+            title={t('kbHoursTitle')}
+            aria-label={t('kbHoursAriaLabel')}
           >
             <Clock className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Horários</span>
+            <span className="hidden sm:inline">{t('kbHoursButton')}</span>
           </button>
           {publicCatalogSlug && (
             <a
@@ -2021,10 +2027,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-200 transition-all hover:bg-sky-500/20"
-              title="Abrir catálogo público"
+              title={t('kbViewCatalogTitle')}
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Ver catálogo</span>
+              <span className="hidden sm:inline">{t('kbViewCatalogButton')}</span>
             </a>
           )}
           {/* Achado real, 29/08/2026 (pedido do dono do produto): morava no
@@ -2036,10 +2042,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <button
             onClick={handleResetToDefault}
             className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-400 transition-all hover:bg-slate-800 hover:text-white"
-            title="Restaurar padrão"
+            title={t('kbRestoreTitle')}
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Restaurar</span>
+            <span className="hidden sm:inline">{t('kbRestoreButton')}</span>
           </button>
         </div>
       </div>
@@ -2060,28 +2066,28 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             <div className="flex min-w-0 gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10 text-cyan-200"><FileCheck className="h-5 w-5" /></div>
               <div>
-                <p className="text-xs font-bold text-cyan-100">Uma Base de Conhecimento publicada</p>
-                <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-400">Edite todos os campos visuais abaixo. <strong className="font-semibold text-slate-200">Salvar rascunho</strong> prepara a alteração; <strong className="font-semibold text-slate-200">Publicar alterações</strong> torna os rascunhos ativos para o agente e o catálogo. Você não precisa preencher códigos ou JSON.</p>
+                <p className="text-xs font-bold text-cyan-100">{t('kbPublishedBannerTitle')}</p>
+                <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-400">{t('kbPublishedBannerIntro')} <strong className="font-semibold text-slate-200">{t('kbSaveDraftLabel')}</strong> {t('kbPublishedBannerMid')} <strong className="font-semibold text-slate-200">{t('kbPublishActionsLabel')}</strong> {t('kbPublishedBannerEnd')}</p>
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <span className="rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-100">{typedDocumentStates.filter((state) => state.published).length}/8 publicados</span>
-              <span className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-2.5 py-1.5 text-[10px] font-bold text-amber-100">{typedDraftDocumentTypes.length} rascunho(s)</span>
+              <span className="rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-100">{t('kbPublishedCount', { count: typedDocumentStates.filter((state) => state.published).length })}</span>
+              <span className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-2.5 py-1.5 text-[10px] font-bold text-amber-100">{t('kbDraftCount', { count: typedDraftDocumentTypes.length })}</span>
             </div>
           </div>
           <div className="mt-4 border-t border-cyan-400/15 pt-4">
             <div className="mb-2 flex items-baseline justify-between gap-3">
               <div>
-                <p className="text-xs font-bold text-slate-100">Documentos da sua Base</p>
-                <p className="mt-0.5 text-[10px] text-slate-500">Toque em um item para abrir o formulário visual correspondente.</p>
+                <p className="text-xs font-bold text-slate-100">{t('kbDocumentsGridTitle')}</p>
+                <p className="mt-0.5 text-[10px] text-slate-500">{t('kbDocumentsGridSubtitle')}</p>
               </div>
-              <span className="text-[10px] font-semibold text-cyan-200">8 tipos</span>
+              <span className="text-[10px] font-semibold text-cyan-200">{t('kbDocumentTypesCount')}</span>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {TYPED_DOCUMENT_NAVIGATION.map((item) => {
                 const state = typedDocumentStates.find((documentState) => documentState.documentType === item.documentType);
                 const Icon = item.icon;
-                const status = state?.draft ? 'Rascunho pendente' : state?.published ? `Publicado v${state.published.version}` : 'Ainda não publicado';
+                const status = state?.draft ? t('kbStatusDraftPending') : state?.published ? t('kbStatusPublishedVersion', { version: state.published.version }) : t('kbStatusNotPublished');
                 // Só dá pra comparar quando existem as DUAS versões — um documento
                 // "Ainda não publicado" não tem base de comparação (tudo é novo).
                 const canShowDiff = Boolean(state?.draft && state?.published);
@@ -2090,7 +2096,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   <div key={item.documentType} className={`group flex min-h-20 flex-col gap-1.5 rounded-xl border p-3 transition-colors ${isDiffOpen ? 'border-cyan-400/50 bg-slate-900' : 'border-slate-800 bg-slate-950/65 hover:border-cyan-400/35 hover:bg-slate-900'}`}>
                     <button type="button" onClick={() => handleOpenTypedDocument(item.documentType)} className="flex items-start gap-2.5 text-left focus:outline-none">
                       <span className="mt-0.5 rounded-lg border border-cyan-400/20 bg-cyan-400/10 p-1.5 text-cyan-200"><Icon className="h-3.5 w-3.5" /></span>
-                      <span className="min-w-0"><span className="block text-[11px] font-bold text-slate-200 group-hover:text-cyan-100">{item.label}</span><span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{item.detail}</span><span className={`mt-1.5 block text-[10px] font-semibold ${state?.draft ? 'text-amber-200' : state?.published ? 'text-emerald-200' : 'text-slate-500'}`}>{status}</span></span>
+                      <span className="min-w-0"><span className="block text-[11px] font-bold text-slate-200 group-hover:text-cyan-100">{t(item.labelKey)}</span><span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{t(item.detailKey)}</span><span className={`mt-1.5 block text-[10px] font-semibold ${state?.draft ? 'text-amber-200' : state?.published ? 'text-emerald-200' : 'text-slate-500'}`}>{status}</span></span>
                     </button>
                     {canShowDiff && (
                       <button
@@ -2098,7 +2104,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                         onClick={() => setDiffOpenDocumentType((previous) => (previous === item.documentType ? null : item.documentType))}
                         className="self-start text-[10px] font-semibold text-cyan-300 underline decoration-cyan-400/40 underline-offset-2 hover:text-cyan-100"
                       >
-                        {isDiffOpen ? 'Ocultar alterações' : 'Ver o que mudou'}
+                        {isDiffOpen ? t('kbHideChanges') : t('kbViewChanges')}
                       </button>
                     )}
                   </div>
@@ -2112,17 +2118,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               const diffEntries = describeKnowledgeBaseDocumentDiff(state.documentType, state.published.data, state.draft.data);
               return (
                 <div className="mt-3 rounded-xl border border-cyan-400/25 bg-slate-950/70 p-3">
-                  <p className="text-[11px] font-bold text-cyan-100">O que vai mudar em "{item?.label}" ao publicar</p>
+                  <p className="text-[11px] font-bold text-cyan-100">{t('kbDiffTitle', { label: item ? t(item.labelKey) : '' })}</p>
                   {diffEntries.length === 0 ? (
-                    <p className="mt-2 text-[11px] text-slate-500">Nenhuma diferença de conteúdo detectada entre a versão publicada e o rascunho.</p>
+                    <p className="mt-2 text-[11px] text-slate-500">{t('kbDiffNoChanges')}</p>
                   ) : (
                     <div className="mt-2 overflow-x-auto">
                       <table className="w-full min-w-[420px] border-collapse text-[11px]">
                         <thead>
                           <tr className="border-b border-slate-800 text-left text-slate-500">
-                            <th className="py-1.5 pr-2 font-semibold">Campo</th>
-                            <th className="py-1.5 pr-2 font-semibold">Publicado</th>
-                            <th className="py-1.5 font-semibold">Rascunho</th>
+                            <th className="py-1.5 pr-2 font-semibold">{t('kbDiffFieldColumn')}</th>
+                            <th className="py-1.5 pr-2 font-semibold">{t('kbDiffPublishedColumn')}</th>
+                            <th className="py-1.5 font-semibold">{t('kbDiffDraftColumn')}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2149,9 +2155,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-bold text-white">
               <BrainCircuit className="h-4 w-4 text-emerald-400" />
-              Diagnóstico de completude
+              {t('kbDiagnosticsTitle')}
             </div>
-            <p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-400">Varredura local dos dados desta empresa. Ela aponta informações que podem comprometer respostas, agendamentos ou valores financeiros, mas não altera nenhum conteúdo automaticamente.</p>
+            <p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-400">{t('kbDiagnosticsDescription')}</p>
           </div>
           <button
             type="button"
@@ -2161,23 +2167,23 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             }}
             className="shrink-0 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-400/15"
           >
-            Ver {knowledgeAudit.actionableProductIds.size} pendência(s) do catálogo
+            {t('kbPendingCatalogButton', { count: knowledgeAudit.actionableProductIds.size })}
           </button>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <AuditMetric label="Itens ativos" value={knowledgeAudit.activeProducts} tone="emerald" />
-          <AuditMetric label="Categorizados" value={`${knowledgeAudit.categorizedProducts}/${knowledgeAudit.activeProducts}`} tone="sky" />
-          <AuditMetric label="Precisam atenção" value={knowledgeAudit.totals.attention} tone="amber" />
-          <AuditMetric label="Críticos" value={knowledgeAudit.totals.critical} tone={knowledgeAudit.totals.critical ? 'rose' : 'slate'} />
+          <AuditMetric label={t('kbActiveItems')} value={knowledgeAudit.activeProducts} tone="emerald" />
+          <AuditMetric label={t('kbCategorized')} value={`${knowledgeAudit.categorizedProducts}/${knowledgeAudit.activeProducts}`} tone="sky" />
+          <AuditMetric label={t('kbNeedsAttention')} value={knowledgeAudit.totals.attention} tone="amber" />
+          <AuditMetric label={t('kbCritical')} value={knowledgeAudit.totals.critical} tone={knowledgeAudit.totals.critical ? 'rose' : 'slate'} />
         </div>
         {knowledgeAudit.findings.length > 0 ? (
           <div className="mt-4 border-t border-slate-800 pt-3">
-            <div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Prioridades encontradas</span><span className="text-[10px] text-slate-500">Exibindo as 4 primeiras</span></div>
+            <div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{t('kbPrioritiesFound')}</span><span className="text-[10px] text-slate-500">{t('kbShowingFirst4')}</span></div>
             <div className="grid gap-2 md:grid-cols-2">
               {knowledgeAudit.findings.slice(0, 4).map((finding) => <div key={finding.id} className="knowledge-workspace__finding rounded-xl border border-slate-800 bg-slate-950/65 p-2.5"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${finding.severity === 'critical' ? 'bg-rose-400' : finding.severity === 'attention' ? 'bg-amber-300' : 'bg-sky-400'}`} /><p className="knowledge-workspace__finding-title truncate text-[11px] font-bold text-slate-200">{finding.title}</p></div><p className="knowledge-workspace__finding-description mt-1 pl-3.5 text-[10px] leading-4 text-slate-500">{finding.description}</p></div>)}
             </div>
           </div>
-        ) : <p className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3 text-xs text-emerald-200">A estrutura principal está completa para o agente usar dados reais desta empresa.</p>}
+        ) : <p className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3 text-xs text-emerald-200">{t('kbStructureComplete')}</p>}
       </section>
 
       {/* Configuração inicial de tenants: modelos e cópia da base ficam no mesmo painel. */}
@@ -2393,7 +2399,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     escopo desta correção pontual). */}
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-bold text-slate-300">
                   Tom de Voz do Agente:
-                  <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-200">Voz da marca</span>
+                  <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-200">{t('kbDocBrandVoiceLabel')}</span>
                 </label>
                 <AutoResizeTextarea
                   minRows={1}
@@ -2465,7 +2471,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   "Perfil do negócio" que dá nome a esta seção. */}
               <label className="mb-1 flex items-center gap-1.5 text-xs font-bold text-slate-300">
                 Políticas Comerciais e Formas de Pagamento:
-                <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">Preços e políticas</span>
+                <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">{t('kbDocPricingPoliciesLabel')}</span>
               </label>
               <AutoResizeTextarea
                 minRows={2}
@@ -2577,7 +2583,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       documento, sem nada que corresponda ao que clicou. Não
                       corrigido aqui de propósito — decisão de produto sobre
                       criar esse campo, não um ajuste de rolagem/rótulo. */}
-                  <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">Preços e políticas</span>
+                  <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">{t('kbDocPricingPoliciesLabel')}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Cadastre regras estritas (Do's and Don'ts) que o agente NUNCA pode descumprir ao conversar com os clientes.
