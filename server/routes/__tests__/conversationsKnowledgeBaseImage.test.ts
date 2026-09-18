@@ -162,3 +162,23 @@ describe('GET /api/knowledge-base/images/:imageId', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// TASK-0437 — pedido direto do dono do produto: o painel só tinha "Trocar
+// foto", nunca um jeito de remover a foto de um produto/variante sem
+// colocar outra no lugar.
+describe('DELETE /api/knowledge-base/images/:imageId', () => {
+  it('apaga o binário no Storage e responde sucesso', async () => {
+    const res = await fetch(`${baseUrl}/api/knowledge-base/images/image-existing`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(deleteKnowledgeBaseImage).toHaveBeenCalledTimes(1);
+    expect(deleteKnowledgeBaseImage).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', TENANT_A, 'image-existing');
+  });
+
+  it('responde sucesso mesmo quando a imagem já não existe (melhor esforço, idempotente)', async () => {
+    const res = await fetch(`${baseUrl}/api/knowledge-base/images/image-ja-apagada`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect(deleteKnowledgeBaseImage).toHaveBeenCalledTimes(1);
+  });
+});

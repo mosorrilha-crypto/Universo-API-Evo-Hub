@@ -48,7 +48,7 @@ import {
 } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
-import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, resolveKnowledgeBaseImageBinary, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
+import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, deleteKnowledgeBaseImage, resolveKnowledgeBaseImageBinary, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, permanentlyDeleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
@@ -2373,6 +2373,19 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('Vary', 'Authorization');
     res.send(image.buffer);
+  }));
+
+  // Remove uma foto de exemplo (produto/variante) sem precisar trocar por
+  // outra — pedido direto do dono do produto: o painel só tinha "Trocar
+  // foto", nunca um jeito de tirar a foto e deixar o item sem nenhuma.
+  // Só apaga o binário do Storage; quem tira a referência (exampleImageId)
+  // do produto/variante é o formData local no cliente (AgentKnowledgeBase.tsx),
+  // mesmo desacoplamento já usado pro upload — só persiste de fato quando a
+  // KB inteira é salva. Melhor esforço (deleteKnowledgeBaseImage nunca
+  // lança), por isso sempre responde sucesso.
+  router.delete('/api/knowledge-base/images/:imageId', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    await deleteKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantOf(req), req.params.imageId);
+    res.json({ success: true });
   }));
 
   // Upload de arquivo (ex: catálogo em PDF) pra um bloco tipo "file" da
