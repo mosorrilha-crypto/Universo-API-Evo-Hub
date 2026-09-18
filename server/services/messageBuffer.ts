@@ -18,6 +18,7 @@
  */
 import { getDb, getPlatformDb } from './db';
 import { runWithTenantDbContext } from './tenantDbContext';
+import { isGenerating } from './generatingLock';
 import type { ResolvedTenant } from './tenantResolver';
 
 // Dez segundos capturam complementos naturais enviados após a primeira frase
@@ -27,6 +28,22 @@ const SILENCE_MS = 10_000;
 
 /** Intervalo do sweeper de recuperação — bem mais espaçado que a janela de silêncio (10s), só existe pra cobrir o caso raro de restart no meio dela. */
 const SWEEP_INTERVAL_MS = 15_000;
+
+/**
+ * TASK-0432 — achado real (tenant Monique, contato "😍"): quando a resposta
+ * anterior pro MESMO telefone ainda está sendo gerada (roteador +
+ * especialista + revisor, tipicamente 20-40s — bem mais que os 10s de
+ * silêncio abaixo), um buffer novo que vença seus próprios 10s nesse
+ * meio-tempo disparava por conta própria, e a proteção de absorção
+ * (TASK-0418) não encontrava mais nada pra absorver (esse buffer já tinha
+ * saído do Map). Intervalo curto de nova checagem enquanto isso — não é a
+ * janela de silêncio em si, só o quão rápido percebemos que a geração
+ * anterior finalmente terminou.
+ */
+const GENERATION_WAIT_RETRY_MS = 2_000;
+
+/** Teto de segurança pra nunca adiar pra sempre um flush, se por algum motivo a marca de "gerando" nunca for desmarcada (bug em outro lugar, processo travado). */
+const MAX_GENERATION_WAIT_MS = 3 * 60_000;
 
 type FlushCallback = (combinedText: string, contactName: string | undefined, lastMessageId: string, messageCount: number, resolvedTenant: ResolvedTenant, firstMessageId: string) => void;
 
@@ -82,7 +99,19 @@ function bufferKey(tenantId: string, phone: string): string {
   return `${tenantId}:${phone}`;
 }
 
-async function doFlush(key: string, phone: string, buffer: PendingBuffer, onFlush: FlushCallback) {
+async function doFlush(key: string, phone: string, buffer: PendingBuffer, onFlush: FlushCallback, waitStartedAt: number = Date.now()) {
+  // TASK-0432 — se uma resposta pro MESMO telefone ainda está sendo gerada
+  // (texto ou áudio, ver generatingLock.ts), adia este flush em vez de
+  // disparar por conta própria: mantém o buffer no Map (mesmos textos já
+  // acumulados) e tenta de novo em breve. Isso garante que, quando a
+  // geração em andamento chegar em takePendingBufferTexts (TASK-0418), esta
+  // mensagem ainda esteja lá esperando pra ser absorvida — em vez de já ter
+  // saído sozinha e virado um 2º ciclo independente e redundante.
+  if (isGenerating(buffer.resolvedTenant.tenantId, phone) && Date.now() - waitStartedAt < MAX_GENERATION_WAIT_MS) {
+    const retryBuffer: PendingBuffer = { ...buffer, timer: setTimeout(() => void doFlush(key, phone, retryBuffer, onFlush, waitStartedAt), GENERATION_WAIT_RETRY_MS) };
+    buffers.set(key, retryBuffer);
+    return;
+  }
   // Remove já da Map de acumulação (uma mensagem nova que chegue agora deve
   // abrir um buffer novo, nunca se juntar a este que já está sendo
   // processado) — mas marca em `flushing` até o delete persistido terminar,
