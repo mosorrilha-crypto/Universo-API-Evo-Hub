@@ -12,6 +12,7 @@ import React from 'react';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AppPreferencesProvider } from '../../contexts/AppPreferencesContext';
 
 const api = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('../../lib/apiClient', () => api);
@@ -50,12 +51,14 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     };
 
     render(
-      <AgentKnowledgeBaseView
-        knowledgeBase={knowledgeBase}
-        businessHours={{}}
-        onSaveBusinessHours={vi.fn(async () => true)}
-        onGoToWhatsAppSim={vi.fn()}
-      />
+      <AppPreferencesProvider>
+        <AgentKnowledgeBaseView
+          knowledgeBase={knowledgeBase}
+          businessHours={{}}
+          onSaveBusinessHours={vi.fn(async () => true)}
+          onGoToWhatsAppSim={vi.fn()}
+        />
+      </AppPreferencesProvider>
     );
 
     // Abre a seção 3 (Preços & Produtos), fechada por padrão.
@@ -87,12 +90,14 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     };
 
     render(
-      <AgentKnowledgeBaseView
-        knowledgeBase={knowledgeBase}
-        businessHours={{}}
-        onSaveBusinessHours={vi.fn(async () => true)}
-        onGoToWhatsAppSim={vi.fn()}
-      />
+      <AppPreferencesProvider>
+        <AgentKnowledgeBaseView
+          knowledgeBase={knowledgeBase}
+          businessHours={{}}
+          onSaveBusinessHours={vi.fn(async () => true)}
+          onGoToWhatsAppSim={vi.fn()}
+        />
+      </AppPreferencesProvider>
     );
 
     await user.click(screen.getByRole('button', { name: /Preços & Produtos/ }));
@@ -118,12 +123,14 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     };
 
     render(
-      <AgentKnowledgeBaseView
-        knowledgeBase={knowledgeBase}
-        businessHours={{}}
-        onSaveBusinessHours={vi.fn(async () => true)}
-        onGoToWhatsAppSim={vi.fn()}
-      />
+      <AppPreferencesProvider>
+        <AgentKnowledgeBaseView
+          knowledgeBase={knowledgeBase}
+          businessHours={{}}
+          onSaveBusinessHours={vi.fn(async () => true)}
+          onGoToWhatsAppSim={vi.fn()}
+        />
+      </AppPreferencesProvider>
     );
 
     await user.click(screen.getByRole('button', { name: /Preços & Produtos/ }));
