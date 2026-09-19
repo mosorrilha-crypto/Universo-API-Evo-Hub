@@ -244,9 +244,36 @@ function dispatchEscalationAlert(tenantId: string, escalation: Escalation): void
     });
 }
 
-/** Pagamentos exigem decisão humana; termos fortes de assédio também são escalados. */
+/**
+ * Pagamentos exigem decisão humana; termos fortes de assédio também são
+ * escalados.
+ *
+ * TASK-0441 (19/09/2026, auditoria + matriz de decisão de intenção de
+ * pagamento): achado real comparando esta função com `isPaymentOrSensitive`
+ * (`replySafetyGate.ts`) — nenhuma das duas reconhecia conjugações de
+ * "transferir" fora do infinitivo/substantivo (ex: "Ya transferí"), e esta
+ * função especificamente só cobria "paguei" (forma portuguesa, com "i"
+ * final), nunca "pagué" (espanhol, sem "i"). `pagu[eé]i` virou
+ * `pagu[eé]i?` (i opcional) e as conjugações do pretérito de "transferir"
+ * foram adicionadas — sem isso, uma confirmação real de pagamento em
+ * espanhol podia passar sem notificar o operador. Esta função (diferente de
+ * `isPaymentOrSensitive`) não remove acentos antes de testar, então as
+ * conjugações precisam da classe de caracteres com a vogal acentuada (ex:
+ * `transfer[ií]`) — um "transferi" sem acento não bateria com "transferí".
+ *
+ * Achado durante a implementação (19/09/2026): o `\b` final do JS trata
+ * letras acentuadas como "não-palavra" (só reconhece `[A-Za-z0-9_]` como
+ * caractere de palavra) — uma correspondência que TERMINA numa vogal
+ * acentuada (ex: "pagué", "transferí", "transfirió") seguida de fim de
+ * string ou espaço nunca satisfaz `\b` ali, porque nenhum dos dois lados
+ * é "palavra" pra ele. Isso fazia "Pagué"/"Ya transferí" nunca baterem,
+ * mesmo com a letra certa no character class. Trocado o `\b` de
+ * fechamento por `(?![a-zA-Z])` (não seguido de letra ASCII), que não tem
+ * esse problema e continua rejeitando corretamente um match parcial (ex:
+ * não bate só "pague" dentro de "pagues" se essa palavra existisse).
+ */
 export function isPaymentRelated(text: string): boolean {
-  return /\b(pago|pagu[eé]i|se[ñn]a|transfer[êe]nc[ií]a|transferir|comprobante|comprovante|dep[oó]sit(o|ei))\b/i.test(text || '');
+  return /\b(pago|pagu[eé]i?|se[ñn]a|transfer[êe]nc[ií]a|transferir|transfer[ií]|transferiste|transferimos|transfiri[oó]|transfirieron|comprobante|comprovante|dep[oó]sit(o|ei))(?![a-zA-Z])/i.test(text || '');
 }
 
 export function looksLikeHarassment(text: string): boolean {
