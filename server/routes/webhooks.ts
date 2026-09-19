@@ -407,6 +407,25 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
+        // TASK-0441 (matriz de decisão de intenção de pagamento aprovada
+        // pelo dono do negócio): comprovante mencionado é aprovado com um
+        // reconhecimento automático (correctedBubbles), mas ainda precisa
+        // de conferência humana antes de qualquer confirmação real de
+        // pagamento/turno — escala em paralelo, sem bloquear o envio do
+        // reconhecimento (mesmo padrão já usado abaixo pra
+        // needsHumanConfirmation de agendamento).
+        if (safety.stillRequiresHumanReview) {
+          await logEscalation(
+            tenantId,
+            phone,
+            contactName,
+            `Cliente mencionou comprovante de pagamento — reconhecimento automático já enviado, aguardando verificação humana antes de confirmar pagamento/turno. ${safety.reason}`,
+            text,
+            'payment_proof',
+            { sourceKey: reviewerEscalationSourceKey(phone), priority: 'high' },
+          );
+          emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+        }
         // TASK-0297: quando o revisor corrige em vez de só aprovar/bloquear
         // (hoje só remove uma bolha isolada de empurrão de agenda depois de
         // pergunta informativa), envia a versão corrigida — nunca o
