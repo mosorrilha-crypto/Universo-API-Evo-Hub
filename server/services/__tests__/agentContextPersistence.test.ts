@@ -177,25 +177,35 @@ describe('memória de contexto e traces do agente', () => {
   });
 
   /**
-   * TASK-0444 (achado real durante a auditoria de rastreabilidade): antes
-   * desta correção, `message_id` usava a mesma sanitização de texto livre
-   * dos outros campos, que descarta qualquer valor contendo "wamid." — o
-   * formato real de id de mensagem do canal Meta. Confirmado com consulta
-   * somente leitura em produção (tenant Monique — Evolution): 0 de 929
-   * traces tinham `message_id` no formato wamid, ou seja, a correlação por
-   * mensagem estava quebrada pra esse canal desde que a tabela existe.
+   * TASK-0444 (achado real durante a auditoria de rastreabilidade, corrigido
+   * depois de uma primeira leitura incompleta): `message_id` usava a mesma
+   * sanitização de texto livre dos outros campos, que descarta qualquer
+   * valor contendo "wamid." OU uma sequência de 8+ dígitos seguidos (padrão
+   * pra pegar telefone). A primeira verificação olhou só o formato "wamid."
+   * (canal Meta) — mas a Monique, tenant real usado nesta auditoria, usa o
+   * canal Evolution como principal, não Meta. Testado depois com os dois
+   * formatos reais: o ID hexadecimal do Evolution também bate no filtro
+   * (tem uma sequência de 8 dígitos consecutivos, ex: "25221676" dentro de
+   * "AC517A86E4A25221676BD4DDF5004169") e o ID interno que o próprio código
+   * gera pra mensagens enviadas (`wa-{timestamp}-{sufixo}`) também bate (o
+   * timestamp é só dígitos) — confirmando que o bug não era específico do
+   * Meta, quebrava a correlação por mensagem nos dois canais.
    */
-  it('persiste message_id no formato real do canal Meta ("wamid.…"), que antes era descartado por engano', async () => {
+  it.each([
+    ['formato Meta ("wamid.…")', 'wamid.HBgLNTk1OTgxMTExMTEVAgASGBQzQUIxOTQ='],
+    ['formato hexadecimal do Evolution', 'AC517A86E4A25221676BD4DDF5004169'],
+    ['id interno gerado pro envio (wa-{timestamp}-{sufixo})', 'wa-1787166819637-6xf00i'],
+  ])('persiste message_id no %s, que antes era descartado por engano', async (_label, messageId) => {
     const trace = await recordAgentTurnTrace({
       tenantId: TENANT_A,
       phone: PHONE,
-      messageId: 'wamid.HBgLNTk1OTgxMTExMTEVAgASGBQzQUIxOTQ=',
+      messageId,
       routerDecision: 'faq',
       contextPackVersion: 'contact-context-v1',
       needsHumanConfirmation: false,
     });
 
-    expect(trace.message_id).toBe('wamid.HBgLNTk1OTgxMTExMTEVAgASGBQzQUIxOTQ=');
+    expect(trace.message_id).toBe(messageId);
   });
 
   describe('updateAgentTurnTraceOutcome — status de revisão/envio (TASK-0444)', () => {

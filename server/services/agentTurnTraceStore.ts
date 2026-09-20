@@ -59,20 +59,27 @@ function normalizeText(value: unknown, maxLength = MAX_STRING_LENGTH): string | 
 }
 
 /**
- * TASK-0444 (achado real durante a auditoria de rastreabilidade): `message_id`
- * usava `normalizeText`, cujo `SENSITIVE_VALUE` descarta de propósito
- * qualquer string contendo "wamid." — pensado pra impedir que um id de
- * mensagem VAZASSE dentro de um campo de texto livre (ex: `reasoningSummary`),
- * não pra rejeitar o próprio campo de id. Efeito real confirmado em produção
- * (consulta somente leitura, tenant Monique — Evolution): 0 de 929 traces
- * tinham `message_id` no formato "wamid.*" — ou seja, toda mensagem recebida
- * pelo canal Meta (que usa exatamente esse formato de id) gravava o trace
- * com `message_id` nulo, quebrando silenciosamente a correlação por
- * mensagem desde que esta tabela existe (TASK cria `agent_turn_traces`,
- * 22/08/2026). `message_id`/`escalation_id` são campos de IDENTIFICADOR, não
- * texto livre — usam só corte de tamanho, sem a checagem de conteúdo
- * sensível (que continua valendo pra `reasoning_summary`/`provider`/`model`,
- * onde faz sentido como defesa contra um id vazando pra dentro de texto).
+ * TASK-0444 (achado real durante a auditoria de rastreabilidade, corrigido
+ * depois de uma primeira leitura incompleta): `message_id` usava
+ * `normalizeText`, cujo `SENSITIVE_VALUE` descarta de propósito qualquer
+ * string contendo "wamid." OU uma sequência de 8+ dígitos seguidos (pensado
+ * pra pegar número de telefone) — pra impedir que um id VAZASSE dentro de um
+ * campo de texto livre (ex: `reasoningSummary`), não pra rejeitar o próprio
+ * campo de id. Primeira verificação (consulta somente leitura, tenant
+ * Monique — Evolution) olhou só o formato "wamid." (canal Meta) e achou 0 de
+ * 929 traces — mas a Monique usa o canal Evolution como principal, não Meta,
+ * então essa amostra não provava nada sobre o impacto real nela. Testado
+ * depois com os IDs reais dos dois canais: o formato hexadecimal do
+ * Evolution (ex: "AC517A86E4A25221676BD4DDF5004169", que contém a sequência
+ * "25221676", 8 dígitos seguidos) e o id interno gerado pelo próprio código
+ * pra mensagens enviadas (`wa-{timestamp}-{sufixo}`, timestamp é só dígitos)
+ * também batem no filtro — o bug não era específico do Meta, quebrava a
+ * correlação por mensagem nos dois canais, silenciosamente, desde que esta
+ * tabela existe (TASK cria `agent_turn_traces`, 22/08/2026). `message_id`/
+ * `escalation_id` são campos de IDENTIFICADOR, não texto livre — usam só
+ * corte de tamanho, sem a checagem de conteúdo sensível (que continua
+ * valendo pra `reasoning_summary`/`provider`/`model`, onde faz sentido como
+ * defesa contra um id vazando pra dentro de texto).
  */
 function normalizeIdentifier(value: unknown, maxLength = MAX_STRING_LENGTH): string | null {
   if (typeof value !== 'string') return null;
