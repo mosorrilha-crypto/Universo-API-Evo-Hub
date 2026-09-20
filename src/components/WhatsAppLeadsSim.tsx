@@ -22,6 +22,7 @@ import { ReopenConversationModal } from './owner-panel/ReopenConversationModal';
 import { ConversationContextSidebar } from './owner-panel/ConversationContextSidebar';
 import type { ContactProfileData } from './owner-panel/ownerPanelTypes';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
+import { interpolate } from '../i18n/translations';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import {
   Play,
@@ -3026,9 +3027,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // fazia certo (var(--text-label)/var(--surface-raised)); só faltava estas
   // duas seguirem o mesmo padrão.
   const waitingGroupMeta: Record<WaitingGroupId, { label: string; className: string }> = {
-    over30: { label: 'ESPERANDO HÁ MAIS DE 30 MIN', className: 'text-[var(--danger)] bg-[var(--danger-surface)]' },
-    under30: { label: 'ESPERANDO ATÉ 30 MIN', className: 'text-[var(--pending)] bg-[var(--pending-surface)]' },
-    awaitingClient: { label: 'AGUARDANDO CLIENTE', className: 'text-[var(--text-label)] bg-[var(--surface-raised)]' },
+    over30: { label: t('chatWaitingOver30'), className: 'text-[var(--danger)] bg-[var(--danger-surface)]' },
+    under30: { label: t('chatWaitingUnder30'), className: 'text-[var(--pending)] bg-[var(--pending-surface)]' },
+    awaitingClient: { label: t('chatWaitingAwaitingClient'), className: 'text-[var(--text-label)] bg-[var(--surface-raised)]' },
   };
 
   const waitingGroups = (['over30', 'under30', 'awaitingClient'] as WaitingGroupId[]).map((id) => ({
@@ -4299,8 +4300,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             onClick={handleToggleLeadsOnly}
             title={
               leadsOnly
-                ? 'Agente só responde mensagens que identificar como comerciais/profissionais — silêncio pra assuntos pessoais, mesmo na 1ª mensagem de um contato novo'
-                : 'Restringir o agente a só responder mensagens que identificar como comerciais/profissionais (útil quando este número também recebe assunto pessoal)'
+                ? t('chatLeadsOnlyActiveTitleMobile')
+                : t('chatLeadsOnlyInactiveTitleMobile')
             }
             className={`flex-1 rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold transition-colors cursor-pointer ${
               leadsOnly ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-400 hover:text-white'
@@ -4315,11 +4316,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         <button
           type="button"
           onClick={loadAgentStatus}
-          title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+          title={t('chatAgentStatusRetryTitle')}
           className="inline-flex items-center gap-1 self-center rounded-lg border border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
         >
           <AlertCircle className="h-3 w-3" />
-          <span>Status incerto — recarregar</span>
+          <span>{t('chatAgentStatusUncertainSr')}</span>
         </button>
       )}
       </>
@@ -4346,7 +4347,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           do que a tela realmente mostra — desempenho de anúncios). */}
       {(onGoToCrm || onGoToFinancial || (onSelectTab && canSeeGrowth)) && (
         <div className="w-full border-t border-slate-800 pt-2.5">
-          <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Módulos</p>
+          <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">{t('chatModulesLabel')}</p>
           <div className="grid w-full grid-cols-4 gap-2">
             {onGoToCrm && renderToolTile({
               key: 'go-to-crm',
@@ -4539,7 +4540,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           <div className="flex items-start space-x-2">
             <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold">Aviso de IA: </span>
+              <span className="font-bold">{t('chatAiWarningLabel')}</span>
               <span>{errorMsg}</span>
             </div>
           </div>
@@ -4555,12 +4556,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer"
             >
               <RefreshCw className="w-3 h-3" />
-              <span>Tentar Novamente</span>
+              <span>{t('chatRetryButton')}</span>
             </button>
             <button
               onClick={() => { setErrorMsg(null); setErrorRetryAction(undefined); }}
               className="p-1.5 rounded-lg text-amber-400 hover:text-amber-200 hover:bg-amber-500/10 transition-all cursor-pointer"
-              title="Dispensar aviso"
+              title={t('chatDismissWarningTitle')}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -4743,7 +4744,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               (`toolbarSettingsBody`). */}
           {canManageAgent && (
           <div className="hidden lg:flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
-            <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</span>
+            <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">{t('chatAgentStatusSectionLabel')}</span>
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {/* Modo "somente anúncios" + Gatilhos — achado real, 29/08/2026
                   (pedido do dono do produto com print): esses dois botões
@@ -4757,8 +4758,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onClick={handleToggleAdsOnly}
                 title={
                   adsOnly
-                    ? 'Somente anúncios ATIVO — agente só responde contatos vindos de anúncio, silêncio pra contatos pessoais'
-                    : 'Ativar modo somente anúncios — agente para de responder contatos pessoais automaticamente'
+                    ? t('chatAdsOnlyActiveTitle')
+                    : t('chatAdsOnlyInactiveTitle')
                 }
                 className={`rounded-lg p-1.5 transition-all cursor-pointer ${
                   adsOnly ? 'bg-[var(--action)] text-[var(--action-contrast)]' : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -4770,7 +4771,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <button
                   type="button"
                   onClick={openAdTriggersModal}
-                  title={`Configurar gatilhos de texto do modo "somente anúncios"${adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}`}
+                  title={`${t('chatAdTriggersConfigTitle')}${adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}`}
                   className="rounded-lg p-1.5 text-slate-400 transition-all hover:bg-slate-800 hover:text-white cursor-pointer"
                 >
                   <Settings className="h-3.5 w-3.5" />
@@ -4785,8 +4786,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onClick={handleToggleLeadsOnly}
                 title={
                   leadsOnly
-                    ? 'Somente leads ATIVO — agente só responde mensagens que identificar como comerciais/profissionais, silêncio pra assuntos pessoais'
-                    : 'Ativar modo somente leads — agente para de responder assuntos pessoais automaticamente (mesmo número usado pra atendimento e uso pessoal)'
+                    ? t('chatLeadsOnlyActiveTitleShort')
+                    : t('chatLeadsOnlyInactiveTitleShort')
                 }
                 className={`rounded-lg p-1.5 transition-all cursor-pointer ${
                   leadsOnly ? 'bg-[var(--action)] text-[var(--action-contrast)]' : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -4807,10 +4808,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     onClick={() => handleChangeAgentStatus(status)}
                     title={
                       agentStatus === null
-                        ? 'Confirmando o status real do agente...'
-                        : status === 'active' ? 'Agente responde sempre' :
-                          status === 'restricted' ? 'Agente só responde fora do horário comercial' :
-                          'Agente pausado — silêncio total'
+                        ? t('chatAgentStatusConfirming')
+                        : status === 'active' ? t('chatAgentStatusActiveTitle') :
+                          status === 'restricted' ? t('chatAgentStatusRestrictedTitle') :
+                          t('chatAgentStatusPausedTitle')
                     }
                     className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
                       agentStatus === status
@@ -4818,19 +4819,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+                    {status === 'active' ? t('active') : status === 'restricted' ? t('restricted') : t('paused')}
                   </button>
                 ))}
                 {agentStatusLoadFailed && (
                   <button
                     type="button"
                     onClick={loadAgentStatus}
-                    title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+                    title={t('chatAgentStatusRetryTitle')}
                     className="ml-0.5 inline-flex items-center gap-1 rounded-lg border-l border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
                   >
                     <AlertCircle className="h-3 w-3" />
-                    <span>Erro</span>
-                    <span className="sr-only">Status incerto — recarregar</span>
+                    <span>{t('chatAgentStatusErrorLabel')}</span>
+                    <span className="sr-only">{t('chatAgentStatusUncertainSr')}</span>
                   </button>
                 )}
               </div>
@@ -4933,7 +4934,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     }
                     setIsWindowFilterMenuOpen((v) => !v);
                   }}
-                  title="Filtrar conversas"
+                  title={t('chatFilterConversationsTitle')}
                   className={`atendimento-filter atendimento-label-filter-trigger flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
                     activeTabFilter === 'window_open' || activeTabFilter === 'window_closed' || activeTabFilter === 'unread'
                       ? 'is-active bg-emerald-500 text-slate-950'
@@ -4968,7 +4969,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           setActiveTabFilter((prev) => (prev === 'unread' ? 'all' : 'unread'));
                           setIsWindowFilterMenuOpen(false);
                         }}
-                        title="Contatos com mensagens não lidas"
+                        title={t('chatUnreadFilterTitle')}
                         className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer border-b border-slate-700/60 ${
                           activeTabFilter === 'unread' ? 'text-emerald-400 font-semibold' : 'text-slate-200'
                         }`}
@@ -4982,12 +4983,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           setActiveTabFilter((prev) => (prev === 'window_open' ? 'all' : 'window_open'));
                           setIsWindowFilterMenuOpen(false);
                         }}
-                        title="Contatos com mensagem do cliente nas últimas 24h — o agente/operador ainda pode responder normalmente."
+                        title={t('chatWindowOpenFilterTitle')}
                         className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${
                           activeTabFilter === 'window_open' ? 'text-emerald-400 font-semibold' : 'text-slate-200'
                         }`}
                       >
-                        <span>Dentro das 24h</span>
+                        <span>{t('chatWindowOpenLabel')}</span>
                         <span>{windowOpenLeadsCount}</span>
                       </button>
                       <button
@@ -4996,12 +4997,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           setActiveTabFilter((prev) => (prev === 'window_closed' ? 'all' : 'window_closed'));
                           setIsWindowFilterMenuOpen(false);
                         }}
-                        title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
+                        title={t('chatWindowClosedFilterTitle')}
                         className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${
                           activeTabFilter === 'window_closed' ? 'text-slate-100 font-semibold' : 'text-slate-400'
                         }`}
                       >
-                        <span>Fora das 24h</span>
+                        <span>{t('chatWindowClosedLabel')}</span>
                         <span>{windowClosedLeadsCount}</span>
                       </button>
                     </div>
@@ -5021,7 +5022,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsStatusModalOpen(true)}
-                  title="Postar Status"
+                  title={t('chatPostStatusTitle')}
                   className="flex-shrink-0 p-1.5 rounded-full bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white transition-all cursor-pointer"
                 >
                   <CircleDashed className="w-3.5 h-3.5" />
@@ -5048,14 +5049,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       }
                       setIsLabelFilterMenuOpen((v) => !v);
                     }}
-                    title="Filtrar por etiqueta"
+                    title={t('chatFilterByLabelTitle')}
                     className={`atendimento-filter atendimento-label-filter-trigger px-2 py-1 rounded-full text-[11px] font-medium border cursor-pointer whitespace-nowrap max-w-[9.5rem] truncate ${
                       labelFilter
                         ? 'is-active bg-emerald-500 text-slate-950 border-emerald-500 font-semibold'
                         : 'bg-[#202c33] text-slate-300 border-slate-700'
                     }`}
                   >
-                    🏷️ {labelFilter || 'Todas etiquetas'}
+                    🏷️ {labelFilter || t('chatAllLabelsOption')}
                   </button>
                   {isLabelFilterMenuOpen && labelFilterMenuPos && (
                     <>
@@ -5071,7 +5072,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             !labelFilter ? 'text-emerald-400 font-semibold' : 'text-slate-200'
                           }`}
                         >
-                          🏷️ Todas etiquetas
+                          🏷️ {t('chatAllLabelsOption')}
                         </button>
                         {tenantLabelSuggestions.map((l) => (
                           <button
@@ -5104,7 +5105,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 >
                   <span className="flex items-center gap-2 text-xs font-medium">
                     <Archive className="w-3.5 h-3.5 text-slate-400" />
-                    Arquivadas · {archivedLeads.length}
+                    {interpolate(t('chatArchivedCount'), { count: archivedLeads.length })}
                   </span>
                   {showArchived ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 </button>
@@ -5153,7 +5154,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {isToolbarSettingsOpen && (
             <div className="flex flex-1 min-h-0 flex-col lg:hidden">
               <div className="flex-shrink-0 px-3 py-2.5 border-b border-slate-800">
-                <h3 className="text-sm font-bold text-white">Ferramentas</h3>
+                <h3 className="text-sm font-bold text-white">{t('chatTools')}</h3>
               </div>
               <div className="flex-1 min-h-0 p-3 flex flex-col gap-2.5 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
                 {toolbarSettingsBody}
@@ -5198,7 +5199,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               22px->24px (w-6 h-6), acompanhando o bump de escala do CSS
               (`.atendimento-bottom-nav__item` no index.css) — ainda
               parecia pequena/desproporcional perto do resto da UI. */}
-          <nav ref={bottomNavRef} className="atendimento-bottom-nav lg:!hidden" aria-label="Navegação do Atendimento">
+          <nav ref={bottomNavRef} className="atendimento-bottom-nav lg:!hidden" aria-label={t('chatNavAriaLabel')}>
             {/* TASK-0336 (achado real, print anotado): "Conversas" tinha
                 "is-active" fixo no className — ficava destacado junto com
                 "Ferramentas"/"Agenda" sempre que um desses overlays abria,
@@ -5210,7 +5211,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               className={`atendimento-bottom-nav__item${!isToolbarSettingsOpen && !isUpcomingEventsPanelOpen ? ' is-active' : ''}`}
             >
               <MessageCircle className="w-6 h-6" />
-              <span>Conversas</span>
+              <span>{t('conversations')}</span>
             </button>
             <button
               type="button"
@@ -5219,7 +5220,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               className="atendimento-bottom-nav__item"
             >
               <AlertTriangle className="w-6 h-6" />
-              <span>Pendências</span>
+              <span>{t('pending')}</span>
               {escalationsPendingCount > 0 && (
                 <span className="atendimento-bottom-nav__badge">{escalationsPendingCount}</span>
               )}
@@ -5238,7 +5239,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 className="atendimento-bottom-nav__item"
               >
                 <CalendarIcon className="w-6 h-6" />
-                <span>Agenda</span>
+                <span>{t('schedule')}</span>
               </button>
             )}
             <button
@@ -5247,7 +5248,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               className={`atendimento-bottom-nav__item${isToolbarSettingsOpen ? ' is-active' : ''}`}
             >
               <Settings className="w-6 h-6" />
-              <span>Ferramentas</span>
+              <span>{t('chatTools')}</span>
             </button>
           </nav>
         </div>
@@ -5290,7 +5291,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <button
                     onClick={() => { setMobileThreadOpen(false); setMobileAnalysisOpen(false); }}
                     className="lg:hidden flex-shrink-0 p-1.5 -ml-1.5 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
-                    title="Voltar pra lista de conversas"
+                    title={t('chatBackToListTitle')}
                   >
                     {/* TASK-0187: 4->[18px], escala mais perto do WhatsApp
                         real (mesmo tamanho já usado na barra inferior). */}
@@ -5325,7 +5326,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           IA), que já recebe `selectedLead.phone` como prop.
                           Contador de mensagens continua, é útil no
                           cabeçalho e não é dado sensível. */}
-                      <span className="truncate min-w-0">{selectedLead.messages?.length || 0} mensagens</span>
+                      <span className="truncate min-w-0">{interpolate(t('chatMessagesCount'), { count: selectedLead.messages?.length || 0 })}</span>
                       {/* TASK-0373 (pedido direto): indicador visual de que
                           a IA está no atendimento deste lead — antes só
                           existia dentro da Ficha do Contato (painel lateral,
@@ -5402,7 +5403,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <button
                       onClick={() => setIsContractModalOpen(true)}
                       className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
-                      title="Gerar contrato"
+                      title={t('chatGenerateContractTitle')}
                     >
                       <FileText className="w-5 h-5" />
                     </button>
@@ -5429,7 +5430,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <button
                     onClick={() => { setRightPanelTab('profile'); setMobileAnalysisOpen(true); }}
                     className="atendimento-analysis-trigger lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
-                    title="Ficha do Cliente"
+                    title={t('chatClientProfileTitle')}
                   >
                     <IdCard className="w-6 h-6" />
                   </button>
@@ -5443,7 +5444,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <button
                     onClick={() => window.open(`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}`, '_blank', 'noopener,noreferrer')}
                     className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
-                    title="Transferir pro WhatsApp pessoal do operador"
+                    title={t('chatTransferToPersonalWhatsAppTitle')}
                   >
                     <Phone className="w-5 h-5" />
                   </button>
@@ -5462,7 +5463,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <button
                     onClick={() => { if (!showRightPanel) setRightPanelTab('profile'); setShowRightPanel(!showRightPanel); }}
                     className={`hidden lg:flex p-2 rounded-lg transition-colors cursor-pointer ${showRightPanel ? 'text-emerald-400 bg-[#2a3942]' : 'text-slate-300 hover:bg-[#2a3942]'}`}
-                    title={showRightPanel ? 'Fechar Ficha do Cliente' : 'Ficha do Cliente'}
+                    title={showRightPanel ? t('chatCloseClientProfileTitle') : t('chatClientProfileTitle')}
                   >
                     {showRightPanel ? <PanelRightClose className="w-5 h-5" /> : <PanelRightOpen className="w-5 h-5" />}
                   </button>
@@ -5654,7 +5655,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsManualAppointmentModalOpen(true); }}
                                 className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                title="Cadastrar agendamento manual combinado fora do WhatsApp"
+                                title={t('chatManualAppointmentTitle')}
                               >
                                 <CalendarPlus className="w-3.5 h-3.5" />
                                 <span>Cadastrar agendamento</span>
@@ -5664,7 +5665,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsContractModalOpen(true); }}
                                 className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                title="Gerar contrato"
+                                title={t('chatGenerateContractTitle')}
                               >
                                 <FileText className="w-3.5 h-3.5" />
                                 <span>Gerar contrato</span>
@@ -5673,7 +5674,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <button
                               onClick={() => { setIsHeaderMenuOpen(false); window.open(`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}`, '_blank', 'noopener,noreferrer'); }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                              title="Continuar no WhatsApp pessoal do operador"
+                              title={t('chatContinuePersonalWhatsAppTitle')}
                             >
                               <Phone className="w-3.5 h-3.5" />
                               <span>Abrir no WhatsApp</span>
@@ -5689,7 +5690,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
                               className={`w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
-                              title="A IA para de responder automaticamente só pra esse número (manual ou automático, ex: falha de agenda) — o resto do atendimento continua normal"
+                              title={t('chatBlockAiTitle')}
                             >
                               <Ban className="w-3.5 h-3.5" />
                               <span>{isAiBlocked ? (isSpanish ? 'Reactivar IA para este lead' : 'Reativar IA para este lead') : (isSpanish ? 'Bloquear IA para este lead' : 'Bloquear IA para este lead')}</span>
@@ -5711,7 +5712,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   if (released) await handleAnalyzeConversation(selectedLead, { draftAfterAnalysis: true });
                                 }}
                                 className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora e já gerar um rascunho de resposta pra última mensagem pendente, sem esperar os 5min nem uma mensagem nova do lead."
+                                title={t('chatReturnAiNowTitle')}
                               >
                                 <RefreshCw className="w-3.5 h-3.5" />
                                 <span>{isSpanish ? 'Devolver la IA ahora' : 'Devolver a IA agora'}</span>
@@ -5725,7 +5726,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   if (activated) await handleAnalyzeConversation(selectedLead, { draftAfterAnalysis: true });
                                 }}
                                 className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                title='Libera a IA para as próximas mensagens deste lead e lê o histórico completo para preparar um rascunho contextual no compositor. O rascunho nunca é enviado sem revisão humana.'
+                                title={t('chatActivateAiDraftTitle')}
                               >
                                 <Megaphone className="w-3.5 h-3.5" />
                                 <span>{isSpanish ? 'Activar IA y preparar borrador' : 'Ativar IA e preparar rascunho'}</span>
@@ -5734,7 +5735,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <button
                               onClick={() => openOperatorFeedback('operator_idea')}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                              title="Enviar uma melhoria contextual para a Central de Qualidade"
+                              title={t('chatSuggestImprovementTitle')}
                             >
                               <Sparkles className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Sugerir mejora' : 'Sugerir melhoria'}</span>
@@ -5742,7 +5743,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <button
                               onClick={() => openOperatorFeedback('bug')}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                              title="Registrar um comportamento inesperado nesta conversa"
+                              title={t('chatReportBugTitle')}
                             >
                               <AlertTriangle className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Reportar bug' : 'Reportar bug'}</span>
@@ -5784,7 +5785,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <button
                               onClick={() => { handleClearChatMessages(selectedLead.id); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                              title="Apaga as mensagens desta conversa, mantendo o contato"
+                              title={t('chatClearMessagesTitle')}
                             >
                               <RefreshCw className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Limpiar historial de mensajes' : 'Limpar histórico de mensagens'}</span>
@@ -5792,7 +5793,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <button
                               onClick={() => { setIsHeaderMenuOpen(false); handleDeleteConversation(selectedLead.id, selectedLead.name); }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
-                              title="Exclui a conversa e o contato permanentemente"
+                              title={t('chatDeleteConversationTitle')}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Eliminar conversación permanentemente' : 'Excluir conversa permanentemente'}</span>
@@ -6094,7 +6095,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   type="button"
                                   onClick={() => { setOpenMessageMenuFor(null); handleDeleteSingleMessage(selectedLead.id, msg.id); }}
                                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
-                                  title="Apagar esta mensagem"
+                                  title={t('chatDeleteMessageTitle')}
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                   <span>{isSpanish ? 'Eliminar' : 'Apagar'}</span>
@@ -6457,19 +6458,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'generating' && (
                   <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/40 rounded-lg px-3 py-1.5 text-[11px] text-emerald-300">
                     <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
-                    <span>A IA está formulando uma resposta para {selectedLead.name}...</span>
+                    <span>{interpolate(t('chatAiGeneratingReply'), { name: selectedLead.name })}</span>
                   </div>
                 )}
                 {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'awaiting_human' && (
                   <div className="flex items-center gap-2 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-1.5 text-[11px] text-amber-200">
                     <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>Atendimento transferido para humano — verifique Escalonamentos antes de responder.</span>
+                    <span>{t('chatTransferredToHuman')}</span>
                   </div>
                 )}
                 {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'delivery_failed' && (
                   <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-1.5 text-[11px] text-rose-300">
                     <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>A entrega automática falhou e o caso foi escalado para acompanhamento manual.</span>
+                    <span>{t('chatDeliveryFailed')}</span>
                   </div>
                 )}
 
@@ -6509,9 +6510,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         // botões embaixo) até `sm`, e só vira uma linha só em
                         // telas largas o bastante pra caber os dois.
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between w-full">
-                          <div className="flex items-start gap-1.5 text-amber-400/90 font-semibold min-w-0" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
+                          <div className="flex items-start gap-1.5 text-amber-400/90 font-semibold min-w-0" title={t('chatInactiveContactWarningTitle')}>
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                            <span className="min-w-0">Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
+                            <span className="min-w-0">{interpolate(t('chatInactiveContactWarningText'), { name: selectedLead.name })}</span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">
                             <button
@@ -6521,12 +6522,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-wait text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 cursor-pointer"
                             >
                               <Sparkles className="w-3 h-3" />
-                              {isGeneratingReengagement ? 'Gerando...' : 'Sugerir mensagem de retomada'}
+                              {isGeneratingReengagement ? (isSpanish ? 'Generando...' : 'Gerando...') : t('chatSuggestResumeMessage')}
                             </button>
                             <button
                               type="button"
                               onClick={() => setDismissedReengagementWarningPhones((prev) => new Set(prev).add(selectedLead.phone))}
-                              title="Fechar este aviso"
+                              title={t('chatCloseWarningTitle')}
                               className="p-1 text-slate-500 hover:text-white rounded-lg cursor-pointer"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -6534,15 +6535,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           </div>
                         </div>
                       ) : isReopenBlockedByWaba ? (
-                        <div className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Fale com o suporte para configurar a conta oficial do WhatsApp Business (WABA) desta empresa.">
+                        <div className="flex items-center gap-1.5 text-amber-400 font-semibold" title={t('chatWabaSupportTitle')}>
                           <Lock className="w-3.5 h-3.5 shrink-0" />
-                          <span>Janela de 24h fechada. Esta empresa ainda não tem WhatsApp Business (WABA) configurado — não é possível reabrir a conversa. Fale com o suporte.</span>
+                          <span>{t('chatWabaClosedText')}</span>
                         </div>
                       ) : (
                         <div className="flex items-center justify-between w-full">
                           <div className="flex items-center gap-1.5 text-amber-400 font-semibold">
                             <Lock className="w-3.5 h-3.5" />
-                            <span>Janela de 24 horas fechou. Só é permitido enviar modelo aprovado.</span>
+                            <span>{t('chatWindowClosedText')}</span>
                           </div>
                           <button
                             type="button"
@@ -6550,7 +6551,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                           >
                             <Sparkles className="w-3 h-3" />
-                            Reabrir a conversa
+                            {t('chatReopenConversationButton')}
                           </button>
                         </div>
                       )}
@@ -6563,10 +6564,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-emerald-500 rounded-lg px-3 py-1.5">
                     <div className="min-w-0">
                       <div className="text-[10px] font-bold text-emerald-400 truncate">
-                        {`Respondendo a: ${replyingTo.sender === 'lead' ? selectedLead.name : 'Você'}`}
+                        {`${t('chatReplyingToLabel')} ${replyingTo.sender === 'lead' ? selectedLead.name : t('chatYou')}`}
                       </div>
                       <div className="text-[11px] text-slate-300 truncate">
-                        {replyingTo.text || (replyingTo.type === 'image' ? '📷 Imagem' : replyingTo.type === 'audio' ? '🎤 Áudio' : replyingTo.type === 'file' ? '📎 Arquivo' : '')}
+                        {replyingTo.text || (replyingTo.type === 'image' ? t('chatReplyImageLabel') : replyingTo.type === 'audio' ? t('chatReplyAudioLabel') : replyingTo.type === 'file' ? t('chatReplyFileLabel') : '')}
                       </div>
                     </div>
                     <button
@@ -6630,7 +6631,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       onClick={handleDiscardRecordedAudio}
                       disabled={isSendingRecordedAudio}
                       className="p-2 text-red-400 hover:text-red-300 rounded-full transition-colors cursor-pointer flex-shrink-0 disabled:opacity-50"
-                      title="Descartar gravação"
+                      title={t('chatDiscardRecordingTitle')}
                     >
                       <Trash2 className="w-5 h-5" />
                     </button>
@@ -6640,7 +6641,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       onClick={handleSendRecordedAudio}
                       disabled={isSendingRecordedAudio}
                       className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all cursor-pointer flex-shrink-0 disabled:opacity-50"
-                      title={`Enviar áudio pra ${recordingForLeadName}`}
+                      title={interpolate(t('chatSendAudioToTitle'), { name: recordingForLeadName })}
                     >
                       {isSendingRecordedAudio ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 ml-0.5" />}
                     </button>
@@ -6660,7 +6661,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         type="button"
                         onClick={() => setShowComposerEmojiPicker((v) => !v)}
                         className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
-                        title="Emoji"
+                        title={t('chatEmojiTitle')}
                       >
                         <Smile className="w-5 h-5" />
                       </button>
@@ -6935,7 +6936,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'text-slate-400 border-transparent hover:text-slate-200'
                 }`}
               >
-                Ficha do Contato
+                {t('chatTabContactProfile')}
               </button>
               <button
                 type="button"
@@ -6946,7 +6947,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'text-slate-400 border-transparent hover:text-slate-200'
                 }`}
               >
-                Análise IA
+                {t('chatTabAiAnalysis')}
               </button>
               <button
                 type="button"
@@ -6999,7 +7000,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <div className="p-2.5 space-y-2.5">
                 <label
                   className="inline-flex items-center gap-1.5 self-start cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
-                  title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise)'
+                  title={t('chatAutoAnalyzeToggleTitleDesktop')}
                 >
                   <input
                     type="checkbox"
@@ -7008,7 +7009,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="sr-only peer"
                   />
                   <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
-                  <span className="text-[10px]">Analisar automaticamente a cada mensagem</span>
+                  <span className="text-[10px]">{t('chatAutoAnalyzeLabel')}</span>
                 </label>
                 <ConversationAnalysisPanel
                   analysis={selectedLead?.fullAnalysis}
@@ -7056,7 +7057,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-3 border-b border-slate-800 flex-shrink-0">
-              <h3 className="text-sm font-bold text-white">Ficha IA</h3>
+              <h3 className="text-sm font-bold text-white">{t('chatMobileAiSheetTitle')}</h3>
               <button
                 onClick={() => setMobileAnalysisOpen(false)}
                 className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
@@ -7078,7 +7079,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'text-slate-400 border-transparent hover:text-slate-200'
                 }`}
               >
-                Ficha do Contato
+                {t('chatTabContactProfile')}
               </button>
               <button
                 type="button"
@@ -7089,7 +7090,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'text-slate-400 border-transparent hover:text-slate-200'
                 }`}
               >
-                Análise IA
+                {t('chatTabAiAnalysis')}
               </button>
               <button
                 type="button"
@@ -7144,7 +7145,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   lá acima), reaproveitado aqui na gaveta mobile. */}
               <label
                 className="inline-flex items-center gap-1.5 cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
-                title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
+                title={t('chatAutoAnalyzeToggleTitleMobile')}
               >
                 <input
                   type="checkbox"
@@ -7153,7 +7154,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   className="sr-only peer"
                 />
                 <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
-                <span className="text-[10px]">Analisar automaticamente a cada mensagem</span>
+                <span className="text-[10px]">{t('chatAutoAnalyzeLabel')}</span>
               </label>
               <ConversationAnalysisPanel
                 analysis={selectedLead.fullAnalysis}
