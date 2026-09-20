@@ -70,7 +70,7 @@ export function TransactionDialog({ kind, leads, currency, isSpanish, onClose, o
         </Field>
         <Field label={isSpanish ? 'Forma' : 'Forma'}>
           <select name="paymentMethod" defaultValue={initialValues?.paymentMethod} className={inputClass}>
-            {PAYMENT_METHODS.map((method) => <option key={method}>{paymentLabel(method)}</option>)}
+            {PAYMENT_METHODS.map((method) => <option key={method} value={method}>{paymentLabel(method)}</option>)}
           </select>
         </Field>
       </div>
