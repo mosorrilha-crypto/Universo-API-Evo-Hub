@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb } from '../db';
 import { getContactAgentMemory, normalizeMemoryFacts, normalizeOperatorContactMemoryPatch, updateContactAgentMemoryByOperator, upsertContactAgentMemory } from '../contactAgentMemoryStore';
-import { listAgentTurnTraces, recordAgentTurnTrace } from '../agentTurnTraceStore';
+import { listAgentTurnTraces, recordAgentTurnTrace, updateAgentTurnTraceOutcome } from '../agentTurnTraceStore';
 import { createFakeSupabase } from './fakeSupabase';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
@@ -174,5 +174,88 @@ describe('memória de contexto e traces do agente', () => {
     expect(tracesA[0].needs_human_confirmation).toBe(true);
     expect(tracesB).toHaveLength(1);
     expect(tracesB[0].router_decision).toBe('faq');
+  });
+
+  /**
+   * TASK-0444 (achado real durante a auditoria de rastreabilidade): antes
+   * desta correção, `message_id` usava a mesma sanitização de texto livre
+   * dos outros campos, que descarta qualquer valor contendo "wamid." — o
+   * formato real de id de mensagem do canal Meta. Confirmado com consulta
+   * somente leitura em produção (tenant Monique — Evolution): 0 de 929
+   * traces tinham `message_id` no formato wamid, ou seja, a correlação por
+   * mensagem estava quebrada pra esse canal desde que a tabela existe.
+   */
+  it('persiste message_id no formato real do canal Meta ("wamid.…"), que antes era descartado por engano', async () => {
+    const trace = await recordAgentTurnTrace({
+      tenantId: TENANT_A,
+      phone: PHONE,
+      messageId: 'wamid.HBgLNTk1OTgxMTExMTEVAgASGBQzQUIxOTQ=',
+      routerDecision: 'faq',
+      contextPackVersion: 'contact-context-v1',
+      needsHumanConfirmation: false,
+    });
+
+    expect(trace.message_id).toBe('wamid.HBgLNTk1OTgxMTExMTEVAgASGBQzQUIxOTQ=');
+  });
+
+  describe('updateAgentTurnTraceOutcome — status de revisão/envio (TASK-0444)', () => {
+    it('atualiza review_status/final_send_status/output_message_ids sem alterar os demais campos do trace', async () => {
+      await recordAgentTurnTrace({
+        tenantId: TENANT_A,
+        phone: PHONE,
+        messageId: 'wamid.msg-1',
+        routerDecision: 'faq',
+        contextPackVersion: 'contact-context-v1',
+        needsHumanConfirmation: false,
+        outcome: 'reply_ready',
+      });
+
+      await updateAgentTurnTraceOutcome({
+        tenantId: TENANT_A,
+        messageId: 'wamid.msg-1',
+        reviewStatus: 'approved_with_correction',
+        finalSendStatus: 'sent',
+        outputMessageIds: ['wa-1-abc', 'wa-2-def'],
+      });
+
+      const [trace] = await listAgentTurnTraces(TENANT_A, PHONE);
+      expect(trace.review_status).toBe('approved_with_correction');
+      expect(trace.final_send_status).toBe('sent');
+      expect(trace.output_message_ids).toEqual(['wa-1-abc', 'wa-2-def']);
+      // Campos gravados no insert original continuam intactos.
+      expect(trace.router_decision).toBe('faq');
+      expect(trace.outcome).toBe('reply_ready');
+    });
+
+    it('nunca atualiza o trace de outro tenant com o mesmo message_id', async () => {
+      await recordAgentTurnTrace({
+        tenantId: TENANT_A,
+        phone: PHONE,
+        messageId: 'wamid.shared',
+        routerDecision: 'faq',
+        contextPackVersion: 'contact-context-v1',
+        needsHumanConfirmation: false,
+      });
+      await recordAgentTurnTrace({
+        tenantId: TENANT_B,
+        phone: PHONE,
+        messageId: 'wamid.shared',
+        routerDecision: 'faq',
+        contextPackVersion: 'contact-context-v1',
+        needsHumanConfirmation: false,
+      });
+
+      await updateAgentTurnTraceOutcome({ tenantId: TENANT_A, messageId: 'wamid.shared', reviewStatus: 'blocked', finalSendStatus: 'not_sent_blocked' });
+
+      const [traceA] = await listAgentTurnTraces(TENANT_A, PHONE);
+      const [traceB] = await listAgentTurnTraces(TENANT_B, PHONE);
+      expect(traceA.review_status).toBe('blocked');
+      expect(traceB.review_status).toBeUndefined();
+    });
+
+    it('não lança quando não existe trace correspondente (ex: insert original falhou) nem quando messageId está vazio', async () => {
+      await expect(updateAgentTurnTraceOutcome({ tenantId: TENANT_A, messageId: 'sem-trace-nenhum', reviewStatus: 'blocked' })).resolves.toBeUndefined();
+      await expect(updateAgentTurnTraceOutcome({ tenantId: TENANT_A, messageId: '', reviewStatus: 'blocked' })).resolves.toBeUndefined();
+    });
   });
 });

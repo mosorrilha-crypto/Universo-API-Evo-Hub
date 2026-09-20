@@ -29,6 +29,7 @@ import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnaly
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolveTenantByInstagramAccountId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
+import { updateAgentTurnTraceOutcome } from '../services/agentTurnTraceStore';
 import { isPlausiblePersonalName } from '../services/contactNameGuard';
 import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { createQualityReview, recordQualityAuditEvent } from '../services/qualityAuditStore';
@@ -405,6 +406,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           emitAiReplyStatus(tenantId, phone, 'safety_blocked');
           emitAiReplyStatus(tenantId, phone, 'escalated');
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+          if (messageId) {
+            await updateAgentTurnTraceOutcome({ tenantId, messageId, reviewStatus: 'blocked', finalSendStatus: 'not_sent_blocked' }).catch((err) =>
+              console.warn(`⚠️  [Trace] tenant=${tenantId} falha não bloqueante ao atualizar status de entrega do trace:`, (err as Error).message)
+            );
+          }
           return;
         }
         // TASK-0441 (matriz de decisão de intenção de pagamento aprovada
@@ -445,6 +451,14 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           console.warn(`⚠️ [Agenda pós-revisão] tenant=${tenantId} nenhuma resposta foi enviada porque a ação aprovada falhou: ${reason}`);
           emitAiReplyStatus(tenantId, phone, 'delivery_failed');
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+          if (messageId) {
+            await updateAgentTurnTraceOutcome({
+              tenantId,
+              messageId,
+              reviewStatus: safety.correctedBubbles ? 'approved_with_correction' : 'approved',
+              finalSendStatus: 'not_sent_calendar_error',
+            }).catch((err) => console.warn(`⚠️  [Trace] tenant=${tenantId} falha não bloqueante ao atualizar status de entrega do trace:`, (err as Error).message));
+          }
           return;
         }
         if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
@@ -465,9 +479,16 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
             console.warn(`⚠️ [Mídia pós-revisão] tenant=${tenantId} falha ao enviar ${result.deferredMediaAction.kind} de "${result.deferredMediaAction.mediaName}" pra ${phone}: ${mediaExecution.error || 'motivo desconhecido'}`);
           }
         }
+        // TASK-0444: ids gerados aqui (em vez de deixar recordOutgoingMessage
+        // gerar o dela mesma) só pra poder correlacionar, no trace do agente,
+        // quais mensagens de saída de verdade vieram desta decisão — nunca
+        // usados pra nenhuma outra lógica de envio.
+        const sentMessageIds: string[] = [];
         try {
           await sendBubbles(channel, phone, bubblesToSend, async (bubbleText) => {
-            await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
+            const outgoingId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai', undefined, undefined, outgoingId);
+            sentMessageIds.push(outgoingId);
             console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
           }, messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
         } catch (sendError: any) {
@@ -481,7 +502,25 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           console.warn(`⚠️ [Agenda pós-envio] tenant=${tenantId} ${compensation}`);
           emitAiReplyStatus(tenantId, phone, 'delivery_failed');
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+          if (messageId) {
+            await updateAgentTurnTraceOutcome({
+              tenantId,
+              messageId,
+              reviewStatus: safety.correctedBubbles ? 'approved_with_correction' : 'approved',
+              finalSendStatus: 'send_failed',
+              outputMessageIds: sentMessageIds,
+            }).catch((err) => console.warn(`⚠️  [Trace] tenant=${tenantId} falha não bloqueante ao atualizar status de entrega do trace:`, (err as Error).message));
+          }
           return;
+        }
+        if (messageId) {
+          await updateAgentTurnTraceOutcome({
+            tenantId,
+            messageId,
+            reviewStatus: safety.correctedBubbles ? 'approved_with_correction' : 'approved',
+            finalSendStatus: 'sent',
+            outputMessageIds: sentMessageIds,
+          }).catch((err) => console.warn(`⚠️  [Trace] tenant=${tenantId} falha não bloqueante ao atualizar status de entrega do trace:`, (err as Error).message));
         }
         if (pendingGuidance) {
           await markOperatorGuidanceConsumed(tenantId, pendingGuidance.id);
