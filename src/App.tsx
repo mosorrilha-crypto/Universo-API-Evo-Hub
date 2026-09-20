@@ -1678,7 +1678,7 @@ export const App: React.FC = () => {
         <LazyTabErrorBoundary>
         {/* Toast Alert */}
         {toastMsg && (
-          <div className="app-toast fixed right-3 top-3 z-50 flex items-center gap-2 rounded-xl border border-emerald-400 bg-emerald-600 px-3 py-2 text-xs font-bold text-slate-950 shadow-xl animate-fade-in sm:right-4 sm:top-4">
+          <div className="app-toast fixed right-3 top-3 z-[80] flex items-center gap-2 rounded-xl border border-emerald-400 bg-emerald-600 px-3 py-2 text-xs font-bold text-slate-950 shadow-xl animate-fade-in sm:right-4 sm:top-4">
             <span>{toastMsg}</span>
           </div>
         )}
