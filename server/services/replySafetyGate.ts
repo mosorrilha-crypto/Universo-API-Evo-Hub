@@ -58,6 +58,16 @@ export interface ReplySafetyVerdict {
    * = nenhuma correção, comportamento normal (usa o rascunho original).
    */
   correctedBubbles?: string[];
+  /**
+   * TASK-0441 — quando presente e true, o chamador (webhooks.ts) deve
+   * escalar para revisão humana em paralelo ao envio das correctedBubbles
+   * (mesmo padrão já usado pra needsHumanConfirmation de agendamento: o
+   * envio automático acontece normalmente, e uma escalação adicional avisa
+   * o operador). Hoje só ocorre no caso de comprovante mencionado —
+   * approved:true com um reconhecimento neutro, mas ainda exige
+   * conferência humana antes de qualquer confirmação real de pagamento.
+   */
+  stillRequiresHumanReview?: boolean;
 }
 
 export interface ReplySuggestionInput {
@@ -137,10 +147,50 @@ function pushesBooking(text: string): boolean {
  * como contendo dado de pagamento sensível e escalada pra revisão humana à
  * toa. Trocado pelo padrão específico "sena" (sem curinga), igual ao já
  * usado e testado em `escalationStore.ts`'s `isPaymentRelated`.
+ *
+ * TASK-0441 (19/09/2026, auditoria + matriz de decisão de intenção de
+ * pagamento aprovada pelo dono do negócio): dado real de produção (tenant
+ * Monique — Evolution) confirmou que "Puedo con tarjeta de credito
+ * pagarte" bloqueava um rascunho que já era uma resposta de política
+ * segura, mesmo sem nenhuma ação de pagamento real ocorrendo. "tarjeta"/
+ * "cartao" e "sena" removidos daqui pelo mesmo motivo: sozinhos, sem
+ * nenhuma palavra de AÇÃO de pagamento junto (pago/transferência/
+ * comprobante/depósito), eles indicam só uma PERGUNTA de política ("posso
+ * pagar com cartão?", "quanto é a seña?") — política agora confirmada pelo
+ * dono do negócio (cartão nunca é aceito; valor/condição da seña pode ser
+ * informado direto pela base de conhecimento), então a resposta correta é
+ * sempre a mesma informação de política, sem precisar de revisão humana.
+ * Uma confirmação de pagamento real continua batendo em outra palavra da
+ * lista (ex: "ya pagué la seña" bate em "pague", "te mando el comprobante"
+ * bate em "comprobante") — nenhum caso de confirmação real deixou de ser
+ * coberto. Também fecha uma lacuna de sub-detecção achada na mesma
+ * auditoria: nenhuma conjugação de "transferir" fora do infinitivo/
+ * substantivo (ex: "Ya transferí") era reconhecida — adicionadas as
+ * conjugações do pretérito.
  */
 function isPaymentOrSensitive(text: string): boolean {
-  return /\b(pago|pague|transferencia|transferir|comprobante|comprovante|deposito|sena|tarjeta|cartao|cedula|documento|contrasena|senha)\b/i.test(normalize(text));
+  return /\b(pago|pague|transferencia|transferir|transferi|transferiste|transferimos|transfirio|transfirieron|comprobante|comprovante|deposito|cedula|documento|contrasena|senha)\b/i.test(normalize(text));
 }
+
+/**
+ * TASK-0441: só as duas palavras que indicam um comprovante sendo
+ * mencionado/enviado — usado para decidir se o bloqueio de pagamento pode
+ * enviar um reconhecimento neutro automático (aprovado pelo dono do
+ * negócio) em vez de ficar em silêncio total até um humano responder. Não
+ * cobre "pago"/"pague"/"transferi" sozinhos (sem comprovante) — para esses,
+ * o comportamento permanece o mesmo de antes (bloqueio silencioso).
+ */
+function mentionsPaymentReceipt(text: string): boolean {
+  return /\b(comprobante|comprovante)\b/i.test(normalize(text));
+}
+
+/**
+ * TASK-0441: texto aprovado pelo dono do negócio (item 6 da matriz de
+ * decisão) para quando a cliente diz que já mandou/vai mandar o
+ * comprovante — reconhece o recebimento sem confirmar pagamento nem turno,
+ * já que a verificação real ainda depende de um humano.
+ */
+export const PAYMENT_RECEIPT_ACKNOWLEDGMENT_TEXT = 'Perfecto, quedo atenta 😊 En cuanto lo verifiquemos te confirmo el turno.';
 
 /**
  * Sobreposição de palavras (Jaccard) — pega repetição quase igual
@@ -216,6 +266,25 @@ function ruleVerdict(input: ReplySafetyInput): ReplySafetyVerdict | null {
     return { approved: false, source: 'rules', severity: 'medium', reason: 'A resposta tenta conduzir para agenda após uma pergunta somente informativa.' };
   }
   if (isPaymentOrSensitive(input.customerMessage)) {
+    // TASK-0441 (matriz de decisão aprovada pelo dono do negócio, item 6):
+    // quando a cliente menciona explicitamente um comprovante, a resposta
+    // correta não é ficar em silêncio total até um humano responder — é
+    // reconhecer o recebimento sem confirmar pagamento nem turno, e AINDA
+    // ASSIM escalar para conferência humana antes de qualquer confirmação
+    // real (stillRequiresHumanReview, tratado em webhooks.ts). Outras
+    // menções sensíveis (pago/pague/transferí sozinhos, dados de
+    // senha/documento) continuam com o bloqueio silencioso de antes — não
+    // houve aprovação de negócio pra elas ainda.
+    if (mentionsPaymentReceipt(input.customerMessage)) {
+      return {
+        approved: true,
+        source: 'rules',
+        severity: 'medium',
+        reason: `${PAYMENT_SENSITIVE_ESCALATION_REASON} Comprovante mencionado: reconhecimento automático enviado (aprovado pelo dono do negócio), aguardando conferência humana antes de confirmar pagamento/turno.`,
+        correctedBubbles: [PAYMENT_RECEIPT_ACKNOWLEDGMENT_TEXT],
+        stillRequiresHumanReview: true,
+      };
+    }
     return { approved: false, source: 'rules', severity: 'high', reason: PAYMENT_SENSITIVE_ESCALATION_REASON };
   }
   return null;
