@@ -145,6 +145,23 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(userContent).not.toContain('REGRAS DE ESTILO');
   });
 
+  /**
+   * TASK-0444 (20/09/2026): regressão de prompt garantindo que a regra de
+   * continuidade de rajada (serviço dito numa mensagem, preço perguntado na
+   * seguinte — achado real, tenant Monique) continua presente no
+   * systemInstruction. Não testa se o modelo de fato segue a regra (isso
+   * depende do LLM real, fora do escopo de um teste unitário com AI mockada)
+   * — só que a instrução chega até ele.
+   */
+  it('inclui a regra de continuidade de rajada (serviço já dito numa mensagem anterior + preço pedido na seguinte)', async () => {
+    const { ai, calls } = makeFakeAi();
+
+    await generateAutoReplyForText('tenant-a', ai, 'quanto custa?', 'Cliente Teste', undefined, undefined);
+
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('trate as duas como uma coisa só');
+  });
+
   it('usa o override da Camada 1 salvo por um saas_admin (global_prompt_layer) em vez do texto padrão hardcoded, quando existir', async () => {
     const customGlobalLayer = 'REGRA CUSTOMIZADA DE TESTE: sempre responda em maiúsculas.';
     getGlobalPromptLayerOverride.mockResolvedValueOnce(customGlobalLayer);
