@@ -41,6 +41,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
     <div
       key={lead.id}
       onClick={onSelect}
+      data-testid="conversation-row"
       className={`px-3 py-2.5 transition-colors cursor-pointer relative flex items-start space-x-3 ${
         isSelected
           ? 'bg-[var(--surface-raised)] border-l-4 border-[var(--action)]'
