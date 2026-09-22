@@ -2937,9 +2937,34 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   {(() => { const prod = selectedProduct; return (<>
                   <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-3 lg:hidden">
                     <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wide text-emerald-300">Editar produto</p><p className="truncate text-sm font-bold text-white">{prod.name}</p></div>
-                    <button type="button" onClick={() => setSelectedProductId(null)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[10px] font-bold text-slate-200 hover:bg-slate-800"><X className="h-3.5 w-3.5" /> Fechar</button>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleDuplicateProduct(prod.id)}
+                        className="rounded-lg border border-slate-700 p-1.5 text-slate-400 hover:bg-slate-800 hover:text-emerald-400"
+                        title={t('kbProductDuplicate')}
+                      >
+                        <FileCheck className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteProduct(prod.id)}
+                        className="rounded-lg border border-slate-700 p-1.5 text-slate-400 hover:bg-slate-800 hover:text-red-400"
+                        title={t('kbProductDelete')}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button type="button" onClick={() => setSelectedProductId(null)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[10px] font-bold text-slate-200 hover:bg-slate-800"><X className="h-3.5 w-3.5" /> Fechar</button>
+                    </div>
                   </div>
-                  <div className="absolute top-3 right-3 z-10 flex items-center gap-0.5">
+                  {/* TASK-0445 (achado real, print anotado: "estes botão estão
+                      encavalados") — este grupo posicionado (absolute) e a
+                      barra "Fechar" acima disputavam o mesmo canto superior
+                      direito no mobile, ficando visualmente empilhados.
+                      Duplicar/excluir já entraram na barra "Fechar" acima
+                      pro mobile; aqui fica só pro desktop, onde não há
+                      barra nenhuma competindo por esse espaço. */}
+                  <div className="hidden lg:flex absolute top-3 right-3 z-10 items-center gap-0.5">
                     <button
                       type="button"
                       onClick={() => handleDuplicateProduct(prod.id)}
