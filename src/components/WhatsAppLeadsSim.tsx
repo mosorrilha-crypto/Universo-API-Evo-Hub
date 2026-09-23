@@ -6011,8 +6011,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     return (
                       <React.Fragment key={msg.id}>
                         {shouldShowDateSeparator && dateLabel && (
-                          <div className="flex justify-center py-1" role="separator" aria-label={dateLabel}>
-                            <span className="rounded-full bg-[#202c33]/90 px-3 py-1 text-[10px] font-semibold text-slate-400 backdrop-blur-sm">
+                          // Pedido direto (print de referência do WhatsApp nativo):
+                          // a data grudada no topo enquanto rola, não só uma marca
+                          // que passa e some — `sticky top-0` faz o pill do dia atual
+                          // ficar fixo na borda de cima do scroll até o próximo
+                          // separador (do dia seguinte) empurrá-lo, mesmo
+                          // comportamento nativo do WhatsApp/Telegram. z-10 e fundo
+                          // mais opaco (era /90, virou sólido) porque agora ele fica
+                          // por cima das bolhas rolando por baixo, não só entre elas.
+                          <div className="sticky top-0 z-10 flex justify-center py-1" role="separator" aria-label={dateLabel}>
+                            <span className="rounded-full bg-[#233138] px-3 py-1 text-[10px] font-semibold text-slate-300 shadow-md backdrop-blur-sm">
                               {dateLabel}
                             </span>
                           </div>
