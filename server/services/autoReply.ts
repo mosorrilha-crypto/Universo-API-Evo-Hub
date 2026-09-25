@@ -1252,11 +1252,44 @@ const CONFIRMATION_CLAIM_PATTERNS = [
   /el horario es tuyo/i,
   /(agendamento|hor[áa]rio|turno|reserva) (est[áa] )?confirmad[oa]/i,
   /confirmad[oa] (tu|o seu) (turno|agendamento|hor[áa]rio)/i,
+  // TASK-0447 (achado real em produção, 23/09/2026, cliente "Mika", tenant
+  // Monique — Evolution): "Te anoto para mañana jueves a las 13:30 hs" não
+  // usa nenhuma palavra literal de "confirmado"/"agendado" (as únicas que os
+  // padrões acima cobriam), mas pro cliente comum tem o mesmo efeito prático
+  // de uma confirmação — e criar_agendamento não chegou a rodar nesta
+  // conversa (nenhuma linha em appointments/pre_reservations pra ela), então
+  // o gate abaixo nunca corrigiu o texto. Mesma classe de bug já documentada
+  // pra "Mabel" em 19/08/2026 (ver comentário grande mais abaixo), só que com
+  // uma frase que escapava da lista de padrões.
+  /te anoto/i,
+  /ya (te )?anot[eé]/i,
+  /qued[aá]s? anotad[oa]/i,
 ];
 
 /** true quando o texto afirma que o turno/agendamento já está confirmado — ver comentário acima. */
 function containsPrematureBookingConfirmation(text: string): boolean {
   return CONFIRMATION_CLAIM_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
+ * TASK-0447 — segundo sinal, mais forte que os padrões de frase acima:
+ * detecta o pedido de transferir a seña e mandar o comprovante, algo que só
+ * deveria acontecer LOGO DEPOIS de criar_agendamento ter rodado com sucesso
+ * nesta mensagem (é a própria ferramenta que instrui o modelo a pedir isso —
+ * ver AGENDAMENTO_TOOLS acima). Cobre qualquer forma de "te anoto"/"ya
+ * agendé"/"perfecto, reservado" que o texto use pra soar como confirmação,
+ * sem depender de uma lista fechada de frases: pedir a seña sem nenhum
+ * agendamento real por trás é sempre prematuro, seja qual for a frase usada.
+ * "seña"/"señal" sozinho não basta (uma resposta de FAQ explicando a
+ * política de sinal, sem pedir transferência agora, é legítima) — exige
+ * também um pedido concreto de transferência/comprovante na mesma mensagem.
+ */
+const MENTIONS_DEPOSIT_PATTERN = /se[nñ]al?\b/i;
+const MENTIONS_TRANSFER_OR_PROOF_PATTERN = /comprobante|transfer/i;
+
+/** true quando o texto pede a transferência da seña + comprovante, sinal de que o modelo está tratando o horário como reservado — ver comentário acima. */
+function containsUnbackedDepositRequest(text: string): boolean {
+  return MENTIONS_DEPOSIT_PATTERN.test(text) && MENTIONS_TRANSFER_OR_PROOF_PATTERN.test(text);
 }
 
 const STANDARD_OFFER_TIMES = ['08:30', '13:30', '16:30', '18:30'];
@@ -2638,11 +2671,12 @@ export async function generateAutoReplyForText(
         || currentAppointment.paymentStatus === 'pending_verification'
         || currentAppointment.paymentStatus === 'rejected'
       );
-      if (!currentAppointment && !deferredCalendarActions.length && containsPrematureBookingConfirmation(bubbles.join(' '))) {
-        console.warn(`⚠️  [Gate de agendamento inexistente] tenant=${tenantId} modelo confirmou/reservou o turno em texto mas nenhum agendamento real existe pra este contato — corrigindo resposta.`);
+      const bubblesText = bubbles.join(' ');
+      if (!currentAppointment && !deferredCalendarActions.length && (containsPrematureBookingConfirmation(bubblesText) || containsUnbackedDepositRequest(bubblesText))) {
+        console.warn(`⚠️  [Gate de agendamento inexistente] tenant=${tenantId} modelo confirmou/reservou o turno em texto (ou pediu a seña) mas nenhum agendamento real existe pra este contato — corrigindo resposta.`);
         bubbles = ['Dejame confirmar bien la disponibilidad antes de asegurarte el turno — en un instante te aviso si quedó todo listo.'];
         quickReplyOptions = undefined; // bubbles mudou — os botões do fallback anterior (se houver) não fazem mais sentido pra este texto novo
-      } else if (paymentUnresolved && containsPrematureBookingConfirmation(bubbles.join(' '))) {
+      } else if (paymentUnresolved && containsPrematureBookingConfirmation(bubblesText)) {
         console.warn(`⚠️  [Gate de pagamento pendente] tenant=${tenantId} modelo confirmou o turno em texto mas o pagamento ainda está "${currentAppointment.paymentStatus}" — corrigindo resposta.`);
         bubbles = [currentAppointment.paymentStatus === 'awaiting_payment'
           ? 'Ese horario queda reservado para vos hasta que llegue tu comprobante y sea aprobado — todavía no está confirmado, así que enviálo cuanto antes para no perderlo.'
