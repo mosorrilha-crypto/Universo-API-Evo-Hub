@@ -880,11 +880,44 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
               })).catch((err) => console.warn(`⚠️ [Auditoria] Não foi possível registrar a revisão do comprovante ${msg.messageId}:`, err?.message || err));
             })
             .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
+        } else if (msg.type === 'sticker') {
+          // Achado real (pedido direto: "ajusta pra abrir figurinhas") —
+          // antes disso o sticker virava só o rótulo de texto "🏷️ Figurinha
+          // recebida" (ramo do "else" abaixo), sem a mídia — o operador não
+          // conseguia abrir/ver a figurinha de verdade. Grava como type:'image'
+          // (o MessageType do painel só tem text/audio/image/file — não
+          // existe um bloco de UI próprio pra sticker) pra reaproveitar o
+          // MESMO player de imagem já usado pra foto (RealClientImage, GET
+          // /api/media/:messageId), sem precisar de nenhuma mudança no
+          // painel. downloadMetaMedia/downloadEvolutionMedia já são
+          // genéricos por media_id/message key — funcionam pra sticker
+          // (webp) exatamente como já funcionam pra foto. Deliberadamente
+          // SEM a análise de comprovante de pagamento acima (isso é
+          // específico de foto sendo comprovante — uma figurinha nunca é).
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: friendlyLabelForOtherType('sticker'), timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
+          const metaSticker = msg.metaSticker;
+          const stickerDownloadPromise = metaSticker
+            ? withMediaDownloadRetry(() => downloadMetaMedia(metaSticker.mediaId, resolvedTenant.metaAccessToken))
+            : msg.evolutionSticker
+            ? withMediaDownloadRetry(() =>
+                downloadEvolutionMedia(
+                  { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
+                  resolvedTenant.evolutionInstanceName,
+                  resolvedTenant.evolutionApiUrl,
+                  resolvedTenant.evolutionApiKey
+                )
+              )
+            : null;
+          if (stickerDownloadPromise) {
+            stickerDownloadPromise
+              .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
+              .catch((err) => console.warn(`❌ [Figurinha] Falha ao baixar sticker de ${msg.from}:`, err.message));
+          }
         } else {
-          // Tipo de mensagem que não geramos resposta automática (sticker,
-          // vídeo/gif, localização, reação, contato etc.) — grava com um
-          // rótulo que descreve o que realmente chegou, em vez do
-          // "[sticker]"/"[video]" cru de antes (achado real em produção).
+          // Tipo de mensagem que não geramos resposta automática (vídeo/gif,
+          // localização, reação, contato etc.) — grava com um rótulo que
+          // descreve o que realmente chegou, em vez do "[video]" cru de
+          // antes (achado real em produção).
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
         }
           }
