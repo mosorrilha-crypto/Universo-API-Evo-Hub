@@ -3004,46 +3004,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       return dateB - dateA;
     });
 
-  // Regra R3 do handoff: a fila é organizada pelo tempo que o cliente espera
-  // por uma resposta humana. O modelo atual não persiste waitingSince, então
-  // ele é derivado com segurança da última mensagem do cliente sem resposta.
-  type WaitingGroupId = 'over30' | 'under30' | 'awaitingClient';
-  const getWaitingGroup = (lead: LeadInfo): WaitingGroupId => {
-    const latestMessage = lead.messages?.[lead.messages.length - 1];
-    if (!latestMessage || latestMessage.sender !== 'lead') return 'awaitingClient';
-
-    const waitingSince = Date.parse(latestMessage.timestamp);
-    // Em registros legados cujo horário não é ISO, prioriza não lidas sem
-    // inventar uma data: elas entram em "até 30 min" até a próxima mensagem.
-    if (Number.isNaN(waitingSince)) return getUnreadCount(lead) > 0 ? 'under30' : 'awaitingClient';
-    return Date.now() - waitingSince > 30 * 60 * 1000 ? 'over30' : 'under30';
-  };
-
-  // Achado real, pedido direto (print anotado, 16/09/2026): 'over30'/
-  // 'under30' usavam hex fixo (#231412/#231C10, os valores de
-  // --danger-surface/--pending-surface só do tema ESCURO) em vez dos tokens
-  // — no claro (e no azul/limpo) isso nunca mudava, sobrava uma tarja quase
-  // preta destoando de qualquer paleta clara. 'awaitingClient' ao lado já
-  // fazia certo (var(--text-label)/var(--surface-raised)); só faltava estas
-  // duas seguirem o mesmo padrão.
-  const waitingGroupMeta: Record<WaitingGroupId, { label: string; className: string }> = {
-    over30: { label: t('chatWaitingOver30'), className: 'text-[var(--danger)] bg-[var(--danger-surface)]' },
-    under30: { label: t('chatWaitingUnder30'), className: 'text-[var(--pending)] bg-[var(--pending-surface)]' },
-    awaitingClient: { label: t('chatWaitingAwaitingClient'), className: 'text-[var(--text-label)] bg-[var(--surface-raised)]' },
-  };
-
-  const waitingGroups = (['over30', 'under30', 'awaitingClient'] as WaitingGroupId[]).map((id) => ({
-    id,
-    leads: filteredLeads
-      .filter((lead) => getWaitingGroup(lead) === id)
-      .sort((a, b) => {
-        if (id === 'awaitingClient') return 0;
-        const timeA = Date.parse(a.messages?.[a.messages.length - 1]?.timestamp || '') || 0;
-        const timeB = Date.parse(b.messages?.[b.messages.length - 1]?.timestamp || '') || 0;
-        return timeA - timeB;
-      }),
-  }));
-
   // Seleciona a conversa e, se for real e tiver mensagens não lidas (contagem
   // real vinda do servidor E/OU marcação manual do operador via menu ⋮),
   // zera os dois: manuallyUnread (PATCH /state, já existente) e unreadCount
@@ -5118,23 +5078,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             )}
 
             {filteredLeads.length > 0 ? (
-              waitingGroups.map((group) => group.leads.length > 0 && (
-                <section key={group.id} aria-label={waitingGroupMeta[group.id].label}>
-                  {/* TASK-0279 (pedido direto, 04/09/2026: "essa barrinha de
-                      aguardando clientes não é muito útil") — a barra
-                      "AGUARDANDO CLIENTE" some; sem ação/urgência pra
-                      sinalizar (é só "esperando o lead responder"), a
-                      etiqueta só ocupava espaço. As barras de espera real
-                      (mais de 30min / até 30min) continuam, pois essas sim
-                      indicam algo que precisa de atenção agora. */}
-                  {group.id !== 'awaitingClient' && (
-                    <div className={`px-3 py-2 text-[10px] font-bold tracking-[0.11em] ${waitingGroupMeta[group.id].className}`}>
-                      {waitingGroupMeta[group.id].label} · {group.leads.length}
-                    </div>
-                  )}
-                  {group.leads.map((lead) => renderLeadRow(lead))}
-                </section>
-              ))
+              // Achado real, pedido direto: os 3 grupos de espera (mais de
+              // 30min / até 30min / aguardando cliente) escondiam mensagens
+              // novas de conversas sem nenhuma pendência de resposta atrás
+              // das que estavam "esperando" — uma conversa fixada mas sem
+              // ninguém esperando ficava acima de uma não fixada com
+              // mensagem muito mais recente. Lista única, na mesma ordem já
+              // calculada em filteredLeads (fixadas primeiro, depois por
+              // mensagem mais recente) — sem dividir por urgência de resposta.
+              filteredLeads.map((lead) => renderLeadRow(lead))
             ) : (
               <div className="p-8 text-center text-xs text-slate-500">
                 {t('selectConversation')}
