@@ -3,6 +3,12 @@
  * "[sticker]" cru, sem sentido nenhum pro operador — e a conversa nunca
  * recebia resposta nenhuma (comportamento mantido de propósito, mas o
  * rótulo precisa dizer o que realmente chegou).
+ *
+ * Sticker deixou de ser um tipo "other" genérico (achado real, pedido
+ * direto: "ajusta pra abrir figurinhas") — agora tem type:'sticker' próprio
+ * com metaSticker/evolutionSticker (mesmo formato de metaImage/evolutionImage),
+ * baixado e servido como imagem de verdade (GET /api/media/:messageId), em
+ * vez de só um rótulo de texto sem a mídia. Ver server/routes/webhooks.ts.
  */
 import { describe, expect, it } from 'vitest';
 import { parseMetaWebhookPayload, friendlyLabelForOtherType } from '../webhookParsers';
@@ -14,11 +20,11 @@ function metaPayload(message: any) {
   };
 }
 
-describe('parseMetaWebhookPayload — tipos não tratados (sticker, video/gif, etc.)', () => {
-  it('captura rawType="sticker" pra mensagem de figurinha', () => {
+describe('parseMetaWebhookPayload — tipos não tratados (video/gif, etc.)', () => {
+  it('captura type="sticker" com metaSticker (media_id + mime_type) pra mensagem de figurinha', () => {
     const [msg] = parseMetaWebhookPayload(metaPayload({ id: 'wamid-1', from: '595981234567', type: 'sticker', sticker: { id: 'stk-1', mime_type: 'image/webp' } }));
-    expect(msg.type).toBe('other');
-    expect(msg.rawType).toBe('sticker');
+    expect(msg.type).toBe('sticker');
+    expect(msg.metaSticker).toEqual({ mediaId: 'stk-1', mimeType: 'image/webp' });
   });
 
   it('captura rawType="video" pra vídeo/gif', () => {

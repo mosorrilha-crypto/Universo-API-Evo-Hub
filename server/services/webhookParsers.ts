@@ -17,8 +17,8 @@ export interface ParsedIncomingMessage {
   instanceName?: string;
   /** ID da conta Instagram que recebeu a mensagem (`entry[].id`) — equivalente ao phoneNumberId/instanceName acima, mas pra Instagram DM (Fase 1, 15/08/2026). Ausente em mensagens via WhatsApp. */
   instagramAccountId?: string;
-  type: 'audio' | 'text' | 'image' | 'other';
-  /** Tipo bruto do WhatsApp quando type==='other' (ex: "sticker", "video", "location", "contacts") — usado pra mostrar um rótulo específico no painel em vez de "[other]" genérico. Ver friendlyLabelForOtherType. */
+  type: 'audio' | 'text' | 'image' | 'sticker' | 'other';
+  /** Tipo bruto do WhatsApp quando type==='other' (ex: "video", "location", "contacts") — usado pra mostrar um rótulo específico no painel em vez de "[other]" genérico. Ver friendlyLabelForOtherType. */
   rawType?: string;
   text?: string;
   /** Legenda digitada junto da imagem (type === 'image', Meta `image.caption` ou Baileys `imageMessage.caption`) — achado real (28/08/2026): a legenda nunca era extraída do payload, então a mensagem gravada na conversa mostrava só "📷 Imagem recebida", descartando o texto que o cliente escreveu junto da foto. */
@@ -27,10 +27,14 @@ export interface ParsedIncomingMessage {
   metaAudio?: { mediaId: string; mimeType?: string };
   /** Presente quando type === 'image' via Meta Cloud API. */
   metaImage?: { mediaId: string; mimeType?: string };
+  /** Presente quando type === 'sticker' via Meta Cloud API — mesmo formato de metaImage (media_id + mime_type), baixado pelo mesmo downloadMetaMedia genérico. */
+  metaSticker?: { mediaId: string; mimeType?: string };
   /** Presente quando type === 'audio' via Evolution API. */
   evolutionAudio?: { url?: string; mediaKey?: string; mimeType?: string };
   /** true quando type === 'image' via Evolution API — sem URL/mediaKey úteis aqui (mídia ponta-a-ponta criptografada), o download reconstrói a message key a partir de messageId/from, mesmo padrão já usado pra evolutionAudio (ver downloadEvolutionMedia). */
   evolutionImage?: true;
+  /** true quando type === 'sticker' via Evolution API — mesmo mecanismo de download de evolutionImage (reconstrói a message key). */
+  evolutionSticker?: true;
   /** Presente quando a mensagem veio de um anúncio "Clique para WhatsApp" (Meta Cloud API) — usado pra atribuição real no Meta Conversions API (Epic 4.5.6). */
   referral?: { headline?: string; sourceId?: string; ctwaClid?: string };
   /** true quando o evento é fromMe (só Evolution API — Baileys espelha TODA atividade do número conectado, inclusive nosso próprio envio via API). Nunca deve disparar resposta automática/escalonamento — ver outboundEchoTracker.ts em webhooks.ts pra distinguir eco do nosso envio de mensagem mandada direto do celular. */
@@ -95,6 +99,8 @@ export function parseMetaWebhookPayload(body: any): ParsedIncomingMessage[] {
             metaImage: { mediaId: msg.image.id, mimeType: msg.image.mime_type },
             ...(typeof msg.image.caption === 'string' && msg.image.caption.trim() ? { caption: msg.image.caption.trim() } : {}),
           });
+        } else if (msg.type === 'sticker' && msg.sticker?.id) {
+          parsed.push({ ...base, type: 'sticker', metaSticker: { mediaId: msg.sticker.id, mimeType: msg.sticker.mime_type } });
         } else {
           parsed.push({ ...base, type: 'other', rawType: msg.type });
         }
@@ -308,9 +314,11 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
     }];
   }
 
-  const rawType = message.stickerMessage
-    ? 'sticker'
-    : message.videoMessage
+  if (message.stickerMessage) {
+    return [{ ...base, type: 'sticker', evolutionSticker: true }];
+  }
+
+  const rawType = message.videoMessage
     ? 'video'
     : message.locationMessage
     ? 'location'
