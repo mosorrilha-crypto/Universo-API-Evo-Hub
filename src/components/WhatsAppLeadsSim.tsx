@@ -652,6 +652,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Organização de conversas — arquivar, fixar, silenciar, não lida manual.
   // Metadados só do painel (ver server/services/conversationStore.ts).
   const [showArchived, setShowArchived] = useState(false);
+  // Renderização progressiva da lista de conversas (fase 2 do achado "app
+  // lento e travando", TASK-0450 fase 1 memoizou o cálculo/recálculo da
+  // lista — isto aqui ataca o outro lado: ter até ~560 linhas no DOM de uma
+  // vez só, mesmo as fora da tela, custa memória/pintura/reflow real.
+  // Decisão de escopo: avaliei virtualização de verdade (react-window/
+  // @tanstack/react-virtual, posicionamento absoluto + medição de altura
+  // por linha) e descartei — linhas têm altura variável (etiquetas da
+  // conversa podem quebrar em mais de uma linha), e sem um navegador real
+  // pra validar visualmente neste sandbox, o risco de sobrepor/cortar
+  // conteúdo na tela mais usada do sistema (atendimento ao vivo de tenant
+  // pagante) não compensa o ganho extra sobre esta alternativa mais simples.
+  // Em vez disso: renderiza só um lote inicial + carrega mais conforme o
+  // operador rola a lista pra baixo (mesmo padrão de "infinite scroll" já
+  // usado no histórico de mensagens — handleMessagesScroll). Zero mudança
+  // de estrutura DOM/CSS das linhas existentes, risco bem menor.
+  const CONVERSATION_LIST_BATCH_SIZE = 60;
+  const [visibleConversationCount, setVisibleConversationCount] = useState(CONVERSATION_LIST_BATCH_SIZE);
+  // Volta ao lote inicial quando o CONJUNTO filtrado muda de verdade (busca/
+  // etiqueta/aba) — não quando `leads` muda (polling/SSE a cada poucos
+  // segundos), senão a lista "encolheria" sozinha enquanto o operador rola.
+  useEffect(() => {
+    setVisibleConversationCount(CONVERSATION_LIST_BATCH_SIZE);
+  }, [searchQuery, labelFilter, activeTabFilter]);
+  const handleConversationListScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight > 600) return;
+    setVisibleConversationCount((prev) => (prev >= filteredLeads.length ? prev : prev + CONVERSATION_LIST_BATCH_SIZE));
+  };
   const [openMenuForLeadId, setOpenMenuForLeadId] = useState<string | null>(null);
   // Achado real em produção ("botão de excluir quebrado, conectado com o
   // outro botão de excluir"): o menu ⋮ do cabeçalho da conversa aberta
@@ -4093,9 +4121,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     () => archivedLeads.map((lead) => renderLeadRow(lead)),
     [archivedLeads, activeLeadId, flashLeadIds, openMenuForLeadId]
   );
+  // Renderização progressiva (ver visibleConversationCount acima): só as
+  // primeiras `visibleConversationCount` entram no DOM — o resto carrega
+  // conforme o operador rola a lista pra baixo.
+  const visibleFilteredLeads = useMemo(
+    () => filteredLeads.slice(0, visibleConversationCount),
+    [filteredLeads, visibleConversationCount]
+  );
   const filteredLeadRows = useMemo(
-    () => filteredLeads.map((lead) => renderLeadRow(lead)),
-    [filteredLeads, activeLeadId, flashLeadIds, openMenuForLeadId]
+    () => visibleFilteredLeads.map((lead) => renderLeadRow(lead)),
+    [visibleFilteredLeads, activeLeadId, flashLeadIds, openMenuForLeadId]
   );
 
   // Achado real, 29/08/2026 (pedido do dono do produto): no mobile, abrir
@@ -5082,7 +5117,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
 
           {/* WhatsApp Web Chat List */}
-          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
+          <div
+            className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin"
+            onScroll={handleConversationListScroll}
+          >
             {/* Seção "Arquivadas" — colapsável, fixa no topo da lista, igual ao WhatsApp Web real */}
             {archivedLeads.length > 0 && (
               <div className="border-b border-slate-800/40">
