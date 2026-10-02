@@ -652,6 +652,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Organização de conversas — arquivar, fixar, silenciar, não lida manual.
   // Metadados só do painel (ver server/services/conversationStore.ts).
   const [showArchived, setShowArchived] = useState(false);
+  // Renderização progressiva da lista de conversas (fase 2 do achado "app
+  // lento e travando", TASK-0450 fase 1 memoizou o cálculo/recálculo da
+  // lista — isto aqui ataca o outro lado: ter até ~560 linhas no DOM de uma
+  // vez só, mesmo as fora da tela, custa memória/pintura/reflow real.
+  // Decisão de escopo: avaliei virtualização de verdade (react-window/
+  // @tanstack/react-virtual, posicionamento absoluto + medição de altura
+  // por linha) e descartei — linhas têm altura variável (etiquetas da
+  // conversa podem quebrar em mais de uma linha), e sem um navegador real
+  // pra validar visualmente neste sandbox, o risco de sobrepor/cortar
+  // conteúdo na tela mais usada do sistema (atendimento ao vivo de tenant
+  // pagante) não compensa o ganho extra sobre esta alternativa mais simples.
+  // Em vez disso: renderiza só um lote inicial + carrega mais conforme o
+  // operador rola a lista pra baixo (mesmo padrão de "infinite scroll" já
+  // usado no histórico de mensagens — handleMessagesScroll). Zero mudança
+  // de estrutura DOM/CSS das linhas existentes, risco bem menor.
+  const CONVERSATION_LIST_BATCH_SIZE = 60;
+  const [visibleConversationCount, setVisibleConversationCount] = useState(CONVERSATION_LIST_BATCH_SIZE);
+  // Volta ao lote inicial quando o CONJUNTO filtrado muda de verdade (busca/
+  // etiqueta/aba) — não quando `leads` muda (polling/SSE a cada poucos
+  // segundos), senão a lista "encolheria" sozinha enquanto o operador rola.
+  useEffect(() => {
+    setVisibleConversationCount(CONVERSATION_LIST_BATCH_SIZE);
+  }, [searchQuery, labelFilter, activeTabFilter]);
+  const handleConversationListScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight > 600) return;
+    setVisibleConversationCount((prev) => (prev >= filteredLeads.length ? prev : prev + CONVERSATION_LIST_BATCH_SIZE));
+  };
   const [openMenuForLeadId, setOpenMenuForLeadId] = useState<string | null>(null);
   // Achado real em produção ("botão de excluir quebrado, conectado com o
   // outro botão de excluir"): o menu ⋮ do cabeçalho da conversa aberta
@@ -2914,7 +2942,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Conversas arquivadas saem da lista principal e ficam numa seção própria,
   // colapsável — igual à seção "Arquivadas" do WhatsApp Web real.
-  const archivedLeads = leads.filter((lead) => !!lead.archivedAt);
+  //
+  // Achado real, pedido direto ("o aplicativo está um pouco lento e
+  // travando"): sem useMemo, este filtro (e o de filteredLeads logo abaixo,
+  // bem mais caro — percorre mensagens inteiras pra busca por texto) rodava
+  // de novo a CADA renderização do componente, mesmo quando nada relevante
+  // mudou — ex: cada letra digitada no campo de resposta (setInputMessage,
+  // mesmo escopo deste componente) recalculava a lista de até ~560
+  // conversas inteira, à toa. Memoizado por `leads` (só recalcula quando a
+  // lista de conversas de fato muda — nova mensagem, SSE, poll de 8s).
+  const archivedLeads = useMemo(() => leads.filter((lead) => !!lead.archivedAt), [leads]);
 
   // Contagem real de não lidas: pra conversa real, vem de unreadCount
   // (calculado no backend a partir de last_read_at — ver
@@ -2951,8 +2988,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const windowClosedLeadsCount = leads.filter((lead) => (lead as any).isReal && !isWithin24hWindow(lead)).length;
   const windowOpenLeadsCount = leads.filter((lead) => (lead as any).isReal && isWithin24hWindow(lead)).length;
 
-  // Filtered Leads according to search and WhatsApp filter tabs
-  const filteredLeads = leads
+  // Filtered Leads according to search and WhatsApp filter tabs — memoizado
+  // pelo mesmo motivo de archivedLeads acima (este é o cálculo caro de
+  // verdade: busca por texto percorre TODAS as mensagens de TODOS os leads).
+  const filteredLeads = useMemo(() => leads
     .filter((lead) => {
       if (lead.archivedAt) return false;
 
@@ -3002,7 +3041,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       const dateB = new Date((b as any).updatedAtIso || b.timestamp).getTime();
       if (Number.isNaN(dateA) || Number.isNaN(dateB)) return 0;
       return dateB - dateA;
-    });
+    }), [leads, searchQuery, labelFilter, activeTabFilter]);
 
   // Seleciona a conversa e, se for real e tiver mensagens não lidas (contagem
   // real vinda do servidor E/OU marcação manual do operador via menu ⋮),
@@ -4071,6 +4110,29 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     );
   };
 
+  // Lista de elementos já renderizados — memoizada separadamente da função
+  // `renderLeadRow` acima (mesmo motivo do useMemo em archivedLeads/
+  // filteredLeads): sem isso, `filteredLeads.map(renderLeadRow)` reconstruía
+  // as até ~560 linhas do zero a cada renderização, mesmo quando nenhuma
+  // delas mudou de verdade (ex: digitar no campo de resposta). Memoizado
+  // pelas únicas coisas que `renderLeadRow` realmente lê fora do próprio
+  // `lead`: quem está selecionado/piscando/com o menu ⋮ aberto.
+  const archivedLeadRows = useMemo(
+    () => archivedLeads.map((lead) => renderLeadRow(lead)),
+    [archivedLeads, activeLeadId, flashLeadIds, openMenuForLeadId]
+  );
+  // Renderização progressiva (ver visibleConversationCount acima): só as
+  // primeiras `visibleConversationCount` entram no DOM — o resto carrega
+  // conforme o operador rola a lista pra baixo.
+  const visibleFilteredLeads = useMemo(
+    () => filteredLeads.slice(0, visibleConversationCount),
+    [filteredLeads, visibleConversationCount]
+  );
+  const filteredLeadRows = useMemo(
+    () => visibleFilteredLeads.map((lead) => renderLeadRow(lead)),
+    [visibleFilteredLeads, activeLeadId, flashLeadIds, openMenuForLeadId]
+  );
+
   // Achado real, 29/08/2026 (pedido do dono do produto): no mobile, abrir
   // "Ferramentas" (aba inferior) empurrava a lista de conversas inteira pra
   // baixo — o painel entrava no fluxo normal do documento, dentro do
@@ -5055,7 +5117,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
 
           {/* WhatsApp Web Chat List */}
-          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
+          <div
+            className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin"
+            onScroll={handleConversationListScroll}
+          >
             {/* Seção "Arquivadas" — colapsável, fixa no topo da lista, igual ao WhatsApp Web real */}
             {archivedLeads.length > 0 && (
               <div className="border-b border-slate-800/40">
@@ -5071,7 +5136,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 </button>
                 {showArchived && (
                   <div className="divide-y divide-slate-800/40">
-                    {archivedLeads.map((lead) => renderLeadRow(lead))}
+                    {archivedLeadRows}
                   </div>
                 )}
               </div>
@@ -5086,7 +5151,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               // mensagem muito mais recente. Lista única, na mesma ordem já
               // calculada em filteredLeads (fixadas primeiro, depois por
               // mensagem mais recente) — sem dividir por urgência de resposta.
-              filteredLeads.map((lead) => renderLeadRow(lead))
+              filteredLeadRows
             ) : (
               <div className="p-8 text-center text-xs text-slate-500">
                 {t('selectConversation')}
