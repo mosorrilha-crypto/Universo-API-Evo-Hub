@@ -2914,7 +2914,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Conversas arquivadas saem da lista principal e ficam numa seção própria,
   // colapsável — igual à seção "Arquivadas" do WhatsApp Web real.
-  const archivedLeads = leads.filter((lead) => !!lead.archivedAt);
+  //
+  // Achado real, pedido direto ("o aplicativo está um pouco lento e
+  // travando"): sem useMemo, este filtro (e o de filteredLeads logo abaixo,
+  // bem mais caro — percorre mensagens inteiras pra busca por texto) rodava
+  // de novo a CADA renderização do componente, mesmo quando nada relevante
+  // mudou — ex: cada letra digitada no campo de resposta (setInputMessage,
+  // mesmo escopo deste componente) recalculava a lista de até ~560
+  // conversas inteira, à toa. Memoizado por `leads` (só recalcula quando a
+  // lista de conversas de fato muda — nova mensagem, SSE, poll de 8s).
+  const archivedLeads = useMemo(() => leads.filter((lead) => !!lead.archivedAt), [leads]);
 
   // Contagem real de não lidas: pra conversa real, vem de unreadCount
   // (calculado no backend a partir de last_read_at — ver
@@ -2951,8 +2960,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const windowClosedLeadsCount = leads.filter((lead) => (lead as any).isReal && !isWithin24hWindow(lead)).length;
   const windowOpenLeadsCount = leads.filter((lead) => (lead as any).isReal && isWithin24hWindow(lead)).length;
 
-  // Filtered Leads according to search and WhatsApp filter tabs
-  const filteredLeads = leads
+  // Filtered Leads according to search and WhatsApp filter tabs — memoizado
+  // pelo mesmo motivo de archivedLeads acima (este é o cálculo caro de
+  // verdade: busca por texto percorre TODAS as mensagens de TODOS os leads).
+  const filteredLeads = useMemo(() => leads
     .filter((lead) => {
       if (lead.archivedAt) return false;
 
@@ -3002,7 +3013,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       const dateB = new Date((b as any).updatedAtIso || b.timestamp).getTime();
       if (Number.isNaN(dateA) || Number.isNaN(dateB)) return 0;
       return dateB - dateA;
-    });
+    }), [leads, searchQuery, labelFilter, activeTabFilter]);
 
   // Seleciona a conversa e, se for real e tiver mensagens não lidas (contagem
   // real vinda do servidor E/OU marcação manual do operador via menu ⋮),
@@ -4071,6 +4082,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     );
   };
 
+  // Lista de elementos já renderizados — memoizada separadamente da função
+  // `renderLeadRow` acima (mesmo motivo do useMemo em archivedLeads/
+  // filteredLeads): sem isso, `filteredLeads.map(renderLeadRow)` reconstruía
+  // as até ~560 linhas do zero a cada renderização, mesmo quando nenhuma
+  // delas mudou de verdade (ex: digitar no campo de resposta). Memoizado
+  // pelas únicas coisas que `renderLeadRow` realmente lê fora do próprio
+  // `lead`: quem está selecionado/piscando/com o menu ⋮ aberto.
+  const archivedLeadRows = useMemo(
+    () => archivedLeads.map((lead) => renderLeadRow(lead)),
+    [archivedLeads, activeLeadId, flashLeadIds, openMenuForLeadId]
+  );
+  const filteredLeadRows = useMemo(
+    () => filteredLeads.map((lead) => renderLeadRow(lead)),
+    [filteredLeads, activeLeadId, flashLeadIds, openMenuForLeadId]
+  );
+
   // Achado real, 29/08/2026 (pedido do dono do produto): no mobile, abrir
   // "Ferramentas" (aba inferior) empurrava a lista de conversas inteira pra
   // baixo — o painel entrava no fluxo normal do documento, dentro do
@@ -5071,7 +5098,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 </button>
                 {showArchived && (
                   <div className="divide-y divide-slate-800/40">
-                    {archivedLeads.map((lead) => renderLeadRow(lead))}
+                    {archivedLeadRows}
                   </div>
                 )}
               </div>
@@ -5086,7 +5113,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               // mensagem muito mais recente. Lista única, na mesma ordem já
               // calculada em filteredLeads (fixadas primeiro, depois por
               // mensagem mais recente) — sem dividir por urgência de resposta.
-              filteredLeads.map((lead) => renderLeadRow(lead))
+              filteredLeadRows
             ) : (
               <div className="p-8 text-center text-xs text-slate-500">
                 {t('selectConversation')}
