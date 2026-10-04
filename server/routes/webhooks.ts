@@ -833,15 +833,31 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
               // valor de paymentStatus).
               if (!appointment || (appointment.paymentStatus && appointment.paymentStatus !== 'awaiting_payment')) return;
               let receiptHint: string | undefined;
+              let analysis: Awaited<ReturnType<typeof analyzePaymentReceiptWithGemini>> = null;
               if (downloadPromise) {
                 try {
                   const downloaded = await downloadPromise;
-                  const analysis = await analyzePaymentReceiptWithGemini(getAi?.() ?? null, downloaded.base64, downloaded.mimeType);
+                  analysis = await analyzePaymentReceiptWithGemini(getAi?.() ?? null, downloaded.base64, downloaded.mimeType);
                   receiptHint = analysis?.hint || undefined;
                 } catch (err: any) {
                   console.warn(`❌ [Imagem] Falha ao analisar possível comprovante de ${msg.from}:`, err.message);
                 }
               }
+              // Achado real (04/10/2026, auditoria + relato direto do dono do
+              // produto: "fotos comuns estão sendo classificadas como
+              // comprovante"): a análise de conteúdo acima já calculava
+              // looksLikeReceipt, mas o resultado nunca era usado pra decidir
+              // nada — só o texto da dica (hint) entrava, cosmético. Resultado:
+              // QUALQUER foto (selfie, print qualquer, pet) chegando enquanto o
+              // agendamento está aguardando pagamento virava "possível
+              // comprovante", marcava pending_verification e escalava à toa.
+              // Só trata como comprovante quando a análise não rodou/falhou
+              // (fallback seguro de sempre — nunca perder um comprovante de
+              // verdade por indisponibilidade do Gemini) OU quando ela roda e
+              // diz que SIM parece comprovante; quando ela roda e diz
+              // explicitamente que não, a imagem segue como mensagem normal,
+              // sem tocar no status de pagamento nem abrir escalonamento.
+              if (analysis && analysis.looksLikeReceipt === false) return;
               await markPaymentPendingVerification(tenantId, msg.from, msg.messageId, receiptHint);
               const hintSuffix = receiptHint ? ` IA: "${receiptHint}"` : '';
               await logEscalation(tenantId, msg.from, msg.contactName, `Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno.${hintSuffix}`, '[imagem]', 'payment_proof');
