@@ -50,7 +50,7 @@ vi.mock('../mediaDownload', () => ({
 }));
 
 const isAgentPaused = vi.fn(async () => false);
-vi.mock('../agentStatus', () => ({ isAgentPaused }));
+vi.mock('../agentStatus', () => ({ isAgentPaused, isLeadsOnlyMode: vi.fn(async () => false) }));
 
 vi.mock('../knowledgeBaseStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../knowledgeBaseStore')>();

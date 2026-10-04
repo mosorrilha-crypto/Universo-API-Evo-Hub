@@ -7,7 +7,7 @@ import { saveMediaImage } from './mediaImageStore';
 import { sendBubbles, type OutboundChannel } from './sendBubbles';
 import { isGeoRestrictedError } from './metaSend';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText } from './autoReply';
-import { isAgentPaused } from './agentStatus';
+import { isAgentPaused, isLeadsOnlyMode } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { getTenantSegment } from './tenantProfileStore';
@@ -261,6 +261,20 @@ async function generateAndSendAudioReply(
         emitAiReplyStatus(tenantId, phone, 'skipped_out_of_scope');
         return;
       }
+      // TASK-0453 — contrapartida do adiamento feito no processamento da
+      // fila (acima, logEscalation condicionado a skipKeywordGatesForNow):
+      // pra tenant leadsOnly, só agora (depois que o outOfScope acima
+      // confirmou que o áudio É de verdade do negócio) os gatilhos de
+      // pagamento/assédio rodam de fato, em cima do texto final desta
+      // rodada (já com qualquer complemento de rajada absorvido acima).
+      if (await isLeadsOnlyMode(tenantId)) {
+        if (isPaymentRelated(combinedText)) {
+          await logEscalation(tenantId, phone, bufferedContactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', combinedText);
+        }
+        if (looksLikeHarassment(combinedText)) {
+          await logEscalation(tenantId, phone, bufferedContactName, '🚫 Áudio de conteúdo pessoal/romântico dirigido à assistente — possível assédio, considere bloquear a IA pra este contato (menu ⋮ na conversa)', combinedText);
+        }
+      }
       const safety = await reviewAutoReplyBeforeSend({
         customerMessage: combinedText,
         draftBubbles: result.bubbles,
@@ -401,13 +415,20 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
     await updateMessageText(tenantId, message.from, message.messageId, messageTextForRecord);
     console.log(`✅ [Fila de Transcrição] tenant=${tenantId} ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): ${redactMessageForLog(messageTextForRecord)}`);
 
+    // TASK-0453 — mesmo adiamento do caminho de texto (webhooks.ts) pra
+    // tenant leadsOnly: os gatilhos de pagamento/assédio por
+    // palavra-chave só rodam aqui, imediatamente, pra quem NÃO é
+    // leadsOnly. Pra leadsOnly, rodam depois, dentro de
+    // generateAndSendAudioReply, só quando result.outOfScope confirmar
+    // que o áudio é mesmo do negócio.
+    const skipKeywordGatesForNow = await isLeadsOnlyMode(tenantId);
     if (outcome.source === 'fallback') {
       await logEscalation(tenantId, message.from, message.contactName, 'Falha ao transcrever áudio automaticamente — operador precisa ouvir manualmente', outcome.result.transcription);
     } else if (hasNoDetectedSpeech) {
       await logEscalation(tenantId, message.from, message.contactName, 'Áudio sem fala detectável (silêncio/ruído) — operador precisa ouvir manualmente antes de responder', messageTextForRecord);
-    } else if (isPaymentRelated(outcome.result.transcription)) {
+    } else if (!skipKeywordGatesForNow && isPaymentRelated(outcome.result.transcription)) {
       await logEscalation(tenantId, message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
-    } else if (looksLikeHarassment(outcome.result.transcription)) {
+    } else if (!skipKeywordGatesForNow && looksLikeHarassment(outcome.result.transcription)) {
       await logEscalation(tenantId, message.from, message.contactName, '🚫 Áudio de conteúdo pessoal/romântico dirigido à assistente — possível assédio, considere bloquear a IA pra este contato (menu ⋮ na conversa)', outcome.result.transcription);
     }
 
