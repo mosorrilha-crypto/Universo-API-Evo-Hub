@@ -69,7 +69,7 @@ vi.mock('../mediaDownload', () => ({
   downloadEvolutionMedia: vi.fn(async () => ({ base64: 'ZmFrZS1hdWRpbw==', mimeType: 'audio/ogg' })),
 }));
 
-vi.mock('../agentStatus', () => ({ isAgentPaused: vi.fn(async () => false) }));
+vi.mock('../agentStatus', () => ({ isAgentPaused: vi.fn(async () => false), isLeadsOnlyMode: vi.fn(async () => false) }));
 
 vi.mock('../knowledgeBaseStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../knowledgeBaseStore')>();

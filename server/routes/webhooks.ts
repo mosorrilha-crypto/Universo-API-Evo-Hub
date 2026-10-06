@@ -12,7 +12,7 @@ import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
 import { showEvolutionTyping } from '../services/evolutionSend';
 import { showInstagramTyping } from '../services/instagramSend';
-import { isAgentPaused } from '../services/agentStatus';
+import { isAgentPaused, isLeadsOnlyMode } from '../services/agentStatus';
 import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { transcribeAudio, isRealTranscriptionSource } from '../services/geminiTranscription';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
@@ -354,6 +354,21 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         if (result.outOfScope) {
           emitAiReplyStatus(tenantId, phone, 'skipped_out_of_scope');
           return;
+        }
+        // TASK-0453 — contrapartida do adiamento feito lá em cima (ramo
+        // msg.type === 'text'): pra tenant leadsOnly, só agora (depois que
+        // o outOfScope acima confirmou que a mensagem É de verdade do
+        // negócio) os gatilhos de pagamento/assédio rodam de fato, em cima
+        // do mesmo texto desta rodada (já com qualquer complemento de
+        // rajada absorvido acima). Pra tenant não-leadsOnly, esses
+        // gatilhos já rodaram antes, imediatamente — não repete aqui.
+        if (await isLeadsOnlyMode(tenantId)) {
+          if (isPaymentRelated(text)) {
+            await logEscalation(tenantId, phone, contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', text);
+          }
+          if (looksLikeHarassment(text)) {
+            await logEscalation(tenantId, phone, contactName, '🚫 Mensagem de conteúdo pessoal/romântico dirigido à assistente — possível assédio, considere bloquear a IA pra este contato (menu ⋮ na conversa)', text);
+          }
         }
         emitAiReplyStatus(tenantId, phone, 'drafted');
 
@@ -769,11 +784,26 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           enqueued += 1;
         } else if (msg.type === 'text') {
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
-          if (msg.text && isPaymentRelated(msg.text)) {
-            await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
-          }
-          if (msg.text && looksLikeHarassment(msg.text)) {
-            await logEscalation(tenantId, msg.from, msg.contactName, '🚫 Mensagem de conteúdo pessoal/romântico dirigido à assistente — possível assédio, considere bloquear a IA pra este contato (menu ⋮ na conversa)', msg.text);
+          // TASK-0453 (achado de auditoria + pedido direto): em tenants
+          // leadsOnly (TASK-0411/0412 — mesmo número de WhatsApp pessoal e
+          // profissional), esses dois gatilhos de palavra-chave disparavam
+          // em cima de mensagem puramente pessoal só por mencionar
+          // "pago"/"transferir" (achado real: "te amo", conversa sobre
+          // financiamento de carro, pedido de favor de um primo) —
+          // inundando a fila de escalonamento com ruído e escondendo os
+          // casos reais de cliente. Pra esses tenants, adia os dois checks
+          // pra depois que a IA já classificou a mensagem como dentro/fora
+          // do escopo (ver triggerAutoReply acima, perto de
+          // result.outOfScope) — só roda aqui, imediatamente, pra quem NÃO
+          // é leadsOnly (comportamento de sempre, número dedicado do
+          // negócio).
+          if (!(await isLeadsOnlyMode(tenantId))) {
+            if (msg.text && isPaymentRelated(msg.text)) {
+              await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
+            }
+            if (msg.text && looksLikeHarassment(msg.text)) {
+              await logEscalation(tenantId, msg.from, msg.contactName, '🚫 Mensagem de conteúdo pessoal/romântico dirigido à assistente — possível assédio, considere bloquear a IA pra este contato (menu ⋮ na conversa)', msg.text);
+            }
           }
           if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
         } else if (msg.type === 'image') {
