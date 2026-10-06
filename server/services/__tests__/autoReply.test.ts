@@ -316,6 +316,17 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('nunca como reflexo automático em toda resposta');
   });
 
+  // TASK-0454 (achado real, print do painel, tenant Monique, "Jessi
+  // Gonzalez"): a lista de interjeições banidas acima não incluía "¡Claro!"
+  // — o modelo usava ela como a mesma muleta reflexa que a regra já proíbe
+  // pros outros sinônimos.
+  it('inclui "¡Claro!" na lista de interjeições banidas (achado real: a lista não cobria esse sinônimo específico)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('"¡Claro!"');
+  });
+
   it('proíbe recorrer sempre à mesma fórmula pronta de "evaluación presencial analiza tus rasgos" pra justificar personalização de técnica (achado real de auditoria, 30/08/2026: a mesma ideia apareceu em 3 conversas reais distintas de clientes diferentes na mesma janela de poucas horas)', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
@@ -729,6 +740,33 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
     expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
     expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips' });
+  });
+
+  // TASK-0454 (achado real, print do painel, tenant Monique, "Jessi
+  // Gonzalez"): a cliente pediu pra reservar e a resposta despejou preço
+  // seco, sem benefício ao redor, empilhando nome + dia + período na mesma
+  // pergunta — pedido demais de uma vez, e preço sem valor percebido não
+  // gera desejo de fechar. A instrução de AGENDAMENTO agora separa nome
+  // (junto do convite de valor) de dia/horário (só no turno seguinte).
+  it('instrui a nunca pedir nome e dia/horário na mesma pergunta, e a liderar com benefício antes do preço seco (achado real, tenant Monique, "Jessi Gonzalez")', async () => {
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'agendamento' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['¿Cómo te llamo?'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    await generateAutoReplyForText('tenant-a', ai, 'quiero reservar un horario', 'Cliente', undefined, undefined);
+
+    const specialistCall = calls.find((c) => !c.contents[0].text.includes('Classifique a intenção principal'));
+    const systemInstruction: string = specialistCall.config.systemInstruction;
+    expect(systemInstruction).toContain('NUNCA peça nome e dia/horário na mesma pergunta');
+    expect(systemInstruction).toContain('diga o preço junto com o que a cliente ganha de verdade com o resultado');
+    expect(systemInstruction).not.toContain('colete os dados que faltam (nome, dia/horário desejado)');
   });
 
   // Achado real em produção (Monique, 20/08/2026): cliente perguntou "Tiene
