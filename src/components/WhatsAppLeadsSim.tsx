@@ -304,11 +304,14 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
   // esgotar essas tentativas automáticas (~29s no total) é que aparece o
   // botão manual — que ainda existe pra qualquer atraso maior que isso.
   const AUTO_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000];
+  const MEDIA_REQUEST_TIMEOUT_MS = 15_000;
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
     let autoRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    const requestTimeout = setTimeout(() => controller.abort(), MEDIA_REQUEST_TIMEOUT_MS);
     setFailed(false);
     setFailReason(null);
     const scheduleRetryOrGiveUp = () => {
@@ -318,7 +321,7 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
         setFailed(true);
       }
     };
-    apiFetch(`/api/media/${encodeURIComponent(messageId)}`)
+    apiFetch(`/api/media/${encodeURIComponent(messageId)}`, { signal: controller.signal })
       .then((r) => {
         if (r.ok) return r.blob();
         if (!cancelled) setFailReason(`HTTP ${r.status}`);
@@ -332,10 +335,10 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
       })
       .catch((err) => {
         if (cancelled) return;
-        setFailReason(err instanceof Error ? err.message : String(err));
+        setFailReason(err?.name === 'AbortError' ? 'tempo limite excedido' : err instanceof Error ? err.message : String(err));
         scheduleRetryOrGiveUp();
       });
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); if (autoRetryTimer) clearTimeout(autoRetryTimer); };
+    return () => { cancelled = true; controller.abort(); clearTimeout(requestTimeout); if (objectUrl) URL.revokeObjectURL(objectUrl); if (autoRetryTimer) clearTimeout(autoRetryTimer); };
   }, [messageId, retryToken]);
 
   if (failed) {
@@ -377,11 +380,14 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
 const RealClientVideo: React.FC<{ messageId: string }> = ({ messageId }) => {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const MEDIA_REQUEST_TIMEOUT_MS = 15_000;
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
-    apiFetch(`/api/media/${encodeURIComponent(messageId)}`)
+    const controller = new AbortController();
+    const requestTimeout = setTimeout(() => controller.abort(), MEDIA_REQUEST_TIMEOUT_MS);
+    apiFetch(`/api/media/${encodeURIComponent(messageId)}`, { signal: controller.signal })
       .then((r) => (r.ok ? r.blob() : null))
       .then((blob) => {
         if (cancelled) return;
@@ -390,7 +396,7 @@ const RealClientVideo: React.FC<{ messageId: string }> = ({ messageId }) => {
         setUrl(objectUrl);
       })
       .catch(() => { if (!cancelled) setFailed(true); });
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    return () => { cancelled = true; controller.abort(); clearTimeout(requestTimeout); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [messageId]);
 
   if (failed) {
