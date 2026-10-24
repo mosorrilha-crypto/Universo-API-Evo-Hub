@@ -63,7 +63,14 @@ export async function getMediaImage(
   messageId: string
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
   const config = getObjectStorageConfig();
-  const result = config ? await getObject(config, storagePath(messageId)) : null;
+  let result: { buffer: Buffer; contentType: string } | null = null;
+  if (config) {
+    try {
+      result = await getObject(config, storagePath(messageId));
+    } catch (err: any) {
+      console.warn(`⚠️  [Mídia] Falha ao ler R2; tentando Storage legado (message_id=${messageId}):`, err?.message || err);
+    }
+  }
   const legacy = result ? null : await getLegacySupabaseStorageObject(supabaseUrl, supabaseKey, storagePath(messageId));
   const found = result || legacy;
   if (!found) return null;

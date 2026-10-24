@@ -12,6 +12,8 @@
  * Puramente leitura, melhor esforço: qualquer falha (config ausente, URL
  * inválida, 404, erro de rede) retorna null, nunca lança.
  */
+const LEGACY_STORAGE_TIMEOUT_MS = 10_000;
+
 export async function getLegacySupabaseStorageObject(
   supabaseUrl: string | undefined,
   supabaseKey: string | undefined,
@@ -26,9 +28,12 @@ export async function getLegacySupabaseStorageObject(
   }
   if (protocol !== 'http:' && protocol !== 'https:') return null;
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LEGACY_STORAGE_TIMEOUT_MS);
   try {
     const res = await fetch(`${supabaseUrl}/storage/v1/object/app-data/${path}`, {
       headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+      signal: controller.signal,
     });
     if (!res.ok) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
@@ -36,5 +41,7 @@ export async function getLegacySupabaseStorageObject(
     return { buffer, contentType };
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }

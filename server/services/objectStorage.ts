@@ -46,7 +46,27 @@ export function getObjectStorageConfig(): ObjectStorageConfig | undefined {
   return { accountId, accessKeyId, secretAccessKey, bucket };
 }
 
+const OBJECT_STORAGE_TIMEOUT_MS = 10_000;
+
 let cachedClient: { client: S3Client; accountId: string; accessKeyId: string; secretAccessKey: string } | undefined;
+
+async function withStorageTimeout<T>(operation: Promise<T>, operationName: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`Timeout ao acessar o R2 (${operationName})`);
+          error.name = 'ObjectStorageTimeoutError';
+          reject(error);
+        }, OBJECT_STORAGE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Reaproveita o mesmo S3Client entre chamadas (evita reconstruir a assinatura/conexão a cada upload/download) — só recria se as credenciais mudarem (ex: troca em runtime num teste). */
 function getClient(config: ObjectStorageConfig): S3Client {
@@ -69,15 +89,24 @@ function getClient(config: ObjectStorageConfig): S3Client {
 
 export async function putObject(config: ObjectStorageConfig, key: string, buffer: Buffer, contentType: string): Promise<void> {
   const client = getClient(config);
-  await client.send(new PutObjectCommand({ Bucket: config.bucket, Key: key, Body: buffer, ContentType: contentType || 'application/octet-stream' }));
+  await withStorageTimeout(
+    client.send(new PutObjectCommand({ Bucket: config.bucket, Key: key, Body: buffer, ContentType: contentType || 'application/octet-stream' })),
+    `upload ${key}`,
+  );
 }
 
 /** `null` quando o objeto não existe (mesmo contrato dos getters que este módulo substitui) — qualquer outro erro (credencial inválida, bucket errado) propaga, pra não mascarar um problema real de configuração como "mídia ausente". */
 export async function getObject(config: ObjectStorageConfig, key: string): Promise<{ buffer: Buffer; contentType: string } | null> {
   const client = getClient(config);
   try {
-    const result = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: key }));
-    const bytes = await result.Body?.transformToByteArray();
+    const result = await withStorageTimeout(
+      client.send(new GetObjectCommand({ Bucket: config.bucket, Key: key })),
+      `download ${key}`,
+    );
+    const bytes = await withStorageTimeout(
+      result.Body?.transformToByteArray() || Promise.resolve(undefined),
+      `leitura ${key}`,
+    );
     if (!bytes) return null;
     return { buffer: Buffer.from(bytes), contentType: result.ContentType || 'application/octet-stream' };
   } catch (err: any) {
@@ -88,5 +117,8 @@ export async function getObject(config: ObjectStorageConfig, key: string): Promi
 
 export async function deleteObject(config: ObjectStorageConfig, key: string): Promise<void> {
   const client = getClient(config);
-  await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+  await withStorageTimeout(
+    client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key })),
+    `delete ${key}`,
+  );
 }

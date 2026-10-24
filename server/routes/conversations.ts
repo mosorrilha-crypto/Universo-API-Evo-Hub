@@ -81,6 +81,22 @@ import { resolveTenantId, requireRole } from '../middleware/rbac';
 import { conversationsStreamRateLimiter, knowledgeBaseImageDeleteRateLimiter } from '../middleware/rateLimit';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
+const MEDIA_ROUTE_TIMEOUT_MS = 12_000;
+
+function withMediaRouteTimeout<T>(operation: PromiseLike<T>, operationName: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`Timeout na rota de mídia (${operationName})`);
+      error.name = 'MediaRouteTimeoutError';
+      reject(error);
+    }, MEDIA_ROUTE_TIMEOUT_MS);
+    Promise.resolve(operation).then(
+      (value) => { if (timer) clearTimeout(timer); resolve(value); },
+      (error) => { if (timer) clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 interface ConversationsRouterDeps {
   authenticateToken: RequestHandler;
@@ -256,12 +272,23 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/media/:messageId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     // A mídia é privada e o id é opaco, mas ainda assim validamos o tenant
     // antes de buscar o objeto para impedir acesso cruzado por id conhecido.
-    const { data: message } = await getDb()
-      .from('messages')
-      .select('id')
-      .eq('tenant_id', tenantOf(req))
-      .eq('id', req.params.messageId)
-      .maybeSingle();
+    let message: { id: string } | null = null;
+    try {
+      const result = await withMediaRouteTimeout(
+        getDb()
+          .from('messages')
+          .select('id')
+          .eq('tenant_id', tenantOf(req))
+          .eq('id', req.params.messageId)
+          .maybeSingle(),
+        'consulta da mensagem',
+      );
+      message = result.data;
+    } catch (err: any) {
+      console.error(`⚠️  [Mídia] Falha ao validar mensagem ${req.params.messageId}:`, err?.message || err);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(err?.name === 'MediaRouteTimeoutError' ? 504 : 500).json({ error: 'Não foi possível validar a mídia agora.' });
+    }
     // TASK-0403 (achado real: imagem confirmada salva no R2 — abria normal
     // no desktop — continuava "indisponível" no celular mesmo minutos
     // depois e mesmo com o auto-retry da TASK-0401 rodando): esta rota
@@ -275,7 +302,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // dois casos de 404 como nunca-cacheáveis antes de responder.
     if (!message) { res.setHeader('Cache-Control', 'no-store'); return res.status(404).json({ error: 'Imagem não encontrada.' }); }
 
-    const media = await getMediaImage(supabaseUrl, supabaseKey, req.params.messageId);
+    let media: { buffer: Buffer; contentType: string } | null = null;
+    try {
+      media = await withMediaRouteTimeout(
+        getMediaImage(supabaseUrl, supabaseKey, req.params.messageId),
+        'leitura do arquivo',
+      );
+    } catch (err: any) {
+      console.error(`⚠️  [Mídia] Falha ao ler arquivo ${req.params.messageId}:`, err?.message || err);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(err?.name === 'MediaRouteTimeoutError' ? 504 : 500).json({ error: 'Não foi possível carregar a mídia agora.' });
+    }
     if (!media) { res.setHeader('Cache-Control', 'no-store'); return res.status(404).json({ error: 'Imagem não encontrada.' }); }
     res.setHeader('Content-Type', media.contentType);
     // Imagens e comprovantes são gravados sob um messageId estável. Cache
