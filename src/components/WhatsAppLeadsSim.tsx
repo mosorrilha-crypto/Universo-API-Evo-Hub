@@ -312,6 +312,7 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
     let autoRetryTimer: ReturnType<typeof setTimeout> | undefined;
     const controller = new AbortController();
     const requestTimeout = setTimeout(() => controller.abort(), MEDIA_REQUEST_TIMEOUT_MS);
+    const mediaUrl = `/api/media/${encodeURIComponent(messageId)}?attempt=${retryToken}`;
     setFailed(false);
     setFailReason(null);
     const scheduleRetryOrGiveUp = () => {
@@ -321,7 +322,7 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
         setFailed(true);
       }
     };
-    apiFetch(`/api/media/${encodeURIComponent(messageId)}`, { signal: controller.signal })
+    apiFetch(mediaUrl, { signal: controller.signal, cache: 'no-store' })
       .then((r) => {
         if (r.ok) return r.blob();
         if (!cancelled) setFailReason(`HTTP ${r.status}`);
@@ -387,7 +388,8 @@ const RealClientVideo: React.FC<{ messageId: string }> = ({ messageId }) => {
     let cancelled = false;
     const controller = new AbortController();
     const requestTimeout = setTimeout(() => controller.abort(), MEDIA_REQUEST_TIMEOUT_MS);
-    apiFetch(`/api/media/${encodeURIComponent(messageId)}`, { signal: controller.signal })
+    const mediaUrl = `/api/media/${encodeURIComponent(messageId)}?attempt=0`;
+    apiFetch(mediaUrl, { signal: controller.signal, cache: 'no-store' })
       .then((r) => (r.ok ? r.blob() : null))
       .then((blob) => {
         if (cancelled) return;
