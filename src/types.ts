@@ -377,6 +377,9 @@ export interface ChatMessage {
   mediaUrl?: string;
   mediaBase64?: string;
   mimeType?: string;
+  /** Estado do pipeline do binário no backend. */
+  mediaStatus?: 'pending' | 'stored' | 'failed';
+  mediaError?: string;
   fileName?: string;
   timestamp: string;
   /** TASK-0281 — timestamp ISO cru (com data completa), só pra mensagens reais de WhatsApp — `timestamp` acima já vem formatado só como "HH:MM" pra exibição, e usar ele pra decidir separador de dia faz qualquer mensagem antiga (de dias atrás) parecer "de hoje" (ver src/lib/chatDate.ts). `undefined` pras mensagens de demonstração/mock, que continuam usando o fallback "sempre hoje" de propósito. */

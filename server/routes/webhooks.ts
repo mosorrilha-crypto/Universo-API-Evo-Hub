@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed, dedupeKeyFor } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText, markSpecialistInvoked, type StoredConversation } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText, markSpecialistInvoked, updateMessageMediaStatus, type StoredConversation } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, executeApprovedMediaAction, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
@@ -813,7 +813,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // webhookParsers.ts) preserva o que o cliente escreveu; a UI
           // (WhatsAppLeadsSim.tsx) já mostra esse texto como legenda abaixo da
           // foto, então só precisa chegar até aqui.
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId, 'pending');
 
           // Uma única promise de download, reaproveitada abaixo (await duas
           // vezes na mesma promise não baixa a imagem de novo) — mantém o
@@ -835,9 +835,26 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
               )
             : null;
           if (downloadPromise) {
-            downloadPromise
-              .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
-              .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
+            void downloadPromise
+              .then(async (downloaded) => {
+                const attempts = 1;
+                const stored = await saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType);
+                await updateMessageMediaStatus(tenantId, msg.messageId, stored ? 'stored' : 'failed', {
+                  attempts,
+                  mimeType: downloaded.mimeType,
+                  error: stored ? undefined : 'Upload para o armazenamento de mídia não foi concluído.',
+                });
+              })
+              .catch(async (err) => {
+                console.warn(`❌ [Imagem] Falha ao baixar ou salvar imagem de ${msg.from}:`, err.message);
+                try {
+                  await updateMessageMediaStatus(tenantId, msg.messageId, 'failed', { attempts: 1, error: err.message });
+                } catch (statusErr: any) {
+                  console.warn(`❌ [Imagem] Falha ao registrar estado failed (${msg.messageId}):`, statusErr?.message || statusErr);
+                }
+              });
+          } else {
+            void updateMessageMediaStatus(tenantId, msg.messageId, 'failed', { error: 'Evento de imagem não trouxe dados para download.' }).catch((err: any) => console.warn(`❌ [Imagem] Falha ao registrar estado failed (${msg.messageId}):`, err?.message || err));
           }
 
           // Etapa 8 (fluxo de verificação de pagamento) — uma imagem chegando
@@ -940,7 +957,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // (webp) exatamente como já funcionam pra foto. Deliberadamente
           // SEM a análise de comprovante de pagamento acima (isso é
           // específico de foto sendo comprovante — uma figurinha nunca é).
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: friendlyLabelForOtherType('sticker'), timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: friendlyLabelForOtherType('sticker'), timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId, 'pending');
           const metaSticker = msg.metaSticker;
           const stickerDownloadPromise = metaSticker
             ? withMediaDownloadRetry(() => downloadMetaMedia(metaSticker.mediaId, resolvedTenant.metaAccessToken))
@@ -955,9 +972,21 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
               )
             : null;
           if (stickerDownloadPromise) {
-            stickerDownloadPromise
-              .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
-              .catch((err) => console.warn(`❌ [Figurinha] Falha ao baixar sticker de ${msg.from}:`, err.message));
+            void stickerDownloadPromise
+              .then(async (downloaded) => {
+                const stored = await saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType);
+                await updateMessageMediaStatus(tenantId, msg.messageId, stored ? 'stored' : 'failed', {
+                  attempts: 1,
+                  mimeType: downloaded.mimeType,
+                  error: stored ? undefined : 'Upload para o armazenamento de mídia não foi concluído.',
+                });
+              })
+              .catch(async (err) => {
+                console.warn(`❌ [Figurinha] Falha ao baixar ou salvar sticker de ${msg.from}:`, err.message);
+                try { await updateMessageMediaStatus(tenantId, msg.messageId, 'failed', { attempts: 1, error: err.message }); } catch {}
+              });
+          } else {
+            void updateMessageMediaStatus(tenantId, msg.messageId, 'failed', { error: 'Evento de figurinha não trouxe dados para download.' }).catch(() => {});
           }
         } else {
           // Tipo de mensagem que não geramos resposta automática (vídeo/gif,

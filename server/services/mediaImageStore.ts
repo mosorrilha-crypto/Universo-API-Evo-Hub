@@ -28,7 +28,7 @@ export async function saveMediaImage(
   messageId: string,
   base64: string,
   mimeType: string
-): Promise<void> {
+): Promise<boolean> {
   const config = getObjectStorageConfig();
   // Achado real em produção (11/09/2026): esta checagem era um retorno
   // 100% silencioso — sem R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/
@@ -41,7 +41,7 @@ export async function saveMediaImage(
   // uma mídia que de fato nunca existiu — nada nos logs apontava a causa raiz.
   if (!config) {
     console.warn(`⚠️  [Mídia] R2 não configurado (R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET_NAME ausentes) — mídia NÃO salva (message_id=${messageId}).`);
-    return;
+    return false;
   }
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
@@ -52,8 +52,10 @@ export async function saveMediaImage(
   // pagamento podia se perder silenciosamente, sem nenhum aviso no log.
   try {
     await putObject(config, storagePath(messageId), buffer, mimeType);
+    return true;
   } catch (err: any) {
     console.warn(`⚠️  [Mídia] Falha ao salvar imagem recebida (message_id=${messageId}):`, err.message);
+    return false;
   }
 }
 

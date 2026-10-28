@@ -16,6 +16,7 @@ import {
   getMessageForReply,
   updateConversationState,
   markConversationRead,
+  updateMessageMediaStatus,
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage, listApprovedMetaMessageTemplates, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
@@ -941,12 +942,21 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         'operator',
         undefined,
         undefined,
-        messageId
+        messageId,
+        undefined,
+        msgType === 'image' || msgType === 'file' ? 'pending' : undefined
       );
       // Salva a versão JÁ CONVERTIDA (não o webm original) — senão o próprio
       // player de áudio do painel (GET /api/media/:messageId) herdaria o
       // mesmo problema de reprodução que motivou a conversão.
-      await saveMediaImage(supabaseUrl, supabaseKey, messageId, uploadBase64, uploadMimeType);
+      const mediaStored = await saveMediaImage(supabaseUrl, supabaseKey, messageId, uploadBase64, uploadMimeType);
+      if (msgType === 'image' || msgType === 'file') {
+        await updateMessageMediaStatus(tenantId, messageId, mediaStored ? 'stored' : 'failed', {
+          attempts: 1,
+          mimeType: uploadMimeType,
+          error: mediaStored ? undefined : 'Upload para o armazenamento de mídia não foi concluído.',
+        });
+      }
       // Achado real (27/08/2026): áudio ENVIADO pelo operador nunca era
       // transcrito — só o placeholder fixo "🎤 Áudio enviado" ficava salvo
       // pra sempre, diferente do áudio recebido do cliente (webhooks.ts +

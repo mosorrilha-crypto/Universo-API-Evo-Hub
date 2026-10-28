@@ -277,7 +277,7 @@ interface WhatsAppLeadsSimProps {
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
 // comprovante de pagamento) — buscada via rota autenticada (nunca pública,
 // pode conter dado sensível), em vez do placeholder genérico de antes.
-const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => void }> = ({ messageId, onOpen }) => {
+const RealClientImage: React.FC<{ messageId: string; mediaStatus?: 'pending' | 'stored' | 'failed'; onOpen: (url: string) => void }> = ({ messageId, mediaStatus, onOpen }) => {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   // TASK-0392 (achado real: "as imagens não estão carregando", reproduzido
@@ -340,7 +340,7 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
         scheduleRetryOrGiveUp();
       });
     return () => { cancelled = true; controller.abort(); clearTimeout(requestTimeout); if (objectUrl) URL.revokeObjectURL(objectUrl); if (autoRetryTimer) clearTimeout(autoRetryTimer); };
-  }, [messageId, retryToken]);
+  }, [messageId, retryToken, mediaStatus]);
 
   if (failed) {
     return (
@@ -357,7 +357,7 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
     );
   }
   if (!url) {
-    return <div className="w-full h-36 bg-slate-800 rounded-lg animate-pulse flex items-center justify-center text-slate-500 text-[10px]">Carregando imagem...</div>;
+    return <div className="w-full h-36 bg-slate-800 rounded-lg animate-pulse flex items-center justify-center text-slate-500 text-[10px]">{mediaStatus === 'pending' ? 'Processando imagem...' : 'Carregando imagem...'}</div>;
   }
   return (
     <div onClick={() => onOpen(url)} className="relative group rounded-lg overflow-hidden cursor-pointer">
@@ -6309,7 +6309,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   conversations.ts, que salva sob o mesmo messageId da mensagem) — só
                                   faltava carregar pro sender 'agent' também. */}
                               {!msg.mediaUrl && (selectedLead as any)?.isReal && (
-                                <RealClientImage messageId={msg.id} onOpen={setViewImageUrl} />
+                                <RealClientImage messageId={msg.id} mediaStatus={msg.mediaStatus} onOpen={setViewImageUrl} />
                               )}
                               <p className="text-xs px-2.5 pt-1.5 pb-2.5">
                                 {msg.text}

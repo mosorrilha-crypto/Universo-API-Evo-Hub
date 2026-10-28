@@ -41,6 +41,9 @@ export interface StoredMessage {
   sentBy?: 'ai' | 'operator' | 'campaign';
   /** TASK-0370 — nome do operador que digitou (snapshot no momento do envio, não um join ao vivo com `operators` — mostra o nome de quem mandou mesmo que o operador seja renomeado/removido depois). Só presente quando `sentBy === 'operator'`; `undefined` em mensagens antigas de antes desta coluna existir (painel cai no rótulo genérico "Você (equipe)"). */
   operatorName?: string;
+  /** Estado do pipeline do binário: pending, stored ou failed. */
+  mediaStatus?: 'pending' | 'stored' | 'failed';
+  mediaError?: string;
 }
 
 export interface GeoRestriction {
@@ -152,6 +155,8 @@ type MessageRow = {
   reactions: MessageReaction[] | null;
   sent_by: 'ai' | 'operator' | 'campaign' | null;
   operator_name: string | null;
+  media_status: 'pending' | 'stored' | 'failed' | null;
+  media_error: string | null;
 };
 
 /** Conta mensagens do lead chegadas depois de lastReadAt — extraída à parte pra ser testável sem depender do formato de embed relacional do Supabase. */
@@ -191,11 +196,13 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
         reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
         sentBy: m.sent_by || undefined,
         operatorName: m.operator_name || undefined,
+        mediaStatus: m.media_status || undefined,
+        mediaError: m.media_error || undefined,
       })),
   };
 }
 
-const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by, operator_name)';
+const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by, operator_name, media_status, media_error)';
 
 // A lista é atualizada por SSE + polling de segurança. Não deve transportar o
 // histórico inteiro de todas as conversas a cada rodada: a view 0041 devolve
@@ -233,6 +240,8 @@ function toStoredConversationSummary(row: ConversationSummaryRow): StoredConvers
     // só a mensagem completa (getConversation/paginação) carrega isso; o
     // preview da lista nunca precisou do nome específico do operador.
     operator_name: null,
+    media_status: null,
+    media_error: null,
   })) });
   conversation.unreadCount = row.unread_count || 0;
   conversation.lastMessageId = row.last_message_id || undefined;
@@ -527,14 +536,18 @@ export async function recordIncomingMessage(
   customId?: string,
   replyToMessageId?: string,
   /** TASK-0171 — número (Meta) que essa mensagem chegou, só usado se a conversa ainda não existir (ver getOrCreateConversationRow). */
-  phoneNumberId?: string
+  phoneNumberId?: string,
+  mediaStatus?: 'pending' | 'stored' | 'failed'
 ): Promise<StoredConversation> {
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone, name, phoneNumberId);
   const id = customId || `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const mediaFields = message.type === 'image' || message.type === 'file'
+    ? { media_status: mediaStatus || 'stored', media_updated_at: new Date().toISOString() }
+    : {};
   const { error } = await db
     .from('messages')
-    .insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null, reply_to_message_id: replyToMessageId || null });
+    .insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null, reply_to_message_id: replyToMessageId || null, ...mediaFields });
   if (error) {
     // Achado consultando uma lead real com ctwa_clid gravado mas 0 mensagens:
     // este erro só era logado, nunca relançado — o try/catch em webhooks.ts
@@ -550,6 +563,33 @@ export async function recordIncomingMessage(
   return (await getConversation(tenantId, phone))!;
 }
 
+export async function updateMessageMediaStatus(
+  tenantId: string,
+  messageId: string,
+  status: 'pending' | 'stored' | 'failed',
+  details?: { error?: string; mimeType?: string; attempts?: number },
+): Promise<void> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('messages')
+    .update({
+      media_status: status,
+      media_error: details?.error ? details.error.slice(0, 500) : null,
+      ...(details?.mimeType ? { media_mime_type: details.mimeType } : {}),
+      ...(details?.attempts !== undefined ? { media_attempts: details.attempts } : {}),
+      media_updated_at: new Date().toISOString(),
+    })
+    .eq('tenant_id', tenantId)
+    .eq('id', messageId)
+    .select('conversation_id')
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao atualizar estado da mídia: ${error.message}`);
+  if (data?.conversation_id) {
+    const { data: conversation } = await db.from('conversations').select('phone').eq('id', data.conversation_id).maybeSingle();
+    if (conversation?.phone) emitConversationUpdated(tenantId, conversation.phone);
+  }
+}
+
 export async function recordOutgoingMessage(
   tenantId: string,
   phone: string,
@@ -561,7 +601,8 @@ export async function recordOutgoingMessage(
   /** ID pré-gerado pra essa mensagem — usado quando quem chama precisa saber o id ANTES de gravar (ex: pra salvar a mídia real sob o mesmo id em mediaImageStore, ver /send-media em conversations.ts). Sem isso, o id só existia dentro desta função e ninguém conseguia associar o áudio/imagem enviado à mensagem gravada. */
   customId?: string,
   /** TASK-0370 (pedido direto — identificar qual operador específico escreveu) — só faz sentido quando `sentBy === 'operator'`; nome já resolvido pelo chamador (ver /send em conversations.ts), gravado como snapshot (não muda se o operador for renomeado depois). */
-  operatorName?: string
+  operatorName?: string,
+  mediaStatus?: 'pending' | 'stored' | 'failed'
 ): Promise<StoredConversation> {
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone);
@@ -579,6 +620,7 @@ export async function recordOutgoingMessage(
       forwarded_from_message_id: forwardedFromMessageId || null,
       sent_by: sentBy,
       operator_name: sentBy === 'operator' ? operatorName || null : null,
+      ...(message.type === 'image' || message.type === 'file' ? { media_status: mediaStatus || 'stored', media_updated_at: new Date().toISOString() } : {}),
     });
   if (error) {
     // Mesmo bug do recordIncomingMessage (ver comentário lá): engolir o erro
