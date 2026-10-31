@@ -4,7 +4,7 @@
  * threshold (não no 1º tick de detecção, dá chance de blip curto); não alerta
  * de novo pro mesmo episódio (idempotência); reconectar limpa os marcadores,
  * permitindo alertar de novo numa queda futura; tenant sem admin_alert_phone
- * não quebra o job; falha ao consultar a Evolution API não conta como queda.
+ * não quebra o job; indisponibilidade persistente da API também alerta, sem afirmar logout.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { initDb, getDb } from '../db';
@@ -145,7 +145,7 @@ describe('evolutionConnectionAlertJob', () => {
     expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
   });
 
-  it('falha ao consultar a Evolution API não conta como queda nem quebra o job', async () => {
+  it('primeira falha da API inicia tolerância sem alertar nem afirmar que a sessão fechou', async () => {
     await seedTenant({ adminAlertPhone: '5567998038466' });
     await seedCredential({ lastState: 'open' });
     fetchMock.mockRejectedValue(new Error('timeout'));
@@ -153,6 +153,31 @@ describe('evolutionConnectionAlertJob', () => {
     await expect(checkEvolutionConnectionsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' })).resolves.not.toThrow();
     expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
     const { data } = await getDb().from('tenant_evolution_credentials').select('disconnected_since').eq('tenant_id', TENANT_A).maybeSingle();
-    expect(data?.disconnected_since).toBeFalsy();
+    expect(data?.disconnected_since).toBe(NOW.toISOString());
   });
+  it.each(['timeout', 'HTTP 503', 'HTTP 401'])('API inacessível por %s alerta uma vez e recupera quando volta a open', async (failure) => {
+    await seedTenant({ adminAlertPhone: '5567998038466' });
+    await seedCredential();
+    if (failure === 'timeout') fetchMock.mockRejectedValue(new Error('timeout'));
+    else fetchMock.mockResolvedValue({ ok: false, status: Number(failure.slice(5)), json: async () => ({ error: 'indisponível' }) });
+
+    await checkEvolutionConnectionsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
+    expect(sendPushToTenant).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(6 * 60 * 1000);
+    await checkEvolutionConnectionsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
+    await checkEvolutionConnectionsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
+    expect(sendPushToTenant).toHaveBeenCalledTimes(1);
+    expect(sendPushToTenant).toHaveBeenCalledWith(TENANT_A, expect.objectContaining({ title: '🔌 Evolution API indisponível' }));
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    const { data: down } = await getDb().from('tenant_evolution_credentials').select('*').eq('tenant_id', TENANT_A).maybeSingle();
+    expect(down?.last_connection_state).toBe('api_unavailable');
+
+    mockConnectionState('open');
+    await checkEvolutionConnectionsAndAlert();
+    const { data: recovered } = await getDb().from('tenant_evolution_credentials').select('*').eq('tenant_id', TENANT_A).maybeSingle();
+    expect(recovered?.last_connection_state).toBe('open');
+    expect(recovered?.disconnected_since).toBeNull();
+    expect(recovered?.disconnected_alert_sent_at).toBeNull();
+  });
+
 });

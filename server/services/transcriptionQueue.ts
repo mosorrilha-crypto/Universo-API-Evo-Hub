@@ -372,7 +372,7 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
       // Instância/URL/API key já vêm resolvidas por tenant (resolveTenantByEvolutionInstance,
       // Epic 4.6) — não mais a instância global única fixa em deps.*.
       const downloaded = await downloadEvolutionMedia(
-        { id: message.messageId, remoteJid: `${message.from}@s.whatsapp.net` },
+        message.evolutionMessageKey ?? { id: message.messageId, remoteJid: `${message.from}@s.whatsapp.net` },
         resolvedTenant.evolutionInstanceName,
         resolvedTenant.evolutionApiUrl,
         resolvedTenant.evolutionApiKey

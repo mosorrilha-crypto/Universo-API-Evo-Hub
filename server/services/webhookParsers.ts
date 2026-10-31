@@ -31,9 +31,12 @@ export interface ParsedIncomingMessage {
   metaSticker?: { mediaId: string; mimeType?: string };
   /** Presente quando type === 'audio' via Evolution API. */
   evolutionAudio?: { url?: string; mediaKey?: string; mimeType?: string };
-  /** true quando type === 'image' via Evolution API — sem URL/mediaKey úteis aqui (mídia ponta-a-ponta criptografada), o download reconstrói a message key a partir de messageId/from, mesmo padrão já usado pra evolutionAudio (ver downloadEvolutionMedia). */
+  /** Chave original para buscar mídia. O telefone do CRM é normalizado e
+   * não pode substituir remoteJid (@lid, nono dígito) nem perder fromMe. */
+  evolutionMessageKey?: { id: string; remoteJid: string; fromMe?: boolean; [key: string]: unknown };
+  /** Sinaliza imagem criptografada que deve ser baixada pela Evolution. */
   evolutionImage?: true;
-  /** true quando type === 'sticker' via Evolution API — mesmo mecanismo de download de evolutionImage (reconstrói a message key). */
+  /** true quando type === 'sticker' via Evolution API — mesmo mecanismo de download de evolutionImage. */
   evolutionSticker?: true;
   /** Presente quando a mensagem veio de um anúncio "Clique para WhatsApp" (Meta Cloud API) — usado pra atribuição real no Meta Conversions API (Epic 4.5.6). */
   referral?: { headline?: string; sourceId?: string; ctwaClid?: string };
@@ -293,6 +296,7 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
     return [{
       ...base,
       type: 'audio',
+      evolutionMessageKey: { ...data.key },
       evolutionAudio: {
         url: message.audioMessage.url,
         mediaKey: message.audioMessage.mediaKey,
@@ -310,12 +314,13 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
       ...base,
       type: 'image',
       evolutionImage: true,
+      evolutionMessageKey: { ...data.key },
       ...(typeof message.imageMessage.caption === 'string' && message.imageMessage.caption.trim() ? { caption: message.imageMessage.caption.trim() } : {}),
     }];
   }
 
   if (message.stickerMessage) {
-    return [{ ...base, type: 'sticker', evolutionSticker: true }];
+    return [{ ...base, type: 'sticker', evolutionSticker: true, evolutionMessageKey: { ...data.key } }];
   }
 
   const rawType = message.videoMessage
