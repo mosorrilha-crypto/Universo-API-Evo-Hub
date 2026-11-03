@@ -27,7 +27,7 @@ describe('download de mídia usa a chave do webhook, não o telefone normalizado
     const key = { id: `media-${kind}-${fromMe}`, remoteJid: '123456@lid', remoteJidAlt: '556798038466@s.whatsapp.net', fromMe };
     const req = { body: { event: 'messages.upsert', instance: 'test-instance', data: { key, message: { [kind]: {} } } }, headers: {} } as any;
     const res = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
-    await route!.route.stack[0].handle(req, res, vi.fn());
+    await route!.route.stack[0].handle(req, res as any, vi.fn());
     await vi.waitFor(() => expect(saveMediaImage).toHaveBeenCalled());
     expect(res.status).toHaveBeenCalledWith(200);
     expect(downloadEvolutionMedia).toHaveBeenCalledWith(key, 'test-instance', 'https://evolution.example.test', 'test-key');
