@@ -2,6 +2,7 @@ import { Router, type RequestHandler, type Response } from 'express';
 import crypto from 'crypto';
 import {
   listConversations,
+  listLastLeadMessageTimestamps,
   getConversation,
   getConversationMessagesPage,
   getConversationPhoneNumberId,
@@ -2508,15 +2509,31 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/escalations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const escalations = await listEscalations(tenantId, { includeArchived: req.query.includeArchived === 'true' });
-    // Issue #97 — timer de janela de 24h no card, pro operador saber se a
-    // resposta dele (própria ou via orientação pra IA) sai como texto livre
-    // agora ou precisa esperar o template de reengajamento primeiro. Só
-    // calcula pros pendentes (resolvidos não precisam mais disso).
+    // Issue #97 — calcula a janela de atendimento em lote pela view resumida.
+    // Buscar o histórico completo uma vez por escalonamento (e em paralelo)
+    // multiplicava as leituras de mensagens e podia estourar o timeout do
+    // Postgres quando a fila crescia.
+    const hasPendingEscalations = escalations.some((escalation) => !escalation.resolved);
+    const lastLeadMessageAtByPhone = hasPendingEscalations
+      ? await listLastLeadMessageTimestamps(tenantId)
+      : new Map<string, string | null>();
     const withWindow = await Promise.all(
       escalations.map(async (e) => {
         if (e.resolved) return e;
-        const window = await getCustomerServiceWindowStatus(tenantId, e.phone);
-        return { ...e, withinServiceWindow: window.withinWindow, serviceWindowExpiresAt: window.windowExpiresAt };
+        if (!lastLeadMessageAtByPhone) {
+          // Compatibilidade temporária se a migration 0076 ainda não foi
+          // aplicada no banco deste ambiente.
+          const window = await getCustomerServiceWindowStatus(tenantId, e.phone);
+          return { ...e, withinServiceWindow: window.withinWindow, serviceWindowExpiresAt: window.windowExpiresAt };
+        }
+        const lastLeadMessageAt = lastLeadMessageAtByPhone.get(e.phone) || null;
+        const expiresAtMs = lastLeadMessageAt ? Date.parse(lastLeadMessageAt) + 24 * 60 * 60 * 1000 : NaN;
+        const windowExpiresAt = Number.isFinite(expiresAtMs) ? new Date(expiresAtMs).toISOString() : null;
+        return {
+          ...e,
+          withinServiceWindow: Number.isFinite(expiresAtMs) && Date.now() < expiresAtMs,
+          serviceWindowExpiresAt: windowExpiresAt,
+        };
       })
     );
     res.json({ escalations: withWindow });

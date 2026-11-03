@@ -16,6 +16,10 @@ export interface DownloadedAudio {
 // todos os tenants — uma chamada de rede travada indefinidamente bloqueava a
 // transcrição de áudio de todo mundo, não só do tenant afetado.
 const MEDIA_DOWNLOAD_TIMEOUT_MS = 20_000;
+// A Evolution precisa buscar e descriptografar o arquivo dentro da própria
+// instância. Em produção, 20s abortava downloads válidos de mídia maior ou
+// quando a instância estava sob carga, deixando o registro sem objeto no R2.
+const EVOLUTION_MEDIA_DOWNLOAD_TIMEOUT_MS = 60_000;
 
 // TASK-0398 (achado real em produção, 12/09/2026: imagem de lead chegando
 // na conversa mas com "Imagem indisponível (HTTP 404)" no painel, apesar da
@@ -103,7 +107,7 @@ export async function downloadEvolutionMedia(
       apikey: apiKey,
     },
     body: JSON.stringify({ message: { key: messageKey }, convertToMp4: false }),
-    signal: AbortSignal.timeout(MEDIA_DOWNLOAD_TIMEOUT_MS),
+    signal: AbortSignal.timeout(EVOLUTION_MEDIA_DOWNLOAD_TIMEOUT_MS),
   });
 
   if (!res.ok) {

@@ -788,6 +788,83 @@ export async function listConversations(tenantId: string, opts: { includeArchive
 }
 
 /**
+ * Leitura enxuta para o CRM. O CRM precisa apenas dos dados de identificação
+ * e da última mensagem; carregar etiquetas, contadores de não lidas e o
+ * histórico inteiro cria trabalho desnecessário numa tela que lista todos os
+ * contatos do tenant.
+ */
+export async function listCrmConversationSummaries(tenantId: string): Promise<Array<{
+  phone: string;
+  name?: string;
+  updatedAt: string;
+  lastMessage?: string;
+}>> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('conversation_list_summaries')
+    .select('phone, name, updated_at, archived_at, last_message_text')
+    .eq('tenant_id', tenantId)
+    .order('updated_at', { ascending: false });
+
+  const missingSummaryView = error && (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    String(error.message || '').includes('conversation_list_summaries')
+  );
+  if (missingSummaryView) {
+    // Compatibilidade temporária enquanto a view 0041 ainda não existe no
+    // ambiente. O caminho normal acima nunca carrega o histórico completo.
+    return (await listConversations(tenantId, { includeArchived: true })).map((conversation) => ({
+      phone: conversation.phone,
+      name: conversation.name,
+      updatedAt: conversation.updatedAt,
+      lastMessage: conversation.messages[conversation.messages.length - 1]?.text,
+    }));
+  }
+  if (error) throw error;
+
+  return ((data || []) as Array<{
+    phone: string;
+    name: string | null;
+    updated_at: string;
+    archived_at: string | null;
+    last_message_text: string | null;
+  }>)
+    .map((row) => ({
+      phone: row.phone,
+      name: row.name || undefined,
+      updatedAt: row.updated_at,
+      lastMessage: row.last_message_text || undefined,
+    }));
+}
+
+/**
+ * Retorna de uma só vez o horário da última mensagem do cliente por conversa.
+ * `null` sinaliza que a coluna da migration 0076 ainda não está disponível,
+ * permitindo que a rota use o caminho de compatibilidade antigo.
+ */
+export async function listLastLeadMessageTimestamps(tenantId: string): Promise<Map<string, string | null> | null> {
+  const { data, error } = await getDb()
+    .from('conversation_list_summaries')
+    .select('phone, last_lead_message_at')
+    .eq('tenant_id', tenantId);
+
+  const missingSummaryView = error && (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    error.code === '42703' ||
+    error.code === 'PGRST204' ||
+    String(error.message || '').includes('conversation_list_summaries') ||
+    String(error.message || '').includes('last_lead_message_at')
+  );
+  if (missingSummaryView) return null;
+  if (error) throw error;
+
+  return new Map(((data || []) as Array<{ phone: string; last_lead_message_at: string | null }>)
+    .map((row) => [row.phone, row.last_lead_message_at]));
+}
+
+/**
  * Consulta leve (sem histórico de mensagens) só do `phone_number_id` da
  * conversa — usado antes de qualquer envio de resposta (manual ou da IA)
  * pra saber qual número usar (ver `resolveCredentialsForConversation`).
