@@ -52,3 +52,26 @@ describe('parseEvolutionWebhookPayload — evolutionImage', () => {
     expect(msg.caption).toBeUndefined();
   });
 });
+
+
+describe('chave de mídia Evolution preservada independente do telefone do CRM', () => {
+  it.each(['imageMessage', 'audioMessage', 'stickerMessage'])('%s mantém @lid, alternativa e fromMe', (mediaType) => {
+    const key = { id: 'media-lid', remoteJid: '123456789@lid', remoteJidAlt: '556798038466@s.whatsapp.net', fromMe: true, addressingMode: 'lid' };
+    const [msg] = parseEvolutionWebhookPayload({
+      event: 'messages.upsert', instance: 'cliente-abc',
+      data: { key, message: { [mediaType]: { mimetype: 'image/jpeg' } } },
+    });
+    expect(msg.from).toBe('5567998038466');
+    expect(msg.evolutionMessageKey).toEqual(key);
+    expect(msg.evolutionMessageKey).not.toBe(key);
+  });
+
+  it('normalizar o nono dígito não altera o remoteJid usado para download', () => {
+    const [msg] = parseEvolutionWebhookPayload({
+      event: 'messages.upsert', instance: 'cliente-abc',
+      data: { key: { id: 'media-legacy', remoteJid: '556798038466@s.whatsapp.net', fromMe: false }, message: { imageMessage: {} } },
+    });
+    expect(msg.from).toBe('5567998038466');
+    expect(msg.evolutionMessageKey?.remoteJid).toBe('556798038466@s.whatsapp.net');
+  });
+});

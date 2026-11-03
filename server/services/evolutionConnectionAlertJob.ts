@@ -81,7 +81,10 @@ async function checkOneTenant(row: EvolutionCredentialRow, deps: EvolutionConnec
     state = await fetchConnectionState(row.api_url, decryptSecret(row.api_key), row.instance_name);
   } catch (err) {
     console.warn(`⚠️  [Alerta conexão WhatsApp] tenant=${row.tenant_id} falha ao consultar estado da instância "${row.instance_name}":`, (err as Error).message);
-    return; // falha transitória de rede pra consultar o status — não conta como "desconectado", tenta de novo no próximo tick
+    // Não presume que a sessão foi deslogada. Porém, falhas persistentes da
+    // API também impedem operação e precisam do mesmo período de tolerância
+    // e alerta por episódio usado numa sessão fechada.
+    state = 'api_unavailable';
   }
 
   if (state === 'open') {
@@ -102,6 +105,10 @@ async function checkOneTenant(row: EvolutionCredentialRow, deps: EvolutionConnec
     return;
   }
 
+  if (row.last_connection_state !== state) {
+    await updateCredentialRow(row.tenant_id, { last_connection_state: state });
+  }
+
   const disconnectedSinceMs = new Date(row.disconnected_since).getTime();
   if (now - disconnectedSinceMs < thresholdMs) return;
   if (row.disconnected_alert_sent_at && new Date(row.disconnected_alert_sent_at).getTime() >= disconnectedSinceMs) return; // já alertou por ESSE episódio
@@ -113,8 +120,10 @@ async function checkOneTenant(row: EvolutionCredentialRow, deps: EvolutionConnec
 
   // Canal 1: push pro PWA do atendente — mesmo padrão dos outros alertas, nunca lança (sendPushToTenant engole erro de assinatura individual).
   await sendPushToTenant(row.tenant_id, {
-    title: '🔌 WhatsApp desconectado',
-    body: `${tenantName} — sem conexão há ${disconnectedMinutes}min. Mensagens de clientes podem não estar chegando. Reconecte em Configurações.`,
+    title: state === 'api_unavailable' ? '🔌 Evolution API indisponível' : '🔌 WhatsApp desconectado',
+    body: state === 'api_unavailable'
+      ? `${tenantName} — sem acesso à Evolution API há ${disconnectedMinutes}min. Verifique o servidor e as credenciais em Configurações; o estado da sessão não pôde ser confirmado.`
+      : `${tenantName} — sem conexão há ${disconnectedMinutes}min. Mensagens de clientes podem não estar chegando. Reconecte em Configurações.`,
     tag: `evolution-disconnected-${row.tenant_id}`,
   });
 

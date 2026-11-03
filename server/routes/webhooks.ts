@@ -713,7 +713,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
                 const isAudio = msg.type === 'audio';
                 withMediaDownloadRetry(() =>
                   downloadEvolutionMedia(
-                    { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
+                    msg.evolutionMessageKey ?? { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
                     resolvedTenant.evolutionInstanceName,
                     resolvedTenant.evolutionApiUrl,
                     resolvedTenant.evolutionApiKey
@@ -827,7 +827,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
             : msg.evolutionImage
             ? withMediaDownloadRetry(() =>
                 downloadEvolutionMedia(
-                  { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
+                  msg.evolutionMessageKey ?? { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
                   resolvedTenant.evolutionInstanceName,
                   resolvedTenant.evolutionApiUrl,
                   resolvedTenant.evolutionApiKey
@@ -964,7 +964,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
             : msg.evolutionSticker
             ? withMediaDownloadRetry(() =>
                 downloadEvolutionMedia(
-                  { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
+                  msg.evolutionMessageKey ?? { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
                   resolvedTenant.evolutionInstanceName,
                   resolvedTenant.evolutionApiUrl,
                   resolvedTenant.evolutionApiKey
