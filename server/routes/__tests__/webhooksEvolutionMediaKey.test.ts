@@ -25,7 +25,7 @@ describe('download de mídia usa a chave do webhook, não o telefone normalizado
     // Exercita o handler real sem abrir porta de rede no ambiente de testes.
     const route = router.stack.find((layer: any) => layer.route?.path === '/api/webhooks/evolution' && layer.route.methods.post);
     const key = { id: `media-${kind}-${fromMe}`, remoteJid: '123456@lid', remoteJidAlt: '556798038466@s.whatsapp.net', fromMe };
-    const req = { body: { event: 'messages.upsert', instance: 'test-instance', data: { key, message: { [kind]: {} } } }, headers: {} };
+    const req = { body: { event: 'messages.upsert', instance: 'test-instance', data: { key, message: { [kind]: {} } } }, headers: {} } as any;
     const res = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
     await route!.route.stack[0].handle(req, res, vi.fn());
     await vi.waitFor(() => expect(saveMediaImage).toHaveBeenCalled());
