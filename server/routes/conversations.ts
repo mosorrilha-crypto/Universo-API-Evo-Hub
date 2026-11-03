@@ -2520,10 +2520,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const withWindow = await Promise.all(
       escalations.map(async (e) => {
         if (e.resolved) return e;
-        if (!lastLeadMessageAtByPhone || !lastLeadMessageAtByPhone.has(e.phone)) {
+        if (!lastLeadMessageAtByPhone || !lastLeadMessageAtByPhone.has(e.phone) || !lastLeadMessageAtByPhone.get(e.phone)) {
           // Compatibilidade temporária se a migration 0076 ainda não foi
-          // aplicada no banco deste ambiente ou se a conversa ainda não está
-          // na view resumida.
+          // aplicada, se a conversa não está resumida ou se o campo está
+          // vazio (o histórico completo pode conter o dado em bases antigas).
           const window = await getCustomerServiceWindowStatus(tenantId, e.phone);
           return { ...e, withinServiceWindow: window.withinWindow, serviceWindowExpiresAt: window.windowExpiresAt };
         }
