@@ -43,7 +43,10 @@ describe('getLegacySupabaseStorageObject', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://proj.supabase.co/storage/v1/object/app-data/kb-image/tenant-a/img-1',
-      { headers: { apikey: 'service-key', Authorization: 'Bearer service-key' } }
+      {
+        headers: { apikey: 'service-key', Authorization: 'Bearer service-key' },
+        signal: expect.any(AbortSignal),
+      }
     );
     expect(result).toEqual({ buffer: Buffer.from('foto antiga'), contentType: 'image/jpeg' });
   });

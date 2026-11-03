@@ -1,5 +1,5 @@
 import { Router, type RequestHandler } from 'express';
-import { listConversations } from '../services/conversationStore';
+import { listCrmConversationSummaries } from '../services/conversationStore';
 import { listCrmLeadStates, upsertCrmLeadState, deleteCrmLeadState, type CrmLeadState } from '../services/crmStore';
 import { createFinancialTransaction, isDuplicateSourceRefError } from '../services/financialStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
@@ -69,7 +69,7 @@ export function createCrmRouter({ authenticateToken, isFinancialModuleEnabled }:
   router.get('/api/crm/leads', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const [conversations, crmStates] = await Promise.all([
-      listConversations(tenantId, { includeArchived: true }),
+      listCrmConversationSummaries(tenantId),
       listCrmLeadStates(tenantId),
     ]);
 
@@ -78,7 +78,6 @@ export function createCrmRouter({ authenticateToken, isFinancialModuleEnabled }:
 
     for (const conv of conversations) {
       const state = crmByPhone.get(conv.phone);
-      const lastMessage = conv.messages[conv.messages.length - 1]?.text;
       leads.push({
         phone: conv.phone,
         // Nome da conversa real sempre prevalece sobre o que foi digitado
@@ -92,7 +91,7 @@ export function createCrmRouter({ authenticateToken, isFinancialModuleEnabled }:
         tasks: state?.tasks || [],
         updatedAt: state?.updatedAt || conv.updatedAt,
         hasConversation: true,
-        lastMessage,
+        lastMessage: conv.lastMessage,
       });
       crmByPhone.delete(conv.phone);
     }
