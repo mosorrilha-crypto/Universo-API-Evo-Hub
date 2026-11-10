@@ -42,3 +42,38 @@ describe('consulta operacional de histórico', () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain('secret body');
   });
 });
+
+describe('retomada restrita da conexão', () => {
+  const restartRequest = { ...request, action: 'restart', requestId: '6d7f72ef-1165-47e7-8f38-024d53c38a58' };
+  function credential() {
+    return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { instance_name: 'monique', api_url: 'https://evolution.example', api_key: 'encrypted' } }) }) }) };
+  }
+  it('recusa ação desconhecida e restart sem identificador', () => {
+    expect(() => parseHistoryProbeRequest(JSON.stringify({ ...request, action: 'delete' }), now)).toThrow();
+    expect(() => parseHistoryProbeRequest(JSON.stringify({ ...request, action: 'restart' }), now)).toThrow();
+  });
+  it('reinicia somente a instância cadastrada, uma vez e sem logout/delete', async () => {
+    db.from.mockReturnValueOnce(credential()).mockReturnValueOnce({ insert: vi.fn().mockResolvedValue({ error: null }) });
+    const call = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ messages: { total: 0, records: [] } })));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runEvolutionHistoryProbe(JSON.stringify(restartRequest));
+    expect(call.mock.calls.map(([url]) => url)).toEqual(['https://evolution.example/instance/restart/monique', 'https://evolution.example/chat/findMessages/monique']);
+    expect(call.mock.calls[0][1]?.method).toBe('POST');
+  });
+  it('não repete restart reivindicado em outro processo', async () => {
+    db.from.mockReturnValueOnce(credential()).mockReturnValueOnce({ insert: vi.fn().mockResolvedValue({ error: { code: '23505' } }) });
+    const call = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ messages: { total: 0, records: [] } })));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runEvolutionHistoryProbe(JSON.stringify(restartRequest));
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(String(call.mock.calls[0][0])).toContain('/chat/findMessages/');
+  });
+  it('não reinicia quando a reivindicação falha', async () => {
+    db.from.mockReturnValueOnce(credential()).mockReturnValueOnce({ insert: vi.fn().mockResolvedValue({ error: { code: '500' } }) });
+    const call = vi.spyOn(globalThis, 'fetch');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runEvolutionHistoryProbe(JSON.stringify(restartRequest));
+    expect(call).not.toHaveBeenCalled();
+  });
+});
