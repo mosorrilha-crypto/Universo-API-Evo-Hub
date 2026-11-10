@@ -2221,7 +2221,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   const selectedLead = leads.find((l) => l.id === activeLeadId) || leads[0];
 
-  const refreshContactContext = React.useCallback(async () => {
+  const refreshContactContext = React.useCallback(async (clearPrevious = true) => {
     const phone = selectedLead?.phone;
     const tenantId = activeTenant?.id;
     const isRealConversation = Boolean((selectedLead as any)?.isReal);
@@ -2238,7 +2238,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // de lead/empresa, o render nunca pode reaproveitar a memória anterior.
     setContactContextPhone(phone);
     setContactContextTenantId(tenantId);
-    setContactContext(null);
+    // Poll mantém somente o snapshot ainda válido; troca de lead/configuração limpa antes.
+    if (clearPrevious) setContactContext(null);
     setIsContactContextLoading(true);
     try {
       const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/context`);
@@ -2257,9 +2258,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   useEffect(() => {
     void refreshContactContext();
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshContactContext();
+      if (document.visibilityState === 'visible') void refreshContactContext(false);
     }, 30000);
-    const onVisible = () => { if (document.visibilityState === 'visible') void refreshContactContext(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') void refreshContactContext(false); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
   }, [refreshContactContext, agentStatus, adsOnly, leadsOnly, selectedLead?.aiBlockedAt, selectedLead?.messages?.length, aiReplyStatusByPhone[selectedLead?.phone || '']]);

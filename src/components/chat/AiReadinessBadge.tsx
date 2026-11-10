@@ -16,6 +16,7 @@ const reasons: Record<string, [string, string]> = {
   channel_disconnected: ['O canal não está conectado. A próxima mensagem pode não chegar ao Universo.', 'El canal no está conectado. El próximo mensaje puede no llegar a Universo.'],
   channel_unverified: ['Não foi possível confirmar a conexão do canal.', 'No se pudo confirmar la conexión del canal.'],
   receive_unverified: ['Não há mensagem recebida deste lead nos últimos 15 minutos para confirmar a sincronização. Isso não significa que o canal esteja desconectado.', 'No hay un mensaje recibido de este lead en los últimos 15 minutos para confirmar la sincronización. Esto no significa que el canal esté desconectado.'],
+  last_reply_failed: ['A última tentativa recente da IA falhou ou não teve envio confirmado. A prontidão precisa ser verificada novamente.', 'El último intento reciente de la IA falló o no tuvo envío confirmado. Se debe verificar nuevamente la disponibilidad.'],
   unavailable: ['Não foi possível confirmar as condições de atendimento. O indicador não comprova disponibilidade.', 'No se pudieron confirmar las condiciones de atención. El indicador no confirma disponibilidad.'],
 };
 

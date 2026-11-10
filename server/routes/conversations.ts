@@ -413,15 +413,18 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/conversations/:phone/context', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
+    const tracePromise = listAgentTurnTraces(tenantId, phone, 1);
     const [memoryResult, traceResult, windowResult, readinessResult] = await Promise.allSettled([
       getContactAgentMemory(tenantId, phone),
-      listAgentTurnTraces(tenantId, phone, 1),
+      tracePromise,
       getCustomerServiceWindowStatus(tenantId, phone),
-      getAiReadiness(tenantId, phone, {
+      tracePromise.then(traces => getAiReadiness(tenantId, phone, {
+        lastSendStatus: traces[0]?.final_send_status,
+        lastDecisionAt: traces[0]?.created_at,
         aiConfigured: Boolean(getAi?.()),
         sharedMeta: { metaAccessToken, metaPhoneNumberId },
         sharedEvo: { evolutionApiUrl, evolutionApiKey, evolutionInstanceName },
-      }),
+      })),
     ]);
     const memory = memoryResult.status === 'fulfilled' ? memoryResult.value : null;
     const latestTrace = traceResult.status === 'fulfilled' ? traceResult.value[0] || null : null;

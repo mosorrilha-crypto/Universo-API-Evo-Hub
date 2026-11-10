@@ -157,7 +157,7 @@ O selo do cabeçalho deixa de usar apenas `aiBlockedAt`. A avaliação somente d
 leitura em `GET /api/conversations/:phone/context` considera pausa global/horário
 restrito, bloqueio individual, conversa iniciada pelo operador, pausa humana de
 5 minutos (com devolução explícita), geração real no processo, IA configurada,
-base publicada e filtros de anúncio/leads. As regras compartilhadas de pausa
+base publicada, resultado de envio recente e filtros de anúncio/leads. As regras compartilhadas de pausa
 são reutilizadas; a política de respostas não muda.
 
 Verde exige também conexão verificada (consulta Evolution com timeout de 3s) e

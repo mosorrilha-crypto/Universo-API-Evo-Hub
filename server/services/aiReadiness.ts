@@ -10,14 +10,14 @@ export interface AiReadiness {
   state: 'ready' | 'busy' | 'blocked' | 'conditional' | 'unknown';
   reason: 'ready' | 'generating' | 'agent_paused' | 'restricted_hours' | 'contact_blocked' | 'operator_active' | 'operator_started'
     | 'ads_only' | 'leads_only' | 'ai_unavailable' | 'knowledge_unavailable' | 'channel_disconnected'
-    | 'channel_unverified' | 'receive_unverified' | 'unavailable';
+    | 'channel_unverified' | 'receive_unverified' | 'last_reply_failed' | 'unavailable';
   checkedAt: string;
   validUntil: string;
 }
 
 /** Só leitura: não marca lead de anúncio, não gera resposta e não envia mensagem. */
 export async function getAiReadiness(tenantId: string, phone: string, deps: {
-  aiConfigured: boolean; sharedMeta: SharedMetaCredentials; sharedEvo: SharedEvolutionCredentials;
+  aiConfigured: boolean; lastSendStatus?: string | null; lastDecisionAt?: string; sharedMeta: SharedMetaCredentials; sharedEvo: SharedEvolutionCredentials;
 }): Promise<AiReadiness> {
   const now = Date.now();
   const result = (state: AiReadiness['state'], reason: AiReadiness['reason']): AiReadiness => ({
@@ -38,6 +38,10 @@ export async function getAiReadiness(tenantId: string, phone: string, deps: {
     if (first?.sender === 'agent' && first.sentBy === 'operator' && !conversation.adGreetingMatchedAt) return result('blocked', 'operator_started');
     if (isOperatorActivelyEngaged(conversation)) return result('blocked', 'operator_active');
     if (isGenerating(tenantId, phone)) return result('busy', 'generating');
+    if (deps.lastDecisionAt && Date.parse(deps.lastDecisionAt) >= now - 15 * 60000
+      && ['send_failed', 'not_sent_blocked', 'not_sent_calendar_error'].includes(deps.lastSendStatus || '')) {
+      return result('unknown', 'last_reply_failed');
+    }
     if (!deps.aiConfigured) return result('blocked', 'ai_unavailable');
     const kb = await getRuntimeKnowledgeBase(tenantId);
     if (!kb.knowledgeBase) return result('blocked', 'knowledge_unavailable');

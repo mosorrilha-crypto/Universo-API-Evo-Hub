@@ -100,6 +100,13 @@ describe('prontidão real da IA por lead', () => {
     mocks.conversation.mockRejectedValue(new Error('db'));
     expect((await check()).state).toBe('unknown');
   });
+  it.each(['send_failed', 'not_sent_blocked', 'not_sent_calendar_error'])('resultado recente %s impede verde', async lastSendStatus => {
+    expect(await getAiReadiness('a', '123', { ...deps, lastSendStatus, lastDecisionAt: new Date(now - 60000).toISOString() }))
+      .toMatchObject({ state: 'unknown', reason: 'last_reply_failed' });
+  });
+  it('não confunde falha antiga com impedimento atual', async () => {
+    expect((await getAiReadiness('a', '123', { ...deps, lastSendStatus: 'send_failed', lastDecisionAt: new Date(now - 3600000).toISOString() })).state).toBe('ready');
+  });
   it('socket aberto sem recepção recente não comprova prontidão', async () => {
     db.__tables.messages[0].created_at = new Date(now - 16 * 60000).toISOString();
     expect(await check()).toMatchObject({ state: 'unknown', reason: 'receive_unverified' });
