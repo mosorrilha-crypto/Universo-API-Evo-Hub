@@ -1,3 +1,4 @@
+import { runEvolutionHistoryProbe } from './server/services/evolutionHistoryProbe';
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
@@ -396,6 +397,7 @@ async function startServer() {
 
   app.listen(config.port, '0.0.0.0', () => {
     console.log(`Servidor Universo.ai rodando na porta ${config.port}`);
+    void runEvolutionHistoryProbe();
   });
 }
 

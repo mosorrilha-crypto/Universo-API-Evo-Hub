@@ -1,0 +1,65 @@
+import { getPlatformDb } from './db';
+import { decryptSecret } from './tokenCrypto';
+
+interface ProbeRequest { tenantId: string; from: string; to: string; expiresAt: string }
+
+/** Diagnóstico operacional opt-in, sem rota pública, sem importar/enviar mensagens. */
+export function parseHistoryProbeRequest(raw: string | undefined, now = Date.now()): ProbeRequest | undefined {
+  if (!raw) return undefined;
+  const request = JSON.parse(raw) as ProbeRequest;
+  const from = Date.parse(request.from), to = Date.parse(request.to), expiry = Date.parse(request.expiresAt);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.tenantId || '')
+      || !Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(expiry)
+      || to <= from || to - from > 86400000 || expiry <= now || expiry > now + 3600000) {
+    throw new Error('Solicitação de diagnóstico inválida ou expirada');
+  }
+  return request;
+}
+
+export async function runEvolutionHistoryProbe(raw = process.env.EVOLUTION_HISTORY_PROBE): Promise<void> {
+  if (!raw) return;
+  try {
+    const request = parseHistoryProbeRequest(raw)!;
+    // Job administrativo explicitamente limitado a um tenant; nenhum segredo sai deste processo.
+    const db = getPlatformDb();
+    const { data: cred, error } = await db.from('tenant_evolution_credentials')
+      .select('instance_name, api_url, api_key').eq('tenant_id', request.tenantId).maybeSingle();
+    if (error || !cred) throw new Error('Credencial indisponível');
+    const base = new URL(cred.api_url);
+    if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) {
+      throw new Error('URL Evolution inválida');
+    }
+    const response = await fetch(`${base.href.replace(/\/$/, '')}/chat/findMessages/${encodeURIComponent(cred.instance_name)}`, {
+      method: 'POST', headers: { apikey: decryptSecret(cred.api_key), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ where: { messageTimestamp: { gte: request.from, lte: new Date(Date.parse(request.to) - 1).toISOString() } }, offset: 100, page: 1 }),
+      signal: AbortSignal.timeout(20000), redirect: 'error',
+    });
+    if (!response.ok) throw new Error(`Evolution HTTP ${response.status}`);
+    const result = await response.json();
+    const records = result?.messages?.records;
+    const total = result?.messages?.total;
+    if (!Array.isArray(records) || !Number.isInteger(total) || total < 0) throw new Error('Resposta Evolution inválida');
+    const ids = records.map((row: any) => row?.key?.id).filter((id: unknown): id is string => typeof id === 'string');
+    let storedCount = 0;
+    if (ids.length) {
+      const { data: existing, error: queryError } = await db.from('messages').select('id')
+        .eq('tenant_id', request.tenantId).in('id', ids);
+      if (queryError) throw new Error('Consulta do histórico Universo falhou');
+      storedCount = existing?.length || 0;
+    }
+    const timestamps = records.map((row: any) => Number(row.messageTimestamp) * 1000)
+      .filter((value: number) => Number.isFinite(value) && value >= Date.parse(request.from) && value < Date.parse(request.to));
+    console.log('[Evolution History Probe]', JSON.stringify({
+      tenantId: request.tenantId, from: request.from, to: request.to, total,
+      sampled: records.length, sampledAlreadyStored: storedCount,
+      sampledMissing: ids.length - storedCount,
+      earliestSample: timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null,
+      latestSample: timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null,
+    }));
+  } catch (error) {
+    // Sem payloads/URLs/chaves nem mensagem arbitrária retornada pelo provedor.
+    const reason = error instanceof Error && /^(Solicitação|Credencial|URL Evolution|Evolution HTTP|Resposta Evolution|Consulta do histórico)/.test(error.message)
+      ? error.message : 'Falha de rede ou configuração';
+    console.error('[Evolution History Probe]', JSON.stringify({ error: reason }));
+  }
+}
