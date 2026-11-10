@@ -11,6 +11,8 @@ export interface ParsedIncomingMessage {
   messageId: string;
   from: string;
   contactName?: string;
+  /** Instante original do provedor em ISO; ausente se inválido/não informado. */
+  timestamp?: string;
   /** phone_number_id da Meta — o número do NEGÓCIO que recebeu a mensagem (não o do cliente). Usado pra resolver de qual tenant é essa mensagem (Bloco 2.B). Ausente em mensagens via Evolution (self-hosted, sem esse conceito). */
   phoneNumberId?: string;
   /** Nome da instância Evolution API (`body.instance`) — equivalente ao phoneNumberId acima, mas pra Porta A (Epic 4.6, self-hosted/QR Code). Ausente em mensagens via Meta. */
@@ -44,6 +46,23 @@ export interface ParsedIncomingMessage {
   fromMe?: true;
 }
 
+/** Meta/Evolution usam segundos; Instagram usa milissegundos. */
+function providerTimestamp(value: unknown, milliseconds = false): string | undefined {
+  let numeric: number;
+  if (typeof value === 'number' || (typeof value === 'string' && value.trim())) {
+    numeric = Number(value);
+  } else if (value && typeof value === 'object' && 'low' in value && 'high' in value
+    && typeof value.low === 'number' && typeof value.high === 'number') {
+    numeric = (value.low >>> 0) + value.high * 0x100000000;
+  } else {
+    return undefined;
+  }
+  const epochMs = numeric * (milliseconds ? 1 : 1000);
+  if (!Number.isSafeInteger(epochMs) || epochMs <= 0) return undefined;
+  const date = new Date(epochMs);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+}
+
 /**
  * Meta Cloud API manda o payload dentro de entry[].changes[].value.messages[].
  * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/payload-examples
@@ -73,6 +92,7 @@ export function parseMetaWebhookPayload(body: any): ParsedIncomingMessage[] {
           from: msg.from,
           contactName: contactsByWaId.get(msg.from),
           phoneNumberId,
+          ...(providerTimestamp(msg.timestamp) ? { timestamp: providerTimestamp(msg.timestamp) } : {}),
           ...(msg.referral
             ? { referral: { headline: msg.referral.headline, sourceId: msg.referral.source_id, ctwaClid: msg.referral.ctwa_clid } }
             : {}),
@@ -181,6 +201,7 @@ export function parseInstagramWebhookPayload(body: any): ParsedIncomingMessage[]
         messageId,
         from,
         instagramAccountId,
+        ...(providerTimestamp(event.timestamp, true) ? { timestamp: providerTimestamp(event.timestamp, true) } : {}),
         ...(event.message?.is_echo ? { fromMe: true as const } : {}),
       };
 
@@ -288,6 +309,7 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
     from,
     contactName,
     instanceName: body.instance,
+    ...(providerTimestamp(data.messageTimestamp) ? { timestamp: providerTimestamp(data.messageTimestamp) } : {}),
     ...(data.key.fromMe ? { fromMe: true as const } : {}),
     ...(adReferral ? { referral: { headline: adReferral.headline, sourceId: adReferral.sourceId, ctwaClid: adReferral.ctwaClid } } : {}),
   };

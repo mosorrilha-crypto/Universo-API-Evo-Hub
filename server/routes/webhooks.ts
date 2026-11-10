@@ -651,8 +651,9 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // dedicado do Evo Hub.
   const enqueueAudioMessages = async (parsedMessages: ParsedIncomingMessage[]) => {
     let enqueued = 0;
-    const nowLabel = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const receivedAt = new Date().toISOString();
     for (const msg of parsedMessages) {
+      const messageTimestamp = msg.timestamp || receivedAt;
       // Escopado por canal/instância (ver comentário em dedupeKeyFor) — o
       // messageId cru da Evolution API não é garantido único entre
       // instâncias/tenants diferentes, só a Meta Cloud API garante isso.
@@ -706,10 +707,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
             const alreadyOurs = await consumePendingEcho(tenantId, msg.from, msg.type, msg.type === 'text' ? msg.text : undefined);
             if (!alreadyOurs) {
               if (msg.type === 'text' && msg.text) {
-                await recordOutgoingMessage(tenantId, msg.from, { type: 'text', text: msg.text, timestamp: nowLabel }, 'operator', undefined, undefined, msg.messageId);
+                await recordOutgoingMessage(tenantId, msg.from, { type: 'text', text: msg.text, timestamp: messageTimestamp }, 'operator', undefined, undefined, msg.messageId);
               } else if (msg.type === 'audio' || msg.type === 'image') {
                 const placeholderText = msg.type === 'audio' ? '🎤 Áudio enviado' : '📷 Imagem enviada';
-                await recordOutgoingMessage(tenantId, msg.from, { type: msg.type, text: placeholderText, timestamp: nowLabel }, 'operator', undefined, undefined, msg.messageId);
+                await recordOutgoingMessage(tenantId, msg.from, { type: msg.type, text: placeholderText, timestamp: messageTimestamp }, 'operator', undefined, undefined, msg.messageId);
                 const isAudio = msg.type === 'audio';
                 withMediaDownloadRetry(() =>
                   downloadEvolutionMedia(
@@ -779,11 +780,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         const inboundMetaPhoneNumberId = resolvedTenant.provider === 'meta' ? resolvedTenant.metaPhoneNumberId : undefined;
 
         if (msg.type === 'audio') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: messageTimestamp }, msg.messageId, undefined, inboundMetaPhoneNumberId);
           enqueueTranscriptionJob(msg, resolvedTenant);
           enqueued += 1;
         } else if (msg.type === 'text') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: messageTimestamp }, undefined, undefined, inboundMetaPhoneNumberId);
           // TASK-0453 (achado de auditoria + pedido direto): em tenants
           // leadsOnly (TASK-0411/0412 — mesmo número de WhatsApp pessoal e
           // profissional), esses dois gatilhos de palavra-chave disparavam
@@ -813,7 +814,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // webhookParsers.ts) preserva o que o cliente escreveu; a UI
           // (WhatsAppLeadsSim.tsx) já mostra esse texto como legenda abaixo da
           // foto, então só precisa chegar até aqui.
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId, 'pending');
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: messageTimestamp }, msg.messageId, undefined, inboundMetaPhoneNumberId, 'pending');
 
           // Uma única promise de download, reaproveitada abaixo (await duas
           // vezes na mesma promise não baixa a imagem de novo) — mantém o
@@ -957,7 +958,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // (webp) exatamente como já funcionam pra foto. Deliberadamente
           // SEM a análise de comprovante de pagamento acima (isso é
           // específico de foto sendo comprovante — uma figurinha nunca é).
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: friendlyLabelForOtherType('sticker'), timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId, 'pending');
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: friendlyLabelForOtherType('sticker'), timestamp: messageTimestamp }, msg.messageId, undefined, inboundMetaPhoneNumberId, 'pending');
           const metaSticker = msg.metaSticker;
           const stickerDownloadPromise = metaSticker
             ? withMediaDownloadRetry(() => downloadMetaMedia(metaSticker.mediaId, resolvedTenant.metaAccessToken))
@@ -993,7 +994,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // localização, reação, contato etc.) — grava com um rótulo que
           // descreve o que realmente chegou, em vez do "[video]" cru de
           // antes (achado real em produção).
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: messageTimestamp }, undefined, undefined, inboundMetaPhoneNumberId);
         }
           }
         );
@@ -1085,7 +1086,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       const parsedMessages = parseEvolutionWebhookPayload(body);
       const enqueued = await enqueueAudioMessages(parsedMessages);
 
-      console.log('📱 [Evolution Webhook] Evento recebido', { instance, eventName, keyId: data?.key?.id, audiosEnfileirados: enqueued });
+      console.log('📱 [Evolution Webhook] Evento recebido', {
+        instance, eventName, keyId: data?.key?.id, audiosEnfileirados: enqueued,
+        sourceTimestamp: parsedMessages[0]?.timestamp,
+        receivedAt: new Date().toISOString(),
+      });
 
       return res.status(200).json({
         success: true,

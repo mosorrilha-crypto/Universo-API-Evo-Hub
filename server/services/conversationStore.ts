@@ -528,6 +528,13 @@ export async function getConversationCtwaClid(tenantId: string, phone: string): 
   return data?.ctwa_clid || null;
 }
 
+/** Horários locais legados (HH:MM) não contêm data: mantém o default do banco. */
+function originalMessageTime(timestamp: string): { created_at?: string } {
+  if (typeof timestamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(timestamp)) return {};
+  const date = new Date(timestamp);
+  return Number.isFinite(date.getTime()) ? { created_at: date.toISOString() } : {};
+}
+
 export async function recordIncomingMessage(
   tenantId: string,
   phone: string,
@@ -547,7 +554,7 @@ export async function recordIncomingMessage(
     : {};
   const { error } = await db
     .from('messages')
-    .insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null, reply_to_message_id: replyToMessageId || null, ...mediaFields });
+    .insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null, reply_to_message_id: replyToMessageId || null, ...originalMessageTime(message.timestamp), ...mediaFields });
   if (error) {
     // Achado consultando uma lead real com ctwa_clid gravado mas 0 mensagens:
     // este erro só era logado, nunca relançado — o try/catch em webhooks.ts
@@ -614,6 +621,7 @@ export async function recordOutgoingMessage(
       tenant_id: tenantId,
       conversation_id: conv.id,
       sender: 'agent',
+      ...originalMessageTime(message.timestamp),
       type: message.type,
       text: message.text ?? null,
       reply_to_message_id: replyToMessageId || null,
