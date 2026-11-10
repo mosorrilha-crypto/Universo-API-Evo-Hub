@@ -151,6 +151,27 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
    - Decisão explícita do dono do produto: prioridade atual é deixar o produto pronto primeiro — nenhum destes é bloqueio pra lançamento, ficam registrados aqui pra não se perderem.
 9. **Interface do painel majoritariamente não-bilíngue** (achado real, 18/09/2026, TASK-0436 — pedido pra preparar apresentação a cliente paraguaio) — o sistema de idioma (`AppPreferencesContext`/`src/i18n/translations.ts`, seletor PT/ES real no Header, `localStorage`) já existe e funciona, mas só **10 de 51 componentes** (`393` chaves de tradução hoje — contagem real em `translations.ts`, TASK-0442; o "298" registrado aqui antes já estava defasado em relação ao `main` no momento em que essa tarefa começou, que já tinha 318) estão ligados a ele — o resto, cerca de **~29 mil linhas de JSX**, ainda é texto fixo em português. TASK-0436 (fase 1) cobriu o cabeçalho/grade de documentos/diagnóstico da Base de Conhecimento (a tela do print reportado); TASK-0438 (fase 2) cobriu o restante do mesmo arquivo — as 6 seções de edição empilhadas, os 2 modais (wizard de produto, editor de horários) e o rodapé de salvar/publicar — exceto o editor profundo de produto/variante da Seção 3 (só aparece ao clicar num item específico, deixado pra próxima fatia por tamanho). TASK-0442 (19/09/2026) cobriu a fatia sempre visível do `WhatsAppLeadsSim.tsx`/Atendimento (a maior tela do sistema, 7.426 linhas) — toolbar/status do agente, busca e filtros da lista, grupos de espera, barra inferior, cabeçalho da conversa aberta, menu ⋮ de ações (tooltips), banners de status da IA/janela de 24h, composer (emoji/áudio/preview de resposta) e as abas do painel lateral (Ficha do Contato/Análise IA), 75 chaves novas (`chat*`). Boa parte do arquivo já era bilíngue via um padrão local `isSpanish ? 'x' : 'y'` (não este sistema `t()`) — essas partes foram deixadas como estavam, sem duplicar. Deixado de fora por ser menos crítico pra demonstração: o modal "Gatilhos de Anúncio", o modal de feedback supervisionado (Sugerir melhoria/Reportar bug), os botões de simular envio de imagem/PDF (só existem em conversa de teste), a aba "Escalonamentos" por contato (histórico), e banners raros de erro (bloqueio geográfico da Meta, comprovante de pagamento aguardando verificação/confirmação) — deixados intactos de propósito por tocarem o fluxo de pagamento/agendamento, que CLAUDE.md pede cautela extra. Ainda 100% em português fixo: esse editor profundo de produto/variante da Base de Conhecimento, `KnowledgeBaseDocumentation.tsx`/`PromptAuditView.tsx`, os itens acima do Atendimento, e a maioria das ~39 telas restantes. Fix: continuar a mesma mecânica (chave em `translations.ts` pt+es, `useAppPreferences()`/`t()` no componente) tela por tela, priorizando o que aparece em demonstração antes do resto.
 
+## Prontidão da IA por lead — TASK-0462
+
+O selo do cabeçalho deixa de usar apenas `aiBlockedAt`. A avaliação somente de
+leitura em `GET /api/conversations/:phone/context` considera pausa global/horário
+restrito, bloqueio individual, conversa iniciada pelo operador, pausa humana de
+5 minutos (com devolução explícita), geração real no processo, IA configurada,
+base publicada e filtros de anúncio/leads. As regras compartilhadas de pausa
+são reutilizadas; a política de respostas não muda.
+
+Verde exige também conexão verificada (consulta Evolution com timeout de 3s) e
+mensagem recebida do próprio lead nos últimos 15 minutos. Socket `open` sozinho
+não comprova sincronização. Ausência dessa evidência é estado incerto, sem declarar
+que a conexão caiu. Filtros que dependem do conteúdo da próxima mensagem são
+condicionais. O selo de demonstração é explícito para conversas simuladas.
+
+A avaliação expira em 45s; o painel atualiza a cada 30s quando visível, ao retornar
+à aba e quando agente/conversa/atividade mudam. A expiração é conferida a cada
+segundo. Falha ou avaliação expirada não mantém verde. Não testa envio nem consome
+IA para gerar resposta; disponibilidade de crédito ou entrega futura não é garantida
+por essa avaliação de condições observadas.
+
 ## Diagnóstico de histórico Evolution — 10/11/2026 (TASK-0459)
 
 O servidor aceita `EVOLUTION_HISTORY_PROBE` como solicitação operacional de leitura,

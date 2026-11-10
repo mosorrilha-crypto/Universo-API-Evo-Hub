@@ -1,3 +1,4 @@
+import { getAiReadiness } from '../services/aiReadiness';
 import { Router, type RequestHandler, type Response } from 'express';
 import crypto from 'crypto';
 import {
@@ -412,10 +413,15 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/conversations/:phone/context', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const [memoryResult, traceResult, windowResult] = await Promise.allSettled([
+    const [memoryResult, traceResult, windowResult, readinessResult] = await Promise.allSettled([
       getContactAgentMemory(tenantId, phone),
       listAgentTurnTraces(tenantId, phone, 1),
       getCustomerServiceWindowStatus(tenantId, phone),
+      getAiReadiness(tenantId, phone, {
+        aiConfigured: Boolean(getAi?.()),
+        sharedMeta: { metaAccessToken, metaPhoneNumberId },
+        sharedEvo: { evolutionApiUrl, evolutionApiKey, evolutionInstanceName },
+      }),
     ]);
     const memory = memoryResult.status === 'fulfilled' ? memoryResult.value : null;
     const latestTrace = traceResult.status === 'fulfilled' ? traceResult.value[0] || null : null;
@@ -434,6 +440,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
 
     res.json({
+      aiReadiness: readinessResult.status === 'fulfilled' ? readinessResult.value : null,
       available: !unavailable.memory && !unavailable.trace,
       unavailable,
       serviceWindow: windowStatus ? {

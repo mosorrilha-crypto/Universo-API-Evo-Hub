@@ -444,7 +444,15 @@ export interface ContactContextOpenLoop {
 }
 
 /** Payload redigido de GET /api/conversations/:phone/context. Não inclui mensagens, prompts, mídias, comprovantes ou credenciais. */
+export interface ContactAiReadiness {
+  state: 'ready' | 'busy' | 'blocked' | 'conditional' | 'unknown';
+  reason: string;
+  checkedAt: string;
+  validUntil: string;
+}
+
 export interface ContactAgentContext {
+  aiReadiness?: ContactAiReadiness | null;
   available: boolean;
   unavailable: { memory: boolean; trace: boolean };
   memory: {
