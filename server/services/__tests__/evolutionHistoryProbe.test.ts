@@ -77,3 +77,47 @@ describe('retomada restrita da conexão', () => {
     expect(call).not.toHaveBeenCalled();
   });
 });
+
+describe('ajuste restrito de grupos', () => {
+  const adjust = { ...request, action: 'ignore_groups', requestId: 'a742911e-aaab-4c9f-b958-933d7dba244b' };
+  function prepare(error: any = null) {
+    db.from.mockReturnValueOnce({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { instance_name: 'daniel', api_url: 'https://evolution.example', api_key: 'encrypted' } }) }) }) })
+      .mockReturnValueOnce({ insert: vi.fn().mockResolvedValue({ error }) });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  }
+  it('preserva outros ajustes, altera somente grupos e verifica a aplicação', async () => {
+    prepare();
+    const current = { groupsIgnore: false, rejectCall: true, msgCall: 'ocupado', readMessages: false, readStatus: true, alwaysOnline: false, syncFullHistory: true, wavoipToken: 'private-voip' };
+    const call = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(current)))
+      .mockResolvedValueOnce(new Response('{}'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...current, groupsIgnore: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ messages: { total: 0, records: [] } })));
+    await runEvolutionHistoryProbe(JSON.stringify(adjust));
+    expect(String(call.mock.calls[1][0])).toBe('https://evolution.example/settings/set/daniel');
+    expect(JSON.parse(call.mock.calls[1][1]?.body as string)).toEqual({ ...current, groupsIgnore: true });
+    expect(JSON.stringify(vi.mocked(console.log).mock.calls)).not.toContain('private-voip');
+    expect(call).toHaveBeenCalledTimes(4);
+  });
+  it('omite strings opcionais null aceitas pelo banco mas recusadas pelo schema HTTP', async () => {
+    prepare();
+    const call = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ groupsIgnore: false, msgCall: null, wavoipToken: null })))
+      .mockResolvedValueOnce(new Response('{}'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ groupsIgnore: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ messages: { total: 0, records: [] } })));
+    await runEvolutionHistoryProbe(JSON.stringify(adjust));
+    expect(JSON.parse(call.mock.calls[1][1]?.body as string)).toEqual({ groupsIgnore: true });
+  });
+  it('não altera configurações se a leitura falha', async () => {
+    prepare();
+    const call = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 401 }));
+    await runEvolutionHistoryProbe(JSON.stringify(adjust));
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+  it('não altera configurações em falha ou duplicata da reivindicação', async () => {
+    prepare({ code: '500' });
+    const call = vi.spyOn(globalThis, 'fetch');
+    await runEvolutionHistoryProbe(JSON.stringify(adjust));
+    expect(call).not.toHaveBeenCalled();
+  });
+});

@@ -181,6 +181,13 @@ registrada para o tenant e registra contagens/datas da primeira página (até 10
 sem conteúdo, telefone ou chave. Por padrão não importa mensagens, altera sessão ou dispara IA.
 TASK-0460: `action: "restart"` e `requestId` explícito permitem retomar somente a
 conexão da instância cadastrada (POST `/instance/restart`), sem logout/exclusão.
+TASK-0463: `action: "ignore_groups"` com `requestId` explícito permite alinhar a
+instância ao comportamento do painel (que já descarta grupos). Lê os ajustes atuais,
+altera somente `groupsIgnore`, preserva os demais valores e confirma por nova leitura.
+Não reinicia ou apaga a sessão. A execução também exige reivindicação atômica e
+falha de leitura impede a alteração. Não afirmar recuperação até observar a mensagem
+individual de teste no tenant receptor.
+
 Reivindicação atômica em `processed_webhook_messages` impede repetição após deploy;
 falha de banco impede a operação. Não reenvia mensagens nem chama o webhook/IA.
 Serve para decidir se uma recuperação pelo banco da Evolution é possível; total zero

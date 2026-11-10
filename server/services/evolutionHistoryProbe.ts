@@ -1,15 +1,15 @@
 import { getPlatformDb } from './db';
 import { decryptSecret } from './tokenCrypto';
 
-interface ProbeRequest { tenantId: string; from: string; to: string; expiresAt: string; action?: 'probe' | 'restart'; requestId?: string }
+interface ProbeRequest { tenantId: string; from: string; to: string; expiresAt: string; action?: 'probe' | 'restart' | 'ignore_groups'; requestId?: string }
 
 /** Operação opt-in, sem rota pública, sem importar/enviar mensagens. Restart explícito e idempotente. */
 export function parseHistoryProbeRequest(raw: string | undefined, now = Date.now()): ProbeRequest | undefined {
   if (!raw) return undefined;
   const request = JSON.parse(raw) as ProbeRequest;
   const from = Date.parse(request.from), to = Date.parse(request.to), expiry = Date.parse(request.expiresAt);
-  if ((request.action !== undefined && request.action !== 'probe' && request.action !== 'restart')
-      || (request.action === 'restart' && !/^[0-9a-f-]{36}$/i.test(request.requestId || ''))
+  if ((request.action !== undefined && request.action !== 'probe' && request.action !== 'restart' && request.action !== 'ignore_groups')
+      || ((request.action === 'restart' || request.action === 'ignore_groups') && !/^[0-9a-f-]{36}$/i.test(request.requestId || ''))
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.tenantId || '')
       || !Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(expiry)
       || to <= from || to - from > 86400000 || expiry <= now || expiry > now + 3600000) {
@@ -30,6 +30,35 @@ export async function runEvolutionHistoryProbe(raw = process.env.EVOLUTION_HISTO
     const base = new URL(cred.api_url);
     if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) {
       throw new Error('URL Evolution inválida');
+    }
+    if (request.action === 'ignore_groups') {
+      const { error: claimError } = await db.from('processed_webhook_messages').insert({
+        message_id: `ops:evolution-ignore-groups:${request.tenantId}:${request.requestId}`,
+      });
+      if (claimError && claimError.code !== '23505') throw new Error('Solicitação de ajuste não pôde ser reivindicada');
+      if (!claimError) {
+        const settingsUrl = `${base.href.replace(/\/$/, '')}/settings/find/${encodeURIComponent(cred.instance_name)}`;
+        const options = { headers: { apikey: decryptSecret(cred.api_key), 'Content-Type': 'application/json' }, redirect: 'error' as const };
+        const read = await fetch(settingsUrl, { ...options, signal: AbortSignal.timeout(15000) });
+        if (!read.ok) throw new Error(`Evolution HTTP ${read.status} ao consultar ajustes`);
+        const current = await read.json();
+        if (!current || typeof current !== 'object' || Array.isArray(current) || typeof current.groupsIgnore !== 'boolean') {
+          throw new Error('Resposta Evolution inválida nos ajustes');
+        }
+        if (!current.groupsIgnore) {
+          // Strings opcionais podem vir null do banco; omitidas, o upsert preserva
+          // esses valores. A API rejeita null no schema desses dois campos.
+          const updateBody = { ...current, groupsIgnore: true };
+          for (const key of ['msgCall', 'wavoipToken']) if (updateBody[key] == null) delete updateBody[key];
+          const update = await fetch(`${base.href.replace(/\/$/, '')}/settings/set/${encodeURIComponent(cred.instance_name)}`, {
+            ...options, method: 'POST', body: JSON.stringify(updateBody), signal: AbortSignal.timeout(15000),
+          });
+          if (!update.ok) throw new Error(`Evolution HTTP ${update.status} ao ajustar grupos`);
+        }
+        const verify = await fetch(settingsUrl, { ...options, signal: AbortSignal.timeout(15000) });
+        if (!verify.ok || (await verify.json())?.groupsIgnore !== true) throw new Error('Resposta Evolution não confirmou ajuste de grupos');
+        console.log('[Evolution History Probe]', JSON.stringify({ tenantId: request.tenantId, groupsIgnored: true }));
+      }
     }
     if (request.action === 'restart') {
       // Reivindicação atômica, fail-closed: nunca repetir restart após deploy/crash.
