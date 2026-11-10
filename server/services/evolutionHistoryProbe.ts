@@ -57,7 +57,20 @@ export async function runEvolutionHistoryProbe(raw = process.env.EVOLUTION_HISTO
         }
         const verify = await fetch(settingsUrl, { ...options, signal: AbortSignal.timeout(15000) });
         if (!verify.ok || (await verify.json())?.groupsIgnore !== true) throw new Error('Resposta Evolution não confirmou ajuste de grupos');
-        console.log('[Evolution History Probe]', JSON.stringify({ tenantId: request.tenantId, groupsIgnored: true }));
+        let linkedPhoneLast4: string | null = null;
+        try {
+          const identity = await fetch(`${base.href.replace(/\/$/, '')}/instance/fetchInstances?instanceName=${encodeURIComponent(cred.instance_name)}`, {
+            ...options, signal: AbortSignal.timeout(3000),
+          });
+          if (identity.ok) {
+            const rows = await identity.json();
+            const instance = (Array.isArray(rows) ? rows : [rows]).map(row => row?.instance || row)
+              .find(row => (row?.name || row?.instanceName) === cred.instance_name);
+            const number = String(instance?.ownerJid || '').split('@')[0].replace(/\D/g, '');
+            if (number.length >= 4) linkedPhoneLast4 = number.slice(-4);
+          }
+        } catch { /* Identidade é diagnóstico opcional; nunca expor payload/chave. */ }
+        console.log('[Evolution History Probe]', JSON.stringify({ tenantId: request.tenantId, groupsIgnored: true, linkedPhoneLast4 }));
       }
     }
     if (request.action === 'restart') {

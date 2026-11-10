@@ -92,18 +92,22 @@ describe('ajuste restrito de grupos', () => {
     const call = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(current)))
       .mockResolvedValueOnce(new Response('{}'))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ...current, groupsIgnore: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ name: 'daniel', ownerJid: '5567999249351@s.whatsapp.net' }, { name: 'outro', ownerJid: '9999999999999@s.whatsapp.net' }])))
       .mockResolvedValueOnce(new Response(JSON.stringify({ messages: { total: 0, records: [] } })));
     await runEvolutionHistoryProbe(JSON.stringify(adjust));
     expect(String(call.mock.calls[1][0])).toBe('https://evolution.example/settings/set/daniel');
     expect(JSON.parse(call.mock.calls[1][1]?.body as string)).toEqual({ ...current, groupsIgnore: true });
     expect(JSON.stringify(vi.mocked(console.log).mock.calls)).not.toContain('private-voip');
-    expect(call).toHaveBeenCalledTimes(4);
+    expect(call).toHaveBeenCalledTimes(5);
+    expect(JSON.stringify(vi.mocked(console.log).mock.calls)).toContain('9351');
+    expect(JSON.stringify(vi.mocked(console.log).mock.calls)).not.toMatch(/5567999249351|9999999999999/);
   });
   it('omite strings opcionais null aceitas pelo banco mas recusadas pelo schema HTTP', async () => {
     prepare();
     const call = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ groupsIgnore: false, msgCall: null, wavoipToken: null })))
       .mockResolvedValueOnce(new Response('{}'))
       .mockResolvedValueOnce(new Response(JSON.stringify({ groupsIgnore: true })))
+      .mockResolvedValueOnce(new Response('[]'))
       .mockResolvedValueOnce(new Response(JSON.stringify({ messages: { total: 0, records: [] } })));
     await runEvolutionHistoryProbe(JSON.stringify(adjust));
     expect(JSON.parse(call.mock.calls[1][1]?.body as string)).toEqual({ groupsIgnore: true });
