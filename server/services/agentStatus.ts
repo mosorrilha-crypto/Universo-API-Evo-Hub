@@ -29,7 +29,10 @@ export async function setAgentStatus(tenantId: string, status: AgentStatus): Pro
 
 /** true = não deve responder automaticamente agora. */
 export async function isAgentPaused(tenantId: string): Promise<boolean> {
-  const status = await getAgentStatus(tenantId);
+  return isAgentStatusPaused(await getAgentStatus(tenantId));
+}
+
+export function isAgentStatusPaused(status: AgentStatus): boolean {
   if (status === 'paused') return true;
   if (status === 'restricted') {
     const hour = Number(new Date().toLocaleString('en-US', { timeZone: TIMEZONE, hour: '2-digit', hour12: false }));

@@ -118,6 +118,16 @@ beforeEach(() => {
 });
 
 describe('GET /api/conversations/:phone/context', () => {
+  it('informa pausa global real mesmo quando o contato não está bloqueado', async () => {
+    supabase.__tables.agent_status = [{ tenant_id: TENANT_A, status: 'paused' }];
+    supabase.__tables.conversations = [{ id: 'conv-a', tenant_id: TENANT_A, phone: PHONE, name: 'Ana' }];
+    supabase.__tables.messages = [];
+    const response = await fetch(`${baseUrl}/api/conversations/${PHONE}/context`);
+    const body = await response.json();
+    expect(body.aiReadiness).toMatchObject({ state: 'blocked', reason: 'agent_paused' });
+    expect(JSON.stringify(body.aiReadiness)).not.toMatch(/token|api_key|phone/);
+  });
+
   it('retorna memória e última decisão apenas do tenant autenticado', async () => {
     const response = await fetch(`${baseUrl}/api/conversations/${PHONE}/context`);
     expect(response.status).toBe(200);
