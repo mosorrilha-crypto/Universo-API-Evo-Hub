@@ -1,14 +1,16 @@
 import { getPlatformDb } from './db';
 import { decryptSecret } from './tokenCrypto';
 
-interface ProbeRequest { tenantId: string; from: string; to: string; expiresAt: string }
+interface ProbeRequest { tenantId: string; from: string; to: string; expiresAt: string; action?: 'probe' | 'restart'; requestId?: string }
 
-/** Diagnóstico operacional opt-in, sem rota pública, sem importar/enviar mensagens. */
+/** Operação opt-in, sem rota pública, sem importar/enviar mensagens. Restart explícito e idempotente. */
 export function parseHistoryProbeRequest(raw: string | undefined, now = Date.now()): ProbeRequest | undefined {
   if (!raw) return undefined;
   const request = JSON.parse(raw) as ProbeRequest;
   const from = Date.parse(request.from), to = Date.parse(request.to), expiry = Date.parse(request.expiresAt);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.tenantId || '')
+  if ((request.action !== undefined && request.action !== 'probe' && request.action !== 'restart')
+      || (request.action === 'restart' && !/^[0-9a-f-]{36}$/i.test(request.requestId || ''))
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.tenantId || '')
       || !Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(expiry)
       || to <= from || to - from > 86400000 || expiry <= now || expiry > now + 3600000) {
     throw new Error('Solicitação de diagnóstico inválida ou expirada');
@@ -28,6 +30,23 @@ export async function runEvolutionHistoryProbe(raw = process.env.EVOLUTION_HISTO
     const base = new URL(cred.api_url);
     if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) {
       throw new Error('URL Evolution inválida');
+    }
+    if (request.action === 'restart') {
+      // Reivindicação atômica, fail-closed: nunca repetir restart após deploy/crash.
+      const { error: claimError } = await db.from('processed_webhook_messages').insert({
+        message_id: `ops:evolution-restart:${request.tenantId}:${request.requestId}`,
+      });
+      if (claimError && claimError.code !== '23505') throw new Error('Solicitação de restart não pôde ser reivindicada');
+      if (!claimError) {
+        const restart = await fetch(`${base.href.replace(/\/$/, '')}/instance/restart/${encodeURIComponent(cred.instance_name)}`, {
+          method: 'POST', headers: { apikey: decryptSecret(cred.api_key) },
+          signal: AbortSignal.timeout(20000), redirect: 'error',
+        });
+        if (!restart.ok) throw new Error(`Evolution HTTP ${restart.status} no restart`);
+        console.log('[Evolution History Probe]', JSON.stringify({ tenantId: request.tenantId, restartRequested: true }));
+      } else {
+        console.log('[Evolution History Probe]', JSON.stringify({ tenantId: request.tenantId, restartAlreadyClaimed: true }));
+      }
     }
     const response = await fetch(`${base.href.replace(/\/$/, '')}/chat/findMessages/${encodeURIComponent(cred.instance_name)}`, {
       method: 'POST', headers: { apikey: decryptSecret(cred.api_key), 'Content-Type': 'application/json' },

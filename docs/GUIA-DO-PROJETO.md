@@ -157,7 +157,11 @@ O servidor aceita `EVOLUTION_HISTORY_PROBE` como solicitação operacional de le
 com `tenantId`, `from`, `to` e `expiresAt` em JSON. Desativado por padrão; janela máxima
 de 24h e expiração de até 1h. Executa na inicialização, consulta somente a instância
 registrada para o tenant e registra contagens/datas da primeira página (até 100 itens),
-sem conteúdo, telefone ou chave. Não importa mensagens, altera sessão ou dispara IA.
+sem conteúdo, telefone ou chave. Por padrão não importa mensagens, altera sessão ou dispara IA.
+TASK-0460: `action: "restart"` e `requestId` explícito permitem retomar somente a
+conexão da instância cadastrada (POST `/instance/restart`), sem logout/exclusão.
+Reivindicação atômica em `processed_webhook_messages` impede repetição após deploy;
+falha de banco impede a operação. Não reenvia mensagens nem chama o webhook/IA.
 Serve para decidir se uma recuperação pelo banco da Evolution é possível; total zero
 não comprova ausência no celular. Remover/desativar a solicitação após diagnóstico.
 
