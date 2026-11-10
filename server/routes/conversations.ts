@@ -272,6 +272,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // Imagem real recebida de um cliente (ex: comprovante de pagamento) —
   // nunca pública, só acessível autenticado (pode conter dado sensível).
   router.get('/api/media/:messageId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    // Resolve o override autorizado antes de getDb(): o cliente RLS congela
+    // o tenant no JWT na criação, não quando o filtro .eq() é aplicado.
+    const tenantId = tenantOf(req);
     // A mídia é privada e o id é opaco, mas ainda assim validamos o tenant
     // antes de buscar o objeto para impedir acesso cruzado por id conhecido.
     let message: { id: string } | null = null;
@@ -280,7 +283,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         getDb()
           .from('messages')
           .select('id')
-          .eq('tenant_id', tenantOf(req))
+          .eq('tenant_id', tenantId)
           .eq('id', req.params.messageId)
           .maybeSingle(),
         'consulta da mensagem',
