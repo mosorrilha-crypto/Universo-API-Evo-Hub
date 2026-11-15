@@ -105,7 +105,8 @@ describe('WhatsAppLeadsSim — vincular agendamento existente no conflito do cad
     fireEvent.click(screen.getByText('Serviço personalizado'));
     fireEvent.change(screen.getByPlaceholderText('Ex: Pacote personalizado combinado com a cliente'), { target: { value: 'Efecto Volumen Brasileño' } });
     fireEvent.change(screen.getByPlaceholderText('Ex: 90'), { target: { value: '60' } });
-    fireEvent.change(document.querySelector('input[type="date"]')!, { target: { value: '2026-09-17' } });
+    const appointmentForm = screen.getByPlaceholderText('Ex: Pacote personalizado combinado com a cliente').closest('form')!;
+    fireEvent.change(appointmentForm.querySelector('input[type="date"]')!, { target: { value: '2026-09-17' } });
     // A busca de horários livres (GET free-slots) responde "não ok" nesta
     // suíte (endpoint fora do escopo do teste) — espera o modal cair pro
     // input de horário manual em vez do seletor de slots.
@@ -119,7 +120,7 @@ describe('WhatsAppLeadsSim — vincular agendamento existente no conflito do cad
 
     // "Cadastrar" também aparece no botão que ainda abre este mesmo modal na
     // Ficha do Contato (por trás do overlay) — usa o botão de submit real.
-    fireEvent.click(document.querySelector('form button[type="submit"]')!);
+    fireEvent.click(appointmentForm.querySelector('button[type="submit"]')!);
 
     const linkButton = await screen.findByText('Vincular este agendamento já existente ao contato');
     expect(screen.getByText(/Efecto Volumen Brasileño/)).toBeTruthy();

@@ -58,6 +58,7 @@ export interface ContactProfileData {
   firstContactAt?: string;
   lastActivityAt?: string;
   interest?: string;
+  nextBestAction?: string;
   hasBooked?: boolean;
   notes?: string;
   funnelStage?: {

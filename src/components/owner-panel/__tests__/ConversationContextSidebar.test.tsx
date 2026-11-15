@@ -239,3 +239,22 @@ describe('ConversationContextSidebar — Pagamentos (TASK-0410)', () => {
     expect(onRegisterPayment).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Ficha com campos manuais', () => {
+  it('edita interesse diretamente na ficha', () => {
+    const save = vi.fn(async () => undefined);
+    render(<ConversationContextSidebar contact={baseContact} agentStatus="active" onSaveMemory={save} />);
+    fireEvent.click(screen.getByTitle('Editar interesse'));
+    fireEvent.change(screen.getByLabelText('Interesse'), { target: { value: 'Massagem' } });
+    fireEvent.click(screen.getByText('Salvar'));
+    expect(save).toHaveBeenCalledWith({ serviceInterest: 'Massagem' });
+  });
+  it('permite limpar o próximo passo sem modificar observações', () => {
+    const save = vi.fn(async () => undefined);
+    render(<ConversationContextSidebar contact={{ ...baseContact, nextBestAction: 'Enviar orçamento' }} agentStatus="active" onSaveMemory={save} />);
+    fireEvent.click(screen.getByTitle('Editar próximo passo'));
+    fireEvent.change(screen.getByLabelText('Próximo passo'), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Salvar'));
+    expect(save).toHaveBeenCalledWith({ nextBestAction: null });
+  });
+});
