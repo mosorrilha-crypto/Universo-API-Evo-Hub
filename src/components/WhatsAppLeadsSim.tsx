@@ -6988,10 +6988,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
             {rightPanelTab === 'profile' ? (
               <ConversationContextSidebar
+                key={`${activeTenant.id}:${selectedLead?.phone}`}
+                crmScopeKey={(selectedLead as any)?.isReal ? activeTenant.id : undefined}
                 contact={selectedLead ? {
                   name: selectedLead.name,
                   phone: selectedLead.phone,
-                  interest: selectedLead.interest || visibleContactContext?.memory?.serviceInterest || undefined,
+                  interest: visibleContactContext?.memory ? visibleContactContext.memory.serviceInterest || undefined : selectedLead.interest || undefined,
+                  nextBestAction: visibleContactContext?.memory?.nextBestAction || undefined,
                   hasBooked: Boolean(paymentAppointment) && !contactFunnelInfo.isPendingPaymentProof,
                   firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
                   notes: visibleContactContext?.memory?.conversationSummary || undefined,
@@ -7130,10 +7133,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </div>
             {rightPanelTab === 'profile' ? (
               <ConversationContextSidebar
+                key={`${activeTenant.id}:${selectedLead?.phone}`}
+                crmScopeKey={(selectedLead as any)?.isReal ? activeTenant.id : undefined}
                 contact={{
                   name: selectedLead.name,
                   phone: selectedLead.phone,
-                  interest: selectedLead.interest || visibleContactContext?.memory?.serviceInterest || undefined,
+                  interest: visibleContactContext?.memory ? visibleContactContext.memory.serviceInterest || undefined : selectedLead.interest || undefined,
+                  nextBestAction: visibleContactContext?.memory?.nextBestAction || undefined,
                   hasBooked: Boolean(paymentAppointment) && !contactFunnelInfo.isPendingPaymentProof,
                   firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
                   notes: visibleContactContext?.memory?.conversationSummary || undefined,

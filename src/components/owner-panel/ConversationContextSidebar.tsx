@@ -17,12 +17,14 @@ import {
   Plus,
   Pencil,
 } from 'lucide-react';
+import { ManualFollowUp } from './ManualFollowUp';
 import type { ContactProfileData } from './ownerPanelTypes';
 import { ContactJourneyTimeline } from './ContactJourneyTimeline';
 import type { ContactJourneyEvent } from '../../types';
 
 interface ConversationContextSidebarProps {
   contact: ContactProfileData | null;
+  crmScopeKey?: string;
   agentStatus: 'active' | 'paused' | 'restricted';
   onToggleAgentStatus?: () => void;
   onClose?: () => void;
@@ -44,7 +46,7 @@ interface ConversationContextSidebarProps {
    * expõe um segundo ponto de edição inline (campo único, não o formulário
    * inteiro) pra quem está nesta aba.
    */
-  onSaveMemory?: (patch: { conversationSummary: string | null }) => Promise<void>;
+  onSaveMemory?: (patch: { conversationSummary?: string | null; serviceInterest?: string | null; nextBestAction?: string | null }) => Promise<void>;
   /** TASK-0410 (pedido direto: "os pagamentos desta cliente devem ficar registrados na ficha e sincronizados com o financeiro") — formata `contact.payments` (mesma FinancialTransaction real do Financeiro). Ex: "PYG"/"BRL". */
   currency?: string;
   /** Abre o mesmo TransactionDialog do Financeiro (WhatsAppLeadsSim.tsx), pré-preenchido com este contato — indisponível (undefined) quando o módulo Financeiro está desligado pro tenant ou o lead ainda não é real. */
@@ -53,6 +55,7 @@ interface ConversationContextSidebarProps {
 
 export const ConversationContextSidebar: React.FC<ConversationContextSidebarProps> = ({
   contact,
+  crmScopeKey,
   agentStatus,
   onToggleAgentStatus,
   onClose,
@@ -104,6 +107,7 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
       `Nome: ${contact.name}`,
       `Telefone: ${contact.phone}`,
       `Interesse: ${contact.interest || 'não informado'}`,
+      `Próximo passo: ${contact.nextBestAction || 'não definido'}`,
       `Agendou?: ${contact.hasBooked ? 'sim' : 'não'}`,
       `Primeiro contato: ${contact.firstContactAt || 'recente'}`,
       `Observações: ${contact.notes || 'nenhuma'}`,
@@ -240,14 +244,18 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
       <div className="border-t border-slate-800/80 pt-4">
         <div className="flex items-center justify-between mb-2.5">
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-            Ficha (Planilha)
+            Ficha do atendimento
           </span>
         </div>
 
         <div className="space-y-2 text-xs">
           <div className="flex items-center justify-between py-1 border-b border-slate-800/40">
             <span className="text-slate-400">Interesse</span>
-            <span className="font-medium text-slate-200">{contact.interest || 'não informado'}</span>
+            <ManualMemoryField label="Interesse" value={contact.interest} maxLength={160} onSave={onSaveMemory ? (value) => onSaveMemory({ serviceInterest: value }) : undefined} />
+          </div>
+          <div className="py-1 border-b border-slate-800/40">
+            <span className="text-slate-400">Próximo passo</span>
+            <ManualMemoryField label="Próximo passo" value={contact.nextBestAction} maxLength={240} onSave={onSaveMemory ? (value) => onSaveMemory({ nextBestAction: value }) : undefined} />
           </div>
           <div className="flex items-center justify-between py-1 border-b border-slate-800/40">
             <span className="text-slate-400">Agendou?</span>
@@ -312,6 +320,8 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
           </div>
         </div>
       </div>
+
+      {crmScopeKey && <ManualFollowUp key={`${crmScopeKey}:${contact.phone}`} phone={contact.phone} />}
 
       {/* Bloco: ETAPA DO FUNIL */}
       <div className="border-t border-slate-800/80 pt-4">
@@ -540,3 +550,25 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
     </div>
   );
 };
+
+function ManualMemoryField({ label, value, maxLength, onSave }: { label: string; value?: string; maxLength: number; onSave?: (value: string | null) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  return editing ? <form className="mt-1 space-y-2" onSubmit={async (event) => {
+    event.preventDefault(); if (!onSave || busy) return;
+    setBusy(true); setError('');
+    try { await onSave(draft.trim() || null); setEditing(false); }
+    catch (err: any) { setError(err.message || 'Não foi possível salvar.'); }
+    finally { setBusy(false); }
+  }}>
+    <input aria-label={label} value={draft} maxLength={maxLength} disabled={busy} onChange={(e) => setDraft(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100" />
+    {error && <p role="alert" className="text-xs text-rose-300">{error}</p>}
+    <button type="submit" disabled={busy} className="mr-2 text-sky-300">{busy ? 'Salvando...' : 'Salvar'}</button>
+    <button type="button" disabled={busy} onClick={() => setEditing(false)}>Cancelar</button>
+  </form> : <div className="flex items-center justify-end gap-2 min-w-0">
+    <span className="font-medium text-slate-200 break-words">{value || 'não informado'}</span>
+    {onSave && <button type="button" title={`Editar ${label.toLowerCase()}`} onClick={() => { setDraft(value || ''); setError(''); setEditing(true); }} className="shrink-0 text-slate-500 hover:text-sky-300"><PencilLine className="h-3 w-3" /></button>}
+  </div>;
+}
