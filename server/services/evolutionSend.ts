@@ -5,6 +5,8 @@
  * `{apiUrl}/{endpoint}/{instanceName}`, autenticado com header `apikey`.
  */
 
+import { evolutionMessageId, evolutionProviderMessageId } from './evolutionMessageId';
+
 const REQUEST_TIMEOUT_MS = 15000;
 
 /**
@@ -44,9 +46,8 @@ function requireCredentials(instanceName: string | undefined, apiUrl: string | u
  * quando o operador responde a uma mensagem específica no painel, monta o
  * formato de citação que o Baileys/Evolution espera (`quoted.key` +
  * `quoted.message.conversation`), pra o WhatsApp do cliente mostrar "em
- * resposta a" de verdade em vez de só um metadado nosso. Retorna o id real
- * da mensagem enviada (`data.key.id`) — precisamos dele pra permitir citar
- * essa mesma mensagem numa resposta futura.
+ * resposta a" de verdade em vez de só um metadado nosso. Retorna um ID
+ * interno por instância, reversível para `data.key.id` nas citações.
  */
 export async function sendEvolutionTextMessage(
   instanceName: string | undefined,
@@ -61,7 +62,7 @@ export async function sendEvolutionTextMessage(
   const body: Record<string, unknown> = { number: to, text };
   if (quoted) {
     body.quoted = {
-      key: { id: quoted.id, remoteJid: quoted.remoteJid, fromMe: quoted.fromMe },
+      key: { id: evolutionProviderMessageId(instanceName!, quoted.id), remoteJid: quoted.remoteJid, fromMe: quoted.fromMe },
       message: { conversation: quoted.text || '' },
     };
   }
@@ -78,7 +79,8 @@ export async function sendEvolutionTextMessage(
     throw new Error(`Falha ao enviar mensagem via Evolution API: HTTP ${res.status} — ${JSON.stringify(data).slice(0, 300)}`);
   }
   const data = await res.json().catch(() => ({}) as any);
-  return data?.key?.id;
+  return typeof data?.key?.id === 'string' && data.key.id
+    ? evolutionMessageId(instanceName!, data.key.id) : undefined;
 }
 
 /** Envio de mídia (imagem, áudio, documento) via Evolution API (POST /message/sendMedia/{instance}). */

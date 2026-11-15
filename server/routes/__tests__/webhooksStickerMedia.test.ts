@@ -74,7 +74,7 @@ describe('webhook — figurinha (sticker) vira mensagem de imagem, não texto ge
 
     const rows = supabase.__tables.messages || [];
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: 'wamid-sticker-1', sender: 'lead', type: 'image' });
+    expect(rows[0]).toMatchObject({ id: 'evo:test-instance:wamid-sticker-1', sender: 'lead', type: 'image' });
     expect(String(rows[0].text)).toContain('Figurinha');
   });
 

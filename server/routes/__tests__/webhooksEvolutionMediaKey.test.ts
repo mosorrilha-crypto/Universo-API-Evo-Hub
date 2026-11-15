@@ -31,6 +31,6 @@ describe('download de mídia usa a chave do webhook, não o telefone normalizado
     await vi.waitFor(() => expect(saveMediaImage).toHaveBeenCalled());
     expect(res.status).toHaveBeenCalledWith(200);
     expect(downloadEvolutionMedia).toHaveBeenCalledWith(key, 'test-instance', 'https://evolution.example.test', 'test-key');
-    expect(saveMediaImage).toHaveBeenCalledWith(undefined, undefined, key.id, 'Zm90bw==', 'image/jpeg');
+    expect(saveMediaImage).toHaveBeenCalledWith(undefined, undefined, `evo:test-instance:${key.id}`, 'Zm90bw==', 'image/jpeg');
   });
 });

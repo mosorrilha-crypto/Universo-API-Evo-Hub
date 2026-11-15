@@ -1,5 +1,6 @@
 import { getPlatformDb } from './db';
 import { decryptSecret } from './tokenCrypto';
+import { evolutionMessageId } from './evolutionMessageId';
 
 interface ProbeRequest { tenantId: string; from: string; to: string; expiresAt: string; action?: 'probe' | 'restart'; requestId?: string }
 
@@ -62,9 +63,10 @@ export async function runEvolutionHistoryProbe(raw = process.env.EVOLUTION_HISTO
     let storedCount = 0;
     if (ids.length) {
       const { data: existing, error: queryError } = await db.from('messages').select('id')
-        .eq('tenant_id', request.tenantId).in('id', ids);
+        .eq('tenant_id', request.tenantId).in('id', ids.flatMap(id => [id, evolutionMessageId(cred.instance_name, id)]));
       if (queryError) throw new Error('Consulta do histórico Universo falhou');
-      storedCount = existing?.length || 0;
+      const storedIds = new Set(existing?.map(row => row.id));
+      storedCount = ids.filter(id => storedIds.has(id) || storedIds.has(evolutionMessageId(cred.instance_name, id))).length;
     }
     const timestamps = records.map((row: any) => Number(row.messageTimestamp) * 1000)
       .filter((value: number) => Number.isFinite(value) && value >= Date.parse(request.from) && value < Date.parse(request.to));
