@@ -243,3 +243,7 @@ A issue [#758](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/
 ### Ficha do Contato — campos manuais (TASK-0464, 15/11/2026)
 
 A Ficha do Contato permite editar interesse e próximo passo pelo mesmo endpoint de memória já existente, além das observações. O bloco Acompanhamento manual salva responsável e tarefas com data de retorno no CRM existente; os dados persistem no servidor e não dependem de localStorage. Nenhuma chamada de IA é feita por esses controles. A data registra uma tarefa, não um envio nem uma notificação automática. A edição de interesse/próximo passo usa a memória compartilhada com a Análise IA, não cria campos independentes nem bloqueia futuras atualizações da memória pelo agente.
+
+### Manutenção de dependências — TASK-0465 (15/11/2026)
+
+O projeto usa npm, package-lock.json e npm ci nos pipelines e no Docker; o pnpm-lock.yaml legado divergente foi retirado. Dependências e ações de CI/Docker foram consolidadas a partir de 15 PRs, preservando pinos SHA das ações e os guards/permissões de publicação. Vitest permanece na linha 4.1.12 com o backport de segurança (#847 acompanha a migração principal). Testes E2E da proposta antiga seguem pendentes de ambiente isolado (#846). O ajuste de grupos #842 não foi publicado nem executado como suposta correção de conexão. Restam quatro alertas altos da cadeia Firebase/Firestore/gRPC, acompanhados em #848; não equivalem a quatro falhas exploradas no Universo.
