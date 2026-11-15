@@ -14,6 +14,18 @@ afterEach(() => {
 });
 
 describe('sendEvolutionTextMessage', () => {
+  it('salva ID interno por instância e cita o ID original do WhatsApp', async () => {
+    const fetchMock = vi.fn(async (_url: string, _options?: any) => ({ ok: true, json: async () => ({ key: { id: 'same-id' } }) }));
+    global.fetch = fetchMock as any;
+    const first = await sendEvolutionTextMessage('lucas', 'https://evo.example.com', 'key', '595981234567', 'Oi');
+    const second = await sendEvolutionTextMessage('monique', 'https://evo.example.com', 'key', '595981234567', 'Oi');
+    expect(first).toBe('evo:lucas:same-id');
+    expect(second).toBe('evo:monique:same-id');
+    await sendEvolutionTextMessage('lucas', 'https://evo.example.com', 'key', '595981234567', 'Resposta', {
+      id: first!, remoteJid: '595981234567@s.whatsapp.net', fromMe: true,
+    });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).quoted.key.id).toBe('same-id');
+  });
   it('chama POST {apiUrl}/message/sendText/{instance} com apikey e o texto', async () => {
     const fetchMock = vi.fn(async (_url: string, _options?: any) => ({ ok: true, json: async () => ({}) }));
     global.fetch = fetchMock as any;

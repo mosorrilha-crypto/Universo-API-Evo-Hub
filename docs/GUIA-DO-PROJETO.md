@@ -72,6 +72,17 @@ continua sendo a fonte de verdade em caso de conflito entre os dois.
 
 ## Arquitetura em uma tela
 
+### Identidade das mensagens Evolution — TASK-0466
+
+Novas mensagens Evolution usam IDs internos `evo:<instância codificada>:<ID do WhatsApp codificado>`.
+A chave primária global de `messages.id` permanece inalterada: duas instâncias podem
+guardar a mesma mensagem do WhatsApp sem disputar o mesmo registro nem o objeto de mídia.
+O envio traduz o ID interno de volta ao ID original ao citar uma mensagem; o download
+de mídia preserva a chave original do webhook. A deduplicação mantém sua chave anterior
+por instância, e a recepção verifica registros legados apenas no tenant resolvido.
+Não exige recriar cadastros, apagar histórico ou executar migration. Não recupera
+automaticamente mensagens perdidas nem corrige erros de sessão/descriptografia da Evolution.
+
 ```
 WhatsApp (Meta Cloud API / Evolution API)
         │  webhook

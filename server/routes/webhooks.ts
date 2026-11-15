@@ -3,6 +3,8 @@ import crypto from 'crypto';
 import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed, dedupeKeyFor } from '../services/idempotency';
+import { getDb } from '../services/db';
+import { evolutionMessageId } from '../services/evolutionMessageId';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText, markSpecialistInvoked, updateMessageMediaStatus, type StoredConversation } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
@@ -628,7 +630,8 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   const enqueueAudioMessages = async (parsedMessages: ParsedIncomingMessage[]) => {
     let enqueued = 0;
     const receivedAt = new Date().toISOString();
-    for (const msg of parsedMessages) {
+    for (const originalMsg of parsedMessages) {
+      let msg = originalMsg;
       const messageTimestamp = msg.timestamp || receivedAt;
       // Escopado por canal/instância (ver comentário em dedupeKeyFor) — o
       // messageId cru da Evolution API não é garantido único entre
@@ -669,6 +672,17 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         await runWithTenantDbContext(
           { tenantId, source: 'webhook' },
           async () => {
+
+        if (msg.provider === 'evolution') {
+          // Dedupe continua usando o ID original acima. Histórico legado fica
+          // intacto; uma reentrega já salva neste tenant não cria outra bolha.
+          const internalId = evolutionMessageId(resolvedTenant.evolutionInstanceName!, msg.messageId);
+          const { data: legacy, error } = await getDb().from('messages').select('id')
+            .eq('tenant_id', tenantId).in('id', [msg.messageId, internalId]).limit(1).maybeSingle();
+          if (error) throw error;
+          if (legacy) return;
+          msg = { ...msg, messageId: internalId };
+        }
 
         // Eco fromMe:true (só Evolution API — Baileys espelha TODA atividade
         // do número conectado, inclusive nosso próprio envio via API). Nunca
@@ -760,7 +774,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           enqueueTranscriptionJob(msg, resolvedTenant);
           enqueued += 1;
         } else if (msg.type === 'text') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: messageTimestamp }, undefined, undefined, inboundMetaPhoneNumberId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: messageTimestamp }, msg.provider === 'evolution' ? msg.messageId : undefined, undefined, inboundMetaPhoneNumberId);
           // TASK-0453 (achado de auditoria + pedido direto): em tenants
           // leadsOnly (TASK-0411/0412 — mesmo número de WhatsApp pessoal e
           // profissional), esses dois gatilhos de palavra-chave disparavam
