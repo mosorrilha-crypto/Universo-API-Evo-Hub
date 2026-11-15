@@ -1,0 +1,60 @@
+name: Evolution Status ACK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/evolution/**'
+      - '.github/workflows/evolution-status-ack.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build e testes sobre a imagem oficial fixada
+        run: docker build --progress=plain -t evolution-status-ack:test infra/evolution
+      - name: Repetir o teste no runtime isolado sem rede
+        run: docker run --rm --network none --entrypoint node evolution-status-ack:test --test /opt/evolution-status-ack/verify-patch.cjs
+
+  publish:
+    # Publicação manual somente da main revisada, após os testes desta imagem.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    steps:
+      - name: Exigir CI aprovado no mesmo commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" -f head_sha="$GITHUB_SHA" -f event=push -f per_page=1 --jq '.workflow_runs[0].conclusion')
+          test "$conclusion" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Nome da imagem
+        id: image
+        run: printf 'name=ghcr.io/%s:evolution-status-ack-%s\n' "${GITHUB_REPOSITORY,,}" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        id: build
+        with:
+          context: infra/evolution
+          push: true
+          tags: ${{ steps.image.outputs.name }}
+      - name: Referência para deploy
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: printf '%s\n%s\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
