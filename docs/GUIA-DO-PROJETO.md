@@ -83,6 +83,15 @@ por instância, e a recepção verifica registros legados apenas no tenant resol
 Não exige recriar cadastros, apagar histórico ou executar migration. Não recupera
 automaticamente mensagens perdidas nem corrige erros de sessão/descriptografia da Evolution.
 
+**TASK-0467 — correção da recepção em preparação:** os logs da Evolution exibem
+`stream errored out` com `ack class="status"`, compatível com Evolution #2778 e
+Baileys #2858. `infra/evolution/` prepara uma imagem derivada do mesmo digest
+atualmente em produção, com ACK de Status e proteção da fila offline de rc.9.
+O workflow dedicado testa a imagem e permite publicação manual na main revisada.
+Sua aplicação no serviço Evolution é uma etapa operacional separada: exige pausa
+temporária dos agentes para revisar o histórico represado, breve interrupção do
+serviço com disco e validação de recepção. Não foi aplicada em produção nesta tarefa.
+
 ```
 WhatsApp (Meta Cloud API / Evolution API)
         │  webhook
