@@ -1002,7 +1002,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           console.warn(`⚠️  [Conversas] Falha ao transcrever áudio enviado (messageId=${messageId}):`, (transcriptionError as Error).message);
         }
       }
-      res.json({ success: true, conversation: conv });
+      // ID exato deste upload: não inferir pela última mensagem da conversa,
+      // que pode ter recebido outro envio enquanto a mídia era processada.
+      res.json({ success: true, messageId, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
       console.error('❌ [Conversas] Falha ao enviar mídia real:', err.message);

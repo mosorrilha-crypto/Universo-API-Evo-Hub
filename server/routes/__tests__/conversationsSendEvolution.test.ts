@@ -220,6 +220,8 @@ describe('Roteamento por provedor (Evolution vs Meta) no envio manual do painel'
     const [, , , savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
     expect(savedBase64).toBe('b2dnLW9wdXMtY29udmVydGlkbw==');
     expect(savedMimeType).toBe('audio/ogg; codecs=opus');
+    const data = await res.json();
+    expect(data.messageId).toBe(saveMediaImage.mock.calls[0][2]);
   });
 
   it('POST /send-example-photo usa evolutionSend pra tenant Evolution', async () => {
