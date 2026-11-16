@@ -72,6 +72,14 @@ continua sendo a fonte de verdade em caso de conflito entre os dois.
 
 ## Arquitetura em uma tela
 
+### Conciliação de mídia enviada no painel — TASK-0468
+
+O `POST /api/conversations/:phone/send-media` retorna o `messageId` exato do envio.
+O painel usa esse ID para substituir o áudio/anexo provisório pelo registro persistido;
+se o SSE já trouxe esse registro, remove somente a bolha provisória. Assim, ambas as
+ordens de chegada mantêm uma única bolha e descartam a duração estimada da gravação.
+Não altera o envio ao provedor nem exige apagar mensagens ou migrar o banco.
+
 ### Identidade das mensagens Evolution — TASK-0466
 
 Novas mensagens Evolution usam IDs internos `evo:<instância codificada>:<ID do WhatsApp codificado>`.

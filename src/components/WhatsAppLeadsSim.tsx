@@ -1439,12 +1439,36 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingConversasAction]);
 
+  const reconcileSentMedia = (leadId: string, optimisticId: string, requestTenantId: string, data: any) => {
+    if (activeTenantIdRef.current !== requestTenantId || typeof data?.messageId !== 'string') return;
+    const confirmedId: string = data.messageId;
+    const confirmedMessage: ChatMessage | undefined = data.conversation?.messages?.find((m: ChatMessage) => m.id === confirmedId);
+    setLeads((prev) => prev.map((lead) => {
+      if (lead.id !== leadId) return lead;
+      const current = lead.messages || [];
+      // O SSE pode trazer a mensagem persistida antes da resposta do POST.
+      // Nesse caso, preservar seus metadados e remover apenas a provisória.
+      if (current.some((m) => m.id === confirmedId)) {
+        return { ...lead, messages: current.filter((m) => m.id !== optimisticId) };
+      }
+      return { ...lead, messages: current.map((m) => m.id !== optimisticId ? m : ({
+        ...(confirmedMessage || { sender: m.sender, type: m.type, text: m.text, sentBy: 'operator' as const }),
+        id: confirmedId,
+        fileName: confirmedMessage?.fileName || m.fileName,
+        timestamp: m.timestamp,
+        rawTimestamp: confirmedMessage?.timestamp,
+      })) };
+    }));
+  };
+
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const requestTenantId = activeTenantIdRef.current;
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !selectedLead) return;
 
     const base64 = await blobToBase64(file);
+    if (activeTenantIdRef.current !== requestTenantId) return;
     const newMsg: ChatMessage = {
       id: `msg-file-${Date.now()}`,
       sender: 'agent',
@@ -1462,6 +1486,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         body: JSON.stringify({ base64, mimeType: file.type, filename: file.name }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      reconcileSentMedia(selectedLead.id, newMsg.id, requestTenantId, await res.json().catch(() => null));
     } catch (err) {
       console.error('Falha ao enviar arquivo real via WhatsApp:', err);
       markMessageFailed(selectedLead.id, newMsg.id, `Falha ao enviar "${file.name}" pro cliente — ele NÃO recebeu este arquivo. Tente reenviar.`);
@@ -1548,12 +1573,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const handleSendRecordedAudio = async () => {
+    const requestTenantId = activeTenantIdRef.current;
     const target = recordingTargetLeadRef.current;
     if (!pendingAudioPreview || !target || isSendingRecordedAudio) return;
     const { blob, mimeType, url } = pendingAudioPreview;
     setIsSendingRecordedAudio(true);
     try {
       const base64 = await blobToBase64(blob);
+      if (activeTenantIdRef.current !== requestTenantId) return;
       const newMsg: ChatMessage = {
         id: `msg-audio-real-${Date.now()}`,
         sender: 'agent',
@@ -1575,6 +1602,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           const errBody = await res.json().catch(() => ({}));
           throw new Error(errBody.error || `HTTP ${res.status}`);
         }
+        reconcileSentMedia(target.id, newMsg.id, requestTenantId, await res.json().catch(() => null));
       } catch (err: any) {
         console.error('Falha ao enviar áudio real via WhatsApp:', err);
         markMessageFailed(target.id, newMsg.id, err?.message || `Falha ao enviar o áudio pro cliente ${target.name} — ele NÃO recebeu. Tente reenviar.`);
