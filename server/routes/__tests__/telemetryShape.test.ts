@@ -54,6 +54,7 @@ describe('GET /api/telemetry/tokens — formato honesto, sem dado fabricado', ()
 
     expect(data.tenantsTelemetry).toEqual([]);
     expect(data.summary).toEqual({
+      legacyRequests: 0, unpricedRequests: 0,
       totalSaaSTokens: 0,
       totalSaaSCostUSD: 0,
       totalCachedSaved: 0,

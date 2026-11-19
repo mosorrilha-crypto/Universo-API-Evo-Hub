@@ -1,3 +1,4 @@
+import { recordContextUsage } from '../services/tokenUsageStore';
 import { Router, type RequestHandler } from 'express';
 import type { ServerConfig } from '../config';
 import { getGeminiClient, withGeminiRetry } from '../gemini';
@@ -129,6 +130,7 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
           model: modelName,
           contents: 'Responda com "OK"',
         });
+        recordContextUsage('analise', response.usageMetadata, 'gemini', modelName);
         results.push({ model: modelName, status: '✅ OK', text: response.text });
       } catch (err: any) {
         results.push({
@@ -229,6 +231,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
               responseMimeType: 'application/json',
             },
           }));
+          recordContextUsage('analise', response.usageMetadata, 'gemini', 'gemini-3.5-flash-lite');
 
           const rawText = response.text || '';
           const parsed = JSON.parse(rawText);
@@ -382,6 +385,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(knowledgeBaseForPrompt)}
             contents: prompt,
             config: { responseMimeType: 'application/json' },
           }));
+          recordContextUsage('analise', response.usageMetadata, 'gemini', 'gemini-3.5-flash-lite');
 
           const parsed = JSON.parse(response.text || '');
           return res.json({ success: true, source: 'gemini', ...parsed });
@@ -450,6 +454,7 @@ Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
             contents: prompt,
             config: { responseMimeType: 'application/json' },
           }));
+          recordContextUsage('analise', response.usageMetadata, 'gemini', 'gemini-3.5-flash-lite');
 
           const parsed = JSON.parse(response.text || '');
           return res.json({ success: true, source: 'gemini', answer: parsed.answer || '' });
@@ -512,6 +517,7 @@ Leads: ${JSON.stringify(leads || [])}`;
             model: 'gemini-3.5-flash-lite',
             contents: reportInstructions,
           }));
+          recordContextUsage('analise', response.usageMetadata, 'gemini', 'gemini-3.5-flash-lite');
           return res.json({ success: true, source: 'gemini', report: response.text });
         } catch (err) {
           console.warn('AI Report generation error:', err);

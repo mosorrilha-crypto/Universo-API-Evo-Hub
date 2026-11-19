@@ -26,6 +26,7 @@ class FakeQueryBuilder {
   private filters: Array<['eq' | 'ilike' | 'gte' | 'lt' | 'lte' | 'in', string, any]> = [];
   private wantSelect = false;
   private maximumRows: number | null = null;
+  private rowOffset = 0;
 
   constructor(
     private rows: Row[],
@@ -72,6 +73,12 @@ class FakeQueryBuilder {
     return this;
   }
 
+  range(from: number, to: number) {
+    this.rowOffset = from;
+    this.maximumRows = to - from + 1;
+    return this;
+  }
+
   limit(count: number) {
     this.maximumRows = count;
     return this;
@@ -96,7 +103,7 @@ class FakeQueryBuilder {
   private run(): { data: Row[] | null; error: null } {
     if (this.op === 'select') {
       const matching = this.rows.filter((row) => this.matches(row));
-      return { data: this.maximumRows === null ? matching : matching.slice(0, this.maximumRows), error: null };
+      return { data: this.maximumRows === null ? matching : matching.slice(this.rowOffset, this.rowOffset + this.maximumRows), error: null };
     }
     if (this.op === 'insert') {
       const payloads = Array.isArray(this.payload) ? this.payload : [this.payload];

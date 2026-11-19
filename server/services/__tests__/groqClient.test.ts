@@ -5,11 +5,13 @@
  * (classifyAgent em autoReply.ts, testado separadamente).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetGroqRateLimitsForTests } from '../groqRateLimit';
 import { callGroqJsonCompletion } from '../groqClient';
 
 const originalFetch = global.fetch;
 
 afterEach(() => {
+  resetGroqRateLimitsForTests();
   global.fetch = originalFetch;
   vi.useRealTimers();
 });

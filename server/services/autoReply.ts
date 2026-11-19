@@ -254,7 +254,7 @@ async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<ty
   timeoutMs: number
 ): Promise<T> {
   const result = await withGeminiRetry(makeCall, timeoutMs);
-  recordGeminiUsage(tenantId, callSite, result.usageMetadata).catch(() => {});
+  recordGeminiUsage(tenantId, callSite, result.usageMetadata ? { ...result.usageMetadata, model: 'gemini-3.6-flash' } : undefined).catch(() => {});
   return result;
 }
 
@@ -370,12 +370,11 @@ async function classifyAgent(
   return withStructuredLog({ tenantId, area: 'autoReply', op: 'router' }, async () => {
     if (groqApiKey) {
       try {
-        const { parsed, usage } = await callGroqJsonCompletion(groqApiKey, prompt);
+        const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt, undefined, undefined, 0, 'router');
         if (!ROUTER_VALID_AGENTS.includes(parsed?.agent)) {
           throw new Error(`Groq retornou "agent" fora do enum esperado: ${JSON.stringify(parsed?.agent)}`);
         }
         const agent = parsed.agent as AgentType;
-        recordGeminiUsage(tenantId, 'router', usage, 'groq').catch(() => {});
         logRouterDecision(tenantId, phone, 'groq', agent, parsed?.confidence, parsed?.reasoning);
         return agent;
       } catch (err) {
@@ -716,7 +715,7 @@ async function generateSpecialistReply(
   // já que a KB agora faz parte do texto cacheado). `null` = cache
   // indisponível por qualquer motivo; usa systemInstruction inline,
   // exatamente como sempre funcionou.
-  const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${tenantId}`, systemInstruction);
+  // Cache só é criado quando a chamada realmente precisa do Gemini.
 
   // TASK-0411/TASK-0412 — reforço específico desta mensagem (Camada 4,
   // dinâmica, nunca cacheada): mesmo a Camada 1 já dizendo pra nunca marcar
@@ -841,8 +840,8 @@ async function generateSpecialistReply(
       );
     } else {
       try {
-        const { parsed: groqParsed, usage } = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}:groq` }, () =>
-          callGroqJsonCompletion(groqApiKey, groqPrompt, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.7)
+        const { parsed: groqParsed } = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}:groq` }, () =>
+          callGroqJsonCompletion(groqApiKey, groqPrompt, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.7, 'especialista')
         );
         const groqBubbles = Array.isArray(groqParsed?.bubbles)
           ? groqParsed.bubbles.filter((b: unknown) => typeof b === 'string' && b.trim())
@@ -855,7 +854,6 @@ async function generateSpecialistReply(
           throw new Error(`Groq retornou resposta do especialista sem "bubbles" válidas: ${JSON.stringify(groqParsed)}`);
         }
         parsed = groqParsed as SpecialistParsed;
-        recordGeminiUsage(tenantId, 'especialista', usage, 'groq').catch(() => {});
       } catch (err) {
         console.warn(`⚠️  [Especialista] Groq falhou (tenant=${tenantId}, agent=${agent}), caindo pro Gemini:`, (err as Error)?.message || err);
       }
@@ -863,6 +861,7 @@ async function generateSpecialistReply(
   }
 
   if (!parsed) {
+    const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${tenantId}`, systemInstruction);
     const response = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}` }, async () => {
       try {
         return await callSpecialist(cachedContentName ? { cachedContent: cachedContentName } : { systemInstruction });
@@ -1403,12 +1402,11 @@ ${durationsList || '(nenhuma duração cadastrada)'}
 
 Responda estritamente em JSON: { "tipo": "consulta_semana" | "consulta_horario_especifico" | "outro", "servico": "nome EXATO do catálogo se tipo for consulta_semana e um serviço foi citado, senão string vazia", "data_hora_inicio": "YYYY-MM-DDTHH:mm:ss (hora local, sem offset) se tipo for consulta_horario_especifico, senão string vazia", "data_hora_fim": "YYYY-MM-DDTHH:mm:ss se tipo for consulta_horario_especifico, senão string vazia" }`;
 
-  const { parsed, usage } = await callGroqJsonCompletion(groqApiKey, prompt);
+  const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt, undefined, undefined, 0, 'agendamento');
   const tipo = parsed?.tipo as string;
   if (!AGENDAMENTO_CONSULTA_VALID_TIPOS.includes(tipo)) {
     throw new Error(`Groq retornou "tipo" fora do enum esperado: ${JSON.stringify(parsed?.tipo)}`);
   }
-  recordGeminiUsage(tenantId, 'agendamento', usage, 'groq').catch(() => {});
   if (tipo === 'outro') return undefined;
 
   if (tipo === 'consulta_horario_especifico') {
@@ -2043,15 +2041,14 @@ async function decideMidiaActionViaGroq(
   groqApiKey: string,
   prompt: string
 ): Promise<MidiaCall | undefined> {
-  const { parsed, usage } = await callGroqJsonCompletion(
+  const { parsed } = await callGroqJsonCompletion(
     groqApiKey,
-    `${prompt}\n\nResponda estritamente em formato JSON: { "action": "enviar_foto_exemplo" | "enviar_video_exemplo" | "nenhuma", "nome_produto": "nome EXATO do catálogo, ou string vazia se action for \\"nenhuma\\"" }`
+    `${prompt}\n\nResponda estritamente em formato JSON: { "action": "enviar_foto_exemplo" | "enviar_video_exemplo" | "nenhuma", "nome_produto": "nome EXATO do catálogo, ou string vazia se action for \\"nenhuma\\"" }`, undefined, undefined, 0, 'foto'
   );
   const action = parsed?.action as MidiaAction;
   if (!MIDIA_VALID_ACTIONS.includes(action)) {
     throw new Error(`Groq retornou "action" fora do enum esperado: ${JSON.stringify(parsed?.action)}`);
   }
-  recordGeminiUsage(tenantId, 'foto', usage, 'groq').catch(() => {});
   if (action === 'nenhuma') return undefined;
   return { name: action, args: { nome_produto: (parsed?.nome_produto as string) || '' } };
 }
