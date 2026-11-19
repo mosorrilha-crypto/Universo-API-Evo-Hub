@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { apiFetch, getTenantOverride } from '../../lib/apiClient';
+import { formatCrmTaskDate } from '../../lib/crmPresentation';
 
 type Task = { id: string; title: string; dueDate: string; completed: boolean; assignedOperator: string };
 type Lead = { phone: string; assignedOperator?: string; tasks: Task[] };
@@ -74,7 +75,7 @@ export const ManualFollowUp: React.FC<{ phone: string }> = ({ phone }) => {
     </form>
     {(lead?.tasks || []).filter((task) => !task.completed).map((task) => <div key={task.id} className="rounded-lg border border-slate-700 p-2 text-xs">
       <p className="text-slate-200 break-words">{task.title}</p>
-      <p className="mt-1 text-slate-400">{task.dueDate ? new Date(`${task.dueDate.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR') : 'Sem prazo'}{task.assignedOperator ? ` · ${task.assignedOperator}` : ''}</p>
+      <p className="mt-1 text-slate-400">{task.dueDate ? formatCrmTaskDate(task.dueDate, 'pt-BR') : 'Sem prazo'}{task.assignedOperator ? ` · ${task.assignedOperator}` : ''}</p>
     </div>)}
   </section>;
 };

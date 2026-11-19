@@ -1,8 +1,6 @@
 import { Router, type RequestHandler } from 'express';
 import { listCrmConversationSummaries } from '../services/conversationStore';
 import { listCrmLeadStates, upsertCrmLeadState, deleteCrmLeadState, type CrmLeadState } from '../services/crmStore';
-import { createFinancialTransaction, isDuplicateSourceRefError } from '../services/financialStore';
-import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { resolveTenantId } from '../middleware/rbac';
@@ -10,8 +8,6 @@ import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 
 interface CrmRouterDeps {
   authenticateToken: RequestHandler;
-  /** Injeção de teste; produção resolve o entitlement no contexto RLS do tenant. */
-  isFinancialModuleEnabled?: () => Promise<boolean>;
 }
 
 /** tenantId de verdade da requisição — vem do JWT, exceto pra saas_admin usando o seletor de tenant do painel (ver resolveTenantId em middleware/rbac.ts). */
@@ -25,42 +21,9 @@ function tenantOf(req: AuthenticatedRequest): string {
  * nunca apareciam lá, a menos que um operador cadastrasse cada um na mão. Ver
  * supabase/migrations/0013_crm_lead_state.sql pro design completo.
  */
-/**
- * Fecha a ponte CRM → Financeiro: quando um lead vira "ganho" no funil, gera
- * uma cobrança `pendente` (nunca `pago` — isso exige confirmação real, ver
- * conversations.ts recordFinancialTransactionForVerifiedPayment) pra que o
- * negócio fechado apareça no FinancialDashboard sem o operador ter que
- * recadastrar tudo na mão. `sourceRef` (`crm-won:<phone>`) é único por
- * tenant (migration 0037) — reenviar o mesmo PATCH (retry, ou marcar "ganho"
- * de novo) nunca duplica a cobrança, só é engolido em silêncio.
- */
-async function recordFinancialTransactionForWonDeal(tenantId: string, state: CrmLeadState, isFinancialModuleEnabled: () => Promise<boolean>): Promise<void> {
-  if (state.dealValue === undefined || state.dealValue === null) return; // sem valor negociado, nada a cobrar ainda
-  try {
-    if (!(await isFinancialModuleEnabled())) return;
-    await createFinancialTransaction(tenantId, {
-      id: crypto.randomUUID(),
-      leadId: state.phone,
-      leadName: state.name || state.phone,
-      leadPhone: state.phone,
-      productName: 'Negócio fechado (CRM)',
-      amount: state.dealValue,
-      paymentMethod: 'Transferência Bancária',
-      status: 'pendente',
-      date: new Date().toISOString(),
-      operatorName: state.assignedOperator,
-      channel: 'CRM',
-      sourceRef: `crm-won:${state.phone}`,
-    });
-  } catch (err) {
-    if (isDuplicateSourceRefError(err)) return; // já gerada antes (retry, ou "ganho" marcado de novo)
-    console.warn(`⚠️  [CRM] Falha ao gerar cobrança automática pro negócio fechado (tenant=${tenantId}, phone=${state.phone}):`, (err as Error)?.message || err);
-  }
-}
-
-export function createCrmRouter({ authenticateToken, isFinancialModuleEnabled }: CrmRouterDeps): Router {
+/** Fechamento comercial não cria cobrança. O operador registra no Financeiro. */
+export function createCrmRouter({ authenticateToken }: CrmRouterDeps): Router {
   const router = Router();
-  const financialModuleEnabled = isFinancialModuleEnabled || isFinancialModuleEnabledForCurrentTenant;
 
   // Combina toda conversa real com o estado de CRM já registrado (se houver)
   // + leads cadastrados manualmente sem conversa nenhuma ainda. Conversa sem
@@ -118,10 +81,6 @@ export function createCrmRouter({ authenticateToken, isFinancialModuleEnabled }:
 
     const tenantId = tenantOf(req);
     const state = await upsertCrmLeadState(tenantId, req.params.phone, patch, req.user?.id);
-
-    if (patch.stage === 'ganho') {
-      await recordFinancialTransactionForWonDeal(tenantId, state, financialModuleEnabled);
-    }
 
     try {
       await recordQualityAuditEvent({

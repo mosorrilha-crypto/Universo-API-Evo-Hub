@@ -25,7 +25,7 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
 beforeAll(async () => {
   const app = express();
   app.use(express.json());
-  app.use(createCrmRouter({ authenticateToken: fakeAuthenticateToken as any, isFinancialModuleEnabled: async () => true }));
+  app.use(createCrmRouter({ authenticateToken: fakeAuthenticateToken as any }));
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
     res.status(500).json({ error: err?.message || 'Erro interno do servidor.' });
@@ -117,8 +117,8 @@ describe('PATCH /api/crm/leads/:phone', () => {
   });
 });
 
-describe('PATCH /api/crm/leads/:phone — ponte com o Financeiro quando o negócio fecha', () => {
-  it('marcar um lead como "ganho" com valor negociado gera uma cobrança pendente automaticamente', async () => {
+describe('PATCH /api/crm/leads/:phone — fechamento separado do Financeiro', () => {
+  it('marcar um lead como "ganho" com valor negociado salva o fechamento sem criar cobrança', async () => {
     const res = await fetch(`${baseUrl}/api/crm/leads/595981111111`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -126,15 +126,11 @@ describe('PATCH /api/crm/leads/:phone — ponte com o Financeiro quando o negóc
     });
     expect(res.status).toBe(200);
 
-    const rows = (supabase as any).__tables.financial_transactions;
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      tenant_id: TENANT_A,
-      lead_phone: '595981111111',
-      amount: 300000,
-      status: 'pendente',
-      source_ref: 'crm-won:595981111111',
-    });
+    const rows = supabase.__tables.financial_transactions || [];
+    expect(rows).toHaveLength(0);
+    const state = (await res.json()).leadState;
+    expect(state.stage).toBe('ganho');
+    expect(state.dealValue).toBe(300000);
   });
 
   it('não gera cobrança quando o lead ainda não tem valor negociado', async () => {
@@ -157,6 +153,25 @@ describe('PATCH /api/crm/leads/:phone — ponte com o Financeiro quando o negóc
     expect(res.status).toBe(200);
     const rows = (supabase as any).__tables.financial_transactions || [];
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe('CRM — fechamento, tarefas e valores independentes de cobranças', () => {
+  it('preserva transações existentes e não gera outra cobrança em novas edições do ganho', async () => {
+    const existing = { id: 'financeiro-existente', tenant_id: TENANT_A, amount: 50000, status: 'pendente' };
+    supabase.__tables.financial_transactions = [existing];
+    for (const patch of [{ stage: 'ganho', dealValue: 300000 }, { stage: 'ganho', dealValue: 400000, notes: [] }]) {
+      const res = await fetch(`${baseUrl}/api/crm/leads/595981111111`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      expect(res.status).toBe(200);
+    }
+    expect(supabase.__tables.financial_transactions).toEqual([existing]);
+  });
+  it('mantém o prazo ISO da tarefa ao salvar e listar novamente', async () => {
+    const tasks = [{ id: 'retorno', title: 'Revisar proposta', dueDate: '2026-11-24T18:30:00.000Z', completed: false, assignedOperator: 'Ana' }];
+    const res = await fetch(`${baseUrl}/api/crm/leads/595981111111`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks }) });
+    expect(res.status).toBe(200);
+    const list = await (await fetch(`${baseUrl}/api/crm/leads`)).json();
+    expect(list.leads.find((item: any) => item.phone === '595981111111').tasks).toEqual(tasks);
   });
 });
 
