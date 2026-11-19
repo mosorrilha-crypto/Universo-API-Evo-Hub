@@ -8,6 +8,13 @@ vi.mock('../../../lib/apiClient', () => ({ apiFetch: vi.fn(), getTenantOverride:
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const response = (value: unknown, ok = true) => ({ ok, json: async () => value }) as Response;
 describe('Acompanhamento manual', () => {
+  it('exibe também o horário dos retornos criados no CRM', async () => {
+    const dueDate = '2026-11-21T14:30:00.000Z';
+    vi.mocked(apiFetch).mockResolvedValueOnce(response({ leads: [{ phone: '123', tasks: [{ id: 'scheduled', title: 'Retorno com horário', dueDate, completed: false, assignedOperator: '' }] }] }));
+    render(<ManualFollowUp phone="123" />);
+    const expected = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(dueDate));
+    expect(await screen.findByText(expected)).toBeTruthy();
+  });
   it('preserva tarefas recentes e registra retorno no CRM sem chamar IA', async () => {
     const existing = { id: 'other', title: 'Tarefa de outro operador', dueDate: '2026-11-20', completed: false, assignedOperator: 'Ana' };
     vi.mocked(apiFetch).mockResolvedValueOnce(response({ leads: [{ phone: '123', assignedOperator: 'Ana', tasks: [] }] }))

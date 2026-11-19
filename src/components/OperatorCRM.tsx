@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { LeadInfo, CRMStage, UserProfile, CRMOperatorNote, CRMTask, LeadSourceChannel, EscalationInfo, FinancialTransaction } from '../types';
+import { crmProbability, formatCrmTaskDate } from '../lib/crmPresentation';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
@@ -33,7 +34,7 @@ import {
 
 interface OperatorCRMProps {
   leads?: LeadInfo[];
-  onUpdateLead?: (updatedLead: LeadInfo) => void;
+  onUpdateLead?: (updatedLead: LeadInfo) => void | boolean | Promise<void | boolean>;
   onDeleteLead?: (leadId: string) => void;
   onClearAllLeads?: () => void;
   currentUser?: UserProfile | any;
@@ -98,13 +99,22 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   const [newNoteText, setNewNoteText] = useState('');
   // New Task State
   const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDate, setNewTaskDate] = useState('');
+  const [isSavingTask, setIsSavingTask] = useState(false);
+  const [taskError, setTaskError] = useState('');
+  const taskContextVersion = useRef(0);
+  useEffect(() => { taskContextVersion.current += 1; setNewTaskTitle(''); setNewTaskDate(''); setTaskError(''); }, [selectedLead?.id]);
+  const probabilityLabel = (value: unknown) => {
+    const probability = crmProbability(value);
+    return probability === null ? (isSpanish ? 'Sin análisis' : 'Sem análise') : `${probability}%`;
+  };
 
   // New Lead Modal State
   const [isNewLeadModalOpen, setIsNewLeadModalOpen] = useState(false);
   const [leadName, setLeadName] = useState('');
   const [leadPhone, setLeadPhone] = useState('');
   const [leadEmail, setLeadEmail] = useState('');
-  const [leadValue, setLeadValue] = useState<number>(3500);
+  const [leadValue, setLeadValue] = useState('');
   const [leadChannel, setLeadChannel] = useState<LeadSourceChannel>('meta_ads');
   const [leadStage, setLeadStage] = useState<CRMStage>('novo');
   const [leadSegment, setLeadSegment] = useState('Orçamento Comercial / Serviços');
@@ -127,7 +137,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       status: 'pending',
       isReal: true,
       crmStage: leadStage,
-      dealValue: Number.isFinite(Number(leadValue)) ? Number(leadValue) : 2500,
+      dealValue: leadValue.trim() && Number.isFinite(Number(leadValue)) && Number(leadValue) >= 0 ? Number(leadValue) : undefined,
       sampleType: leadSegment || 'Atendimento Comercial Real',
       assignedOperator: currentUser.name,
       attribution: {
@@ -156,14 +166,14 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     setLeadName('');
     setLeadPhone('');
     setLeadEmail('');
-    setLeadValue(3500);
+    setLeadValue('');
     setLeadNotes('');
   };
 
   const getLeadStage = (lead: LeadInfo): CRMStage => {
     if (lead.crmStage) return lead.crmStage;
     // Map default status to stage
-    if (lead.status === 'transcribed' && lead.fullAnalysis?.dealProbability && lead.fullAnalysis.dealProbability > 70) {
+    if (lead.status === 'transcribed' && (crmProbability(lead.fullAnalysis?.dealProbability) ?? 0) > 70) {
       return 'negociacao';
     }
     return 'novo';
@@ -232,7 +242,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     leads.forEach((lead) => {
       const stage = getLeadStage(lead);
       const openTasks = (lead.crmTasks || []).filter((task) => !task.completed);
-      openTasks.forEach((task) => items.push({ id: `task-${lead.id}-${task.id}`, kind: 'task', title: lead.name, context: `${isSpanish ? 'Tarea' : 'Tarefa'} · ${task.title} · ${task.dueDate}`, priority: 3, actionLabel: isSpanish ? 'Abrir tarea' : 'Abrir tarefa', sourceLabel: isSpanish ? 'Tareas' : 'Tarefas', ownerLabel: task.assignedOperator, lead }));
+      openTasks.forEach((task) => items.push({ id: `task-${lead.id}-${task.id}`, kind: 'task', title: lead.name, context: `${isSpanish ? 'Tarea' : 'Tarefa'} · ${task.title} · ${formatCrmTaskDate(task.dueDate, locale)}`, priority: 3, actionLabel: isSpanish ? 'Abrir tarea' : 'Abrir tarefa', sourceLabel: isSpanish ? 'Tareas' : 'Tarefas', ownerLabel: task.assignedOperator, lead }));
       if (!openTasks.length && (stage === 'proposta' || stage === 'negociacao')) items.push({ id: `negotiation-${lead.id}`, kind: 'negotiation', title: lead.name, context: `${isSpanish ? 'Negociación sin tarea abierta' : 'Negociação sem tarefa aberta'} · ${lead.attribution?.channelLabel || (isSpanish ? 'Origen no informado' : 'Origem não informada')}`, priority: 4, actionLabel: isSpanish ? 'Retomar' : 'Retomar', sourceLabel: isSpanish ? 'Pipeline' : 'Pipeline', lead });
       if (!openTasks.length && lead.hasConversation && (stage === 'novo' || stage === 'contato')) items.push({ id: `conversation-${lead.id}`, kind: 'conversation', title: lead.name, context: `${isSpanish ? 'Conversación para responder' : 'Conversa para responder'} · ${lead.fullAnalysis?.conversationSummary || lead.phone}`, priority: 3, actionLabel: isSpanish ? 'Responder' : 'Responder', sourceLabel: isSpanish ? 'Conversaciones' : 'Conversas', lead });
     });
@@ -294,14 +304,19 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     setNewNoteText('');
   };
 
-  const handleAddTask = (e: React.FormEvent) => {
+  const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedLead || !newTaskTitle.trim()) return;
+    if (!selectedLead || !newTaskTitle.trim() || isSavingTask) return;
+    const dueDate = new Date(newTaskDate);
+    if (!newTaskDate || !Number.isFinite(dueDate.getTime())) {
+      setTaskError(isSpanish ? 'Elegí una fecha y hora válidas.' : 'Escolha uma data e hora válidas.');
+      return;
+    }
 
     const task: CRMTask = {
       id: `task_${Date.now()}`,
       title: newTaskTitle.trim(),
-      dueDate: isSpanish ? 'Mañana 14:00' : 'Amanhã 14:00',
+      dueDate: dueDate.toISOString(),
       completed: false,
       assignedOperator: currentUser.name,
     };
@@ -311,9 +326,16 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       crmTasks: [...(selectedLead.crmTasks || []), task],
     };
 
-    onUpdateLead(updated);
-    setSelectedLead(updated);
-    setNewTaskTitle('');
+    const requestContext = taskContextVersion.current;
+    setIsSavingTask(true); setTaskError('');
+    try {
+      const saved = await onUpdateLead?.(updated);
+      if (taskContextVersion.current !== requestContext) return;
+      if (saved === false) throw new Error(isSpanish ? 'No se guardó la tarea. Intentá de nuevo.' : 'A tarefa não foi salva. Tente novamente.');
+      setSelectedLead(updated); setNewTaskTitle(''); setNewTaskDate('');
+    } catch (error: any) {
+      if (taskContextVersion.current === requestContext) setTaskError(error.message || (isSpanish ? 'No se pudo guardar la tarea.' : 'Não foi possível salvar a tarefa.'));
+    } finally { setIsSavingTask(false); }
   };
 
   const handleToggleTask = (taskToToggle: CRMTask) => {
@@ -418,7 +440,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
 
       <section className="crm-workspace__activities rounded-2xl border border-slate-800 bg-slate-900/75 p-3 sm:p-4" aria-labelledby="crm-activities-title">
         <div className="mb-3 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{isSpanish ? 'Seguimiento' : 'Acompanhamento'}</p><h2 id="crm-activities-title" className="mt-1 text-base font-bold text-white">{isSpanish ? 'Actividades abiertas' : 'Atividades abertas'}</h2></div><span className="text-[10px] font-bold text-slate-400">{activityItems.length}</span></div>
-        {activityItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 px-3 py-6 text-center text-xs text-slate-400">{isSpanish ? 'No hay tareas abiertas.' : 'Nenhuma tarefa aberta.'}</div> : <div className="space-y-2">{activityItems.map(({ lead, task }) => <button key={`${lead.id}-${task.id}`} type="button" onClick={() => setSelectedLead(lead)} className="flex w-full items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-left hover:border-emerald-500/40"><Clock className="h-4 w-4 shrink-0 text-amber-300" /><span className="min-w-0 flex-1"><strong className="block truncate text-xs text-white">{task.title}</strong><small className="mt-0.5 block truncate text-[11px] text-slate-400">{lead.name} · {task.dueDate}</small></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-500" /></button>)}</div>}
+        {activityItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 px-3 py-6 text-center text-xs text-slate-400">{isSpanish ? 'No hay tareas abiertas.' : 'Nenhuma tarefa aberta.'}</div> : <div className="space-y-2">{activityItems.map(({ lead, task }) => <button key={`${lead.id}-${task.id}`} type="button" onClick={() => setSelectedLead(lead)} className="flex w-full items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-left hover:border-emerald-500/40"><Clock className="h-4 w-4 shrink-0 text-amber-300" /><span className="min-w-0 flex-1"><strong className="block truncate text-xs text-white">{task.title}</strong><small className="mt-0.5 block truncate text-[11px] text-slate-400">{lead.name} · {formatCrmTaskDate(task.dueDate, locale)}</small></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-500" /></button>)}</div>}
       </section>
 
       {/* Metric Cards Bar */}
@@ -581,7 +603,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                           {/* Sentiment / Probability Badge */}
                           <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700/40 text-[10px]">
                             <span className="text-slate-400">
-                              {isSpanish ? 'Prob.:' : 'Prob.:'} <strong className="text-slate-200">{lead.fullAnalysis?.dealProbability || 50}%</strong>
+                              {isSpanish ? 'Prob.:' : 'Prob.:'} <strong className="text-slate-200">{probabilityLabel(lead.fullAnalysis?.dealProbability)}</strong>
                             </span>
                             {lead.attribution && (
                               <span className="text-emerald-300 font-medium truncate max-w-[100px]">
@@ -667,7 +689,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                       </td>
 
                       <td className="p-3.5 max-w-xs truncate text-slate-400">
-                        {lead.fullAnalysis?.conversationSummary || (isSpanish ? 'Esperando transcripción...' : 'Aguardando transcrição...')}
+                        {lead.fullAnalysis?.conversationSummary || (isSpanish ? 'Sin análisis' : 'Sem análise')}
                       </td>
 
                       <td className="p-3.5 text-slate-300">
@@ -756,10 +778,12 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                     className="py-2 px-3 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center space-x-2 transition-all shadow"
                   >
                     <DollarSign className="w-4 h-4" />
-                    <span>{isSpanish ? 'Generar factura' : 'Gerar fatura'}</span>
+                    <span>{isSpanish ? 'Abrir Finanzas' : 'Abrir Financeiro'}</span>
                   </button>
                 )}
               </div>
+
+              <p className="mt-3 text-[11px] text-slate-400">{isSpanish ? 'Marcar como ganado no genera cobro ni confirma pago. Registrá el cobro por separado en Finanzas.' : 'Marcar como ganho não gera cobrança nem confirma pagamento. Registre a cobrança separadamente no Financeiro.'}</p>
 
               {/* Stage & Deal Value Editor */}
               <div className="mt-6 p-4 bg-slate-950/70 border border-slate-800 rounded-xl space-y-4">
@@ -816,7 +840,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                   <div className="grid grid-cols-2 gap-2 text-[11px] pt-2 border-t border-slate-800">
                     <div>
                       <span className="text-slate-500">{isSpanish ? 'Probabilidad de cierre:' : 'Probabilidade de fechamento:'}</span>
-                      <p className="font-bold text-emerald-400">{selectedLead.fullAnalysis.dealProbability}%</p>
+                      <p className="font-bold text-emerald-400">{probabilityLabel(selectedLead.fullAnalysis.dealProbability)}</p>
                     </div>
                     <div>
                       <span className="text-slate-500">{isSpanish ? 'Sentimiento predominante:' : 'Sentimento predominante:'}</span>
@@ -839,22 +863,33 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                   {isSpanish ? 'Tareas y recordatorios del operador' : 'Tarefas e lembretes do operador'}
                 </h3>
 
-                <form onSubmit={handleAddTask} className="flex gap-2">
+                <form onSubmit={handleAddTask} className="flex flex-wrap gap-2">
                   <input
                     type="text"
                     value={newTaskTitle}
+                    required
+                    disabled={isSavingTask}
+                    aria-label={isSpanish ? 'Título de la tarea' : 'Título da tarefa'}
                     onChange={(e) => setNewTaskTitle(e.target.value)}
                     placeholder={isSpanish ? 'Agregar tarea (ej.: llamar a las 15 h, enviar propuesta)...' : 'Adicionar tarefa (ex.: ligar às 15h, enviar proposta)...'}
                     className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
                   />
+                  <label className="w-full text-xs text-slate-400">
+                    {isSpanish ? 'Fecha y hora del retorno' : 'Data e hora do retorno'}
+                    <input type="datetime-local" required value={newTaskDate} disabled={isSavingTask}
+                      onChange={(event) => setNewTaskDate(event.target.value)}
+                      className="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
+                  </label>
                   <button
                     type="submit"
+                    disabled={isSavingTask}
                     className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl flex items-center space-x-1"
                   >
                     <Plus className="w-4 h-4" />
                     <span>{isSpanish ? 'Agregar' : 'Adicionar'}</span>
                   </button>
                 </form>
+                {taskError && <p role="alert" className="text-xs text-rose-300">{taskError}</p>}
 
                 <div className="space-y-1.5 max-h-40 overflow-y-auto">
                   {(selectedLead.crmTasks || []).length === 0 ? (
@@ -877,7 +912,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                           <span>{t.title}</span>
                         </div>
                         <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                          {t.dueDate}
+                          {formatCrmTaskDate(t.dueDate, locale)}
                         </span>
                       </div>
                     ))
@@ -1025,7 +1060,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                     min="0"
                     step="100"
                     value={leadValue}
-                    onChange={(e) => setLeadValue(Number(e.target.value))}
+                    onChange={(e) => setLeadValue(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-100 focus:outline-none focus:border-emerald-500 font-bold text-emerald-400"
                   />
                 </div>

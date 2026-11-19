@@ -439,7 +439,7 @@ flowchart TB
         <div class="filerow"><div class="fname">conversations.ts</div><div class="fdesc">Histórico de conversa, envio manual pelo operador, mídia (áudio/imagem/vídeo) e SSE de atualização ao vivo do painel.</div></div>
         <div class="filerow"><div class="fname">ai.ts</div><div class="fdesc">Rotas auxiliares de IA fora do pipeline automático — ex.: "Ficha IA" (texto assistido pro operador escrever).</div></div>
         <div class="filerow"><div class="fname">googleCalendar.ts</div><div class="fdesc">OAuth do Google Calendar por tenant e consulta de horários realmente livres.</div></div>
-        <div class="filerow"><div class="fname">crm.ts</div><div class="fdesc">Funil de leads (CRM) e a ponte que cria cobrança automática quando um negócio é marcado como ganho.</div></div>
+        <div class="filerow"><div class="fname">crm.ts</div><div class="fdesc">Funil de leads (CRM), com tarefas e fechamento comercial. Cobranças são registradas explicitamente no Financeiro; marcar ganho não cria transação.</div></div>
         <div class="filerow"><div class="fname">financial.ts</div><div class="fdesc">Transações financeiras (receita/despesa) por tenant.</div></div>
         <div class="filerow"><div class="fname">broadcast.ts</div><div class="fdesc">CRUD e ativação de campanhas de disparo em massa.</div></div>
         <div class="filerow"><div class="fname">qualityAudit.ts</div><div class="fdesc">Central de Qualidade: revisões, achados de bug/ideia, exemplos aprovados que realimentam o agente; desde 02/09/2026 também <code>POST/GET /eval-runs</code> pra disparar e acompanhar a avaliação automática.</div></div>

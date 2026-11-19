@@ -1144,13 +1144,14 @@ export const App: React.FC = () => {
       } catch (err) {
         console.error('Falha ao salvar CRM no servidor:', err);
         showToast('Não foi possível salvar essa alteração no servidor. Tente de novo.');
-        return;
+        return false;
       }
     }
     setLeads((prev) => {
       const exists = prev.some((l) => l.id === updatedLead.id);
       return exists ? prev.map((l) => (l.id === updatedLead.id ? updatedLead : l)) : [updatedLead, ...prev];
     });
+    return true;
   };
 
   const handleDeleteLead = async (leadId: string) => {
