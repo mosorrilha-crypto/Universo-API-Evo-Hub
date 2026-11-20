@@ -6,9 +6,10 @@
  * chamada que gravam aqui.
  */
 import { getDb } from './db';
-import { estimateUsageCostUSD, estimateCacheSavingsUSD } from './modelPricing';
+import { getTenantDbContext } from './tenantDbContext';
+import { estimateUsageCostUSD, estimateCacheSavingsUSD, isKnownUsageModel } from './modelPricing';
 
-export type GeminiCallSite = 'router' | 'especialista' | 'agendamento' | 'foto';
+export type GeminiCallSite = 'router' | 'especialista' | 'agendamento' | 'foto' | 'analise' | 'transcricao';
 
 /** Router-fallback Groq (plano aprovado): qual provedor gerou a chamada, pra não misturar custo/volume dos dois na telemetria. Ausente/legado = 'gemini'. */
 export type LlmProvider = 'gemini' | 'groq';
@@ -18,6 +19,8 @@ export interface GeminiUsageMetadata {
   candidatesTokenCount?: number;
   totalTokenCount?: number;
   cachedContentTokenCount?: number;
+  thoughtsTokenCount?: number;
+  model?: string;
 }
 
 /**
@@ -36,7 +39,7 @@ export async function recordGeminiUsage(
   if (!usage) return;
   try {
     const db = getDb();
-    await db.from('gemini_token_usage').insert({
+    const { error } = await db.from('gemini_token_usage').insert({
       tenant_id: tenantId,
       call_site: callSite,
       provider,
@@ -44,11 +47,14 @@ export async function recordGeminiUsage(
       candidates_tokens: usage.candidatesTokenCount || 0,
       total_tokens: usage.totalTokenCount || 0,
       cached_tokens: usage.cachedContentTokenCount || 0,
+      model: usage.model || null,
+      thinking_tokens: usage.thoughtsTokenCount ?? null,
       // Explícito em vez de confiar no default do Postgres (now()) — a
       // agregação por janela de tempo (getTokenTelemetry) precisa desse
       // valor logo após o insert, sem round-trip extra pra ler de volta.
       created_at: new Date().toISOString(),
     });
+    if (error) throw error;
   } catch (err) {
     console.warn('⚠️  [Telemetria] falha ao gravar uso de tokens Gemini/Groq (não bloqueia o agente):', (err as Error)?.message || err);
   }
@@ -93,6 +99,8 @@ export interface TenantTokenSummary {
 }
 
 export interface TokenTelemetrySummary {
+  legacyRequests: number;
+  unpricedRequests: number;
   totalSaaSTokens: number;
   totalSaaSCostUSD: number;
   totalCachedSaved: number;
@@ -103,26 +111,22 @@ export interface TokenTelemetrySummary {
 
 const TELEMETRY_WINDOW_DAYS = 30;
 
-/**
- * Agregado por tenant dos últimos TELEMETRY_WINDOW_DAYS dias — agregação em
- * JS (não GROUP BY no Postgres), consistente com o volume real do projeto
- * hoje (poucos tenants, baixo volume de mensagens); revisar se algum dia
- * isso virar um gargalo de verdade.
- *
- * `estimatedCostUSD`/`totalSaaSCostUSD` são calculados por linha via
- * `estimateUsageCostUSD` (modelPricing.ts), usando o preço confirmado do
- * modelo efetivamente usado (`gemini-3.6-flash`/`openai/gpt-oss-20b`) na
- * data de cada chamada (`created_at` da linha, não a data de hoje) — nunca
- * um preço genérico "por token" sem fonte.
- */
+/** Agregado de 30 dias, paginado. Modelo e raciocínio reais quando disponíveis;
+ * legado sem modelo permanece aproximação identificada no painel. Não é fatura. */
 export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySummary; tenantsTelemetry: TenantTokenSummary[] }> {
   const db = getDb();
-  const since = new Date(Date.now() - TELEMETRY_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const { data: rows, error } = await db
-    .from('gemini_token_usage')
-    .select('tenant_id, prompt_tokens, candidates_tokens, total_tokens, cached_tokens, provider, created_at')
-    .gte('created_at', since);
-  if (error) throw error;
+  const until = new Date().toISOString();
+  const since = new Date(Date.parse(until) - TELEMETRY_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const rows: any[] = [];
+  // Páginas abaixo do limite padrão do PostgREST; não perde registros após 1.000 chamadas.
+  for (let offset = 0; ; offset += 500) {
+    const { data, error } = await db.from('gemini_token_usage')
+      .select('id, tenant_id, prompt_tokens, candidates_tokens, total_tokens, cached_tokens, provider, created_at, model, thinking_tokens')
+      .gte('created_at', since).lte('created_at', until).order('created_at').order('id').range(offset, offset + 499);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < 500) break;
+  }
 
   const byTenant = new Map<
     string,
@@ -151,13 +155,13 @@ export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySumm
       providerBreakdown: emptyProviderBreakdown(),
     };
     const promptTokens = row.prompt_tokens || 0;
-    const candidatesTokens = row.candidates_tokens || 0;
+    const candidatesTokens = (row.candidates_tokens || 0) + (row.thinking_tokens || 0);
     const cachedTokens = row.cached_tokens || 0;
     // Linhas gravadas antes desta coluna existir não têm `provider` — trata
     // como 'gemini' (única origem possível até aqui), nunca descarta o dado.
     const provider: LlmProvider = row.provider === 'groq' ? 'groq' : 'gemini';
-    const rowCostUSD = estimateUsageCostUSD(provider, promptTokens, candidatesTokens, cachedTokens, row.created_at);
-    const rowCacheSavingsUSD = estimateCacheSavingsUSD(provider, cachedTokens, row.created_at);
+    const rowCostUSD = estimateUsageCostUSD(provider, promptTokens, candidatesTokens, cachedTokens, row.created_at, row.model);
+    const rowCacheSavingsUSD = estimateCacheSavingsUSD(provider, cachedTokens, row.created_at, row.model);
 
     acc.promptTokens += promptTokens;
     acc.candidatesTokens += candidatesTokens;
@@ -198,6 +202,8 @@ export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySumm
   }, emptyProviderBreakdown());
 
   const summary: TokenTelemetrySummary = {
+    legacyRequests: rows.filter(row => !row.model).length,
+    unpricedRequests: rows.filter(row => !isKnownUsageModel(row.provider === 'groq' ? 'groq' : 'gemini', row.model)).length,
     totalSaaSTokens: tenantsTelemetry.reduce((sum, t) => sum + t.totalTokens, 0),
     totalSaaSCostUSD: tenantsTelemetry.reduce((sum, t) => sum + t.estimatedCostUSD, 0),
     totalCachedSaved: tenantsTelemetry.reduce((sum, t) => sum + t.cachedTokensSaved, 0),
@@ -207,4 +213,10 @@ export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySumm
   };
 
   return { summary, tenantsTelemetry };
+}
+
+/** Usa somente o contexto autenticado/resolvido, nunca um tenant enviado no prompt. */
+export function recordContextUsage(callSite: GeminiCallSite, usage: GeminiUsageMetadata | undefined, provider: LlmProvider, model: string): void {
+  const tenantId = getTenantDbContext()?.tenantId;
+  if (tenantId && usage) void recordGeminiUsage(tenantId, callSite, { ...usage, model }, provider);
 }

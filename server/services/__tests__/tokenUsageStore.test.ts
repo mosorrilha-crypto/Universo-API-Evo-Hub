@@ -63,6 +63,7 @@ describe('getTokenTelemetry', () => {
     const { summary, tenantsTelemetry } = await getTokenTelemetry();
     expect(tenantsTelemetry).toEqual([]);
     expect(summary).toEqual({
+      legacyRequests: 0, unpricedRequests: 0,
       totalSaaSTokens: 0,
       totalSaaSCostUSD: 0,
       totalCachedSaved: 0,
@@ -130,5 +131,30 @@ describe('getTokenTelemetry', () => {
 
     const { tenantsTelemetry } = await getTokenTelemetry();
     expect(tenantsTelemetry).toEqual([]);
+  });
+});
+
+describe('Consumo por modelo e paginação', () => {
+  it('conta mais de uma página e preserva a soma integral', async () => {
+    supabase.__tables.gemini_token_usage = Array.from({ length: 1201 }, (_, i) => ({ id: String(i), tenant_id: TENANT_A, provider: 'gemini', prompt_tokens: 10, total_tokens: 10, created_at: new Date().toISOString() }));
+    const { summary } = await getTokenTelemetry();
+    expect(summary.totalRequests).toBe(1201);
+    expect(summary.totalSaaSTokens).toBe(12010);
+    expect(summary.legacyRequests).toBe(1201);
+  });
+  it('soma raciocínio sem confundir o modelo maior do Groq com o roteador', async () => {
+    await recordGeminiUsage(TENANT_A, 'analise', { model: 'openai/gpt-oss-120b', promptTokenCount: 1000, candidatesTokenCount: 200, totalTokenCount: 1200 }, 'groq');
+    await recordGeminiUsage(TENANT_A, 'especialista', { model: 'gemini-3.6-flash', promptTokenCount: 1000, candidatesTokenCount: 100, thoughtsTokenCount: 900, totalTokenCount: 2000 });
+    const { summary } = await getTokenTelemetry();
+    expect(summary.providerBreakdown.groq.costUSD).toBeCloseTo(0.00027, 8);
+    expect(summary.providerBreakdown.gemini.costUSD).toBeCloseTo(0.0045, 8);
+    expect(summary.legacyRequests).toBe(0);
+  });
+  it('não precifica modelo desconhecido como se fosse o modelo padrão', async () => {
+    await recordGeminiUsage(TENANT_A, 'analise', { model: 'modelo-novo', promptTokenCount: 1000, totalTokenCount: 1000 });
+    const { summary } = await getTokenTelemetry();
+    expect(summary.unpricedRequests).toBe(1);
+    expect(summary.totalSaaSCostUSD).toBe(0);
+    expect(summary.totalRequests).toBe(1);
   });
 });

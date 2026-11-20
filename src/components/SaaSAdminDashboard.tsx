@@ -1448,7 +1448,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
   // Advanced Token Strategy & Telemetry state
   const [telemetryData, setTelemetryData] = useState<{
-    summary: { totalSaaSTokens: number; totalSaaSCostUSD: number; totalCachedSaved: number; totalCacheSavingsUSD: number; totalRequests: number; providerBreakdown: ProviderBreakdown };
+    summary: { legacyRequests?: number; unpricedRequests?: number; totalSaaSTokens: number; totalSaaSCostUSD: number; totalCachedSaved: number; totalCacheSavingsUSD: number; totalRequests: number; providerBreakdown: ProviderBreakdown };
     tenantsTelemetry: TenantTokenTelemetry[];
   } | null>(null);
 
@@ -2049,7 +2049,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg space-y-1">
               <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Custo Estimado (Gemini + Groq)</span>
+                <span>Estimativa parcial de tokens (Gemini + Groq)</span>
                 <DollarSign className="w-4 h-4 text-emerald-400" />
               </div>
               {/* Calculado a partir do preço confirmado por 1M tokens do
@@ -2063,8 +2063,10 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               <p className="text-[10px] text-slate-500 font-medium">
                 {telemetryData
                   ? `G $${telemetryData.summary.providerBreakdown.gemini.costUSD.toFixed(4)} · Q $${telemetryData.summary.providerBreakdown.groq.costUSD.toFixed(4)}`
-                  : 'Preço confirmado por 1M tokens (ai.google.dev/gemini-api/docs/pricing)'}
+                  : 'Tarifas por modelo — aguardando consumo registrado'}
               </p>
+              <p className="text-[10px] text-slate-400">Não é fatura nem saldo. Exclui áudio Whisper, armazenamento do cache e ferramentas. Raciocínio incluído quando reportado.</p>
+              {telemetryData && <p className="text-[10px] text-amber-300">{telemetryData.summary.legacyRequests || 0} chamadas legadas sem modelo (aproximação); {telemetryData.summary.unpricedRequests || 0} sem tarifa conhecida (excluídas do custo).</p>}
             </div>
 
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg space-y-1">

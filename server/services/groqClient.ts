@@ -1,3 +1,5 @@
+import { recordContextUsage, type GeminiCallSite } from './tokenUsageStore';
+import { assertGroqAvailable, rememberGroqRateLimit } from './groqRateLimit';
 /**
  * Cliente REST mínimo pro Groq (API compatível com OpenAI) — usado só como
  * primeira tentativa, mais barata e rápida, na classificação do router
@@ -96,6 +98,7 @@ export async function callGroqAudioTranscription(
   mimeType: string | undefined,
   timeoutMs: number = GROQ_WHISPER_TIMEOUT_MS
 ): Promise<GroqTranscriptionResult> {
+  assertGroqAvailable(apiKey, GROQ_WHISPER_MODEL);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -114,6 +117,7 @@ export async function callGroqAudioTranscription(
 
     if (!res.ok) {
       const bodyText = await res.text().catch(() => '');
+      rememberGroqRateLimit(apiKey, GROQ_WHISPER_MODEL, res, bodyText);
       throw new Error(`Groq (Whisper) respondeu ${res.status}: ${bodyText.slice(0, 300)}`);
     }
 
@@ -150,8 +154,11 @@ export async function callGroqJsonCompletion(
   prompt: string,
   timeoutMs: number = GROQ_TIMEOUT_MS,
   model: string = GROQ_MODEL,
-  temperature: number = 0
+  temperature: number = 0,
+  callSite: GeminiCallSite = 'analise'
 ): Promise<GroqJsonCompletionResult> {
+  assertGroqAvailable(apiKey, model);
+  if (prompt.length > 21_500) throw new Error('Prompt excede o orçamento seguro do Groq; usar fallback sem cortar contexto.');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -172,10 +179,12 @@ export async function callGroqJsonCompletion(
 
     if (!res.ok) {
       const bodyText = await res.text().catch(() => '');
+      rememberGroqRateLimit(apiKey, model, res, bodyText);
       throw new Error(`Groq respondeu ${res.status}: ${bodyText.slice(0, 300)}`);
     }
 
     const data: any = await res.json();
+    recordContextUsage(callSite, data?.usage ? { promptTokenCount: data.usage.prompt_tokens, candidatesTokenCount: data.usage.completion_tokens, totalTokenCount: data.usage.total_tokens } : undefined, 'groq', model);
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || !content.trim()) {
       throw new Error('Groq não retornou conteúdo em choices[0].message.content.');

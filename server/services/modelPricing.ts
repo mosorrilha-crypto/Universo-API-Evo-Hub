@@ -1,40 +1,9 @@
-/**
- * Pricing Engine — preço confirmado por 1M tokens, por provedor. Antes desta
- * issue, `getTokenTelemetry()` sempre devolvia `totalSaaSCostUSD: 0` porque
- * não existia preço confiável pro modelo em uso (CLAUDE.md: "AI fallbacks
- * never fabricate business data" — vale pra dado de custo tanto quanto pra
- * resposta do agente, um custo estimado sem fonte real é dado de negócio
- * inventado). O painel mostrava "—" no card "Custo Estimado Gemini API" em
- * vez de um número fabricado.
- *
- * Fontes checadas em 18/08/2026:
- * - Gemini 3.6 Flash (`server/services/autoReply.ts`, único modelo Gemini
- *   usado hoje): https://ai.google.dev/gemini-api/docs/pricing — preço
- *   promocional vigente até 31/12/2026, dobra em 01/01/2027. Os dois tiers
- *   estão registrados abaixo; a chamada é resolvida pela data de cada linha
- *   de uso, nunca pela data de hoje.
- * - Groq openai/gpt-oss-20b (`server/services/groqClient.ts`, único modelo
- *   Groq usado hoje — trocado em 18/08/2026: llama-3.1-8b-instant, o modelo
- *   anterior, foi descontinuado pela Groq em 16/08/2026 e toda chamada
- *   vinha respondendo 404 há dois dias, sempre caindo pro Gemini sem
- *   nenhum aviso visível — ver comentário em groqClient.ts): preço oficial
- *   direto da Groq, $0.075 / $0.30 por 1M tokens (input/output).
- *
- * Se o modelo usado em `autoReply.ts`/`groqClient.ts` mudar, este arquivo
- * precisa ser atualizado junto — o preço aqui é específico do modelo, não
- * do provedor em geral.
- *
- * Limitação conhecida (18/08/2026): `server/routes/ai.ts` (análise
- * contextual, gerar resposta a partir de sugestão, perguntar à IA,
- * relatório estratégico) passou a usar gemini-3.5-flash-lite — mais barato
- * e com cota própria, pra não competir pela mesma cota de 2M tokens/minuto
- * do gemini-3.6-flash que o autoReply.ts (resposta automática real ao
- * cliente) usa. `tokenUsageStore.ts` só rastreia por PROVEDOR ('gemini'/
- * 'groq'), não por modelo específico, então o custo estimado dessas
- * chamadas de ai.ts fica hoje superestimado (calculado no preço do
- * 3.6-flash, mais caro) até esse rastreamento ganhar granularidade por
- * modelo — não é um custo real cobrado a mais, só uma imprecisão da
- * telemetria de custo.
+/** Tarifas de tokens verificadas em 19/11/2026 nas fontes oficiais.
+ * https://ai.google.dev/gemini-api/docs/pricing
+ * https://console.groq.com/docs/models
+ * Estimativa parcial: não inclui armazenamento do cache, áudio Whisper,
+ * ferramentas externas nem chamadas anteriores sem telemetria.
+ * Linhas legadas sem modelo usam o preço histórico do provedor (aproximação).
  */
 import type { LlmProvider } from './tokenUsageStore';
 
@@ -96,7 +65,15 @@ const PRICING: Record<LlmProvider, ModelPricing> = {
   },
 };
 
-function findTier(provider: LlmProvider, atISODate: string): PricingTier | undefined {
+export function isKnownUsageModel(provider: LlmProvider, model?: string | null): boolean {
+  return !model || (provider === 'gemini'
+    ? ['gemini-3.6-flash', 'gemini-3.5-flash-lite'].includes(model)
+    : ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'].includes(model));
+}
+function findTier(provider: LlmProvider, atISODate: string, model?: string | null): PricingTier | undefined {
+  if (!isKnownUsageModel(provider, model)) return undefined;
+  if (provider === 'groq' && model === 'openai/gpt-oss-120b') return { effectiveFrom: '2000-01-01', inputPerMillionUSD: 0.15, outputPerMillionUSD: 0.6, cachedInputPerMillionUSD: 0.15 };
+  if (provider === 'gemini' && model === 'gemini-3.5-flash-lite') return { effectiveFrom: '2000-01-01', inputPerMillionUSD: 0.3, outputPerMillionUSD: 2.5, cachedInputPerMillionUSD: 0.03 };
   return PRICING[provider].tiers.find(
     (tier) => atISODate >= tier.effectiveFrom && (!tier.effectiveUntil || atISODate < tier.effectiveUntil)
   );
@@ -114,9 +91,10 @@ export function estimateUsageCostUSD(
   promptTokens: number,
   candidatesTokens: number,
   cachedTokens: number,
-  atISODate: string
+  atISODate: string,
+  model?: string | null
 ): number {
-  const tier = findTier(provider, atISODate);
+  const tier = findTier(provider, atISODate, model);
   if (!tier) return 0;
   const nonCachedInputTokens = Math.max(0, promptTokens - cachedTokens);
   const inputCost = (nonCachedInputTokens / 1_000_000) * tier.inputPerMillionUSD;
@@ -126,8 +104,8 @@ export function estimateUsageCostUSD(
 }
 
 /** Quanto os tokens em cache economizaram (USD) frente ao preço cheio de input, na mesma data. */
-export function estimateCacheSavingsUSD(provider: LlmProvider, cachedTokens: number, atISODate: string): number {
-  const tier = findTier(provider, atISODate);
+export function estimateCacheSavingsUSD(provider: LlmProvider, cachedTokens: number, atISODate: string, model?: string | null): number {
+  const tier = findTier(provider, atISODate, model);
   if (!tier || cachedTokens <= 0) return 0;
   return (cachedTokens / 1_000_000) * (tier.inputPerMillionUSD - tier.cachedInputPerMillionUSD);
 }

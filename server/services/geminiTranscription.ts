@@ -1,3 +1,5 @@
+import { assertGroqAvailable } from './groqRateLimit';
+import { recordContextUsage } from './tokenUsageStore';
 import type { GoogleGenAI } from '@google/genai';
 import { withGeminiRetry } from '../gemini';
 import { isAudioEffectivelySilent, stripDataUrlPrefix } from './audioTranscode';
@@ -90,7 +92,7 @@ ${opts.customInstructions || ''}
 
 Transcrição literal do áudio: "${transcription}"`;
 
-  const { parsed } = await callGroqJsonCompletion(apiKey, prompt, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.5);
+  const { parsed } = await callGroqJsonCompletion(apiKey, prompt, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.5, 'transcricao');
   if (!parsed || typeof parsed.summary !== 'string' || !parsed.summary.trim()) {
     throw new Error(`Groq retornou análise de transcrição sem "summary" válido: ${JSON.stringify(parsed)?.slice(0, 200)}`);
   }
@@ -131,6 +133,8 @@ export async function transcribeAudio(
       return { source: 'groq', result: noSpeechDetectedResult() };
     }
     try {
+      // Evita pagar Whisper quando a segunda etapa já está em cooldown.
+      assertGroqAvailable(opts.groqApiKey, GROQ_SPECIALIST_MODEL);
       const audioBuffer = Buffer.from(stripDataUrlPrefix(audioBase64), 'base64');
       const { text } = await callGroqAudioTranscription(opts.groqApiKey, audioBuffer, mimeType);
       if (!text.trim()) {
@@ -198,6 +202,7 @@ ${opts.customInstructions || ''}`;
         })
       );
 
+      recordContextUsage('transcricao', response.usageMetadata, 'gemini', 'gemini-3.6-flash');
       const rawText = response.text || '';
       const parsed = JSON.parse(rawText);
       return { source: 'gemini', result: parsed };

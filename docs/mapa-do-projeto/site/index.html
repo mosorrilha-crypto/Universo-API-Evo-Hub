@@ -592,14 +592,14 @@ flowchart TB
         <div class="filerow"><div class="fname">structuredLog.ts</div><div class="fdesc">Log estruturado usado pelos jobs/serviços de alerta e incidente.</div></div>
         <div class="filerow"><div class="fname">logRedaction.ts</div><div class="fdesc">Remove dado sensível do log antes de gravar/exibir.</div></div>
         <div class="filerow"><div class="fname">operationEventStore.ts</div><div class="fdesc">Eventos operacionais registrados pra auditoria.</div></div>
-        <div class="filerow"><div class="fname">tokenUsageStore.ts</div><div class="fdesc">Contabiliza uso de token de IA por tenant.</div></div>
+        <div class="filerow"><div class="fname">tokenUsageStore.ts</div><div class="fdesc">Consumo paginado por tenant e modelo, com raciocínio reportado e custo parcial identificado.</div></div>
         <div class="filerow"><div class="fname">modelPricing.ts</div><div class="fdesc">Tabela de preço por modelo de IA, usada no cálculo de custo/uso.</div></div>
         <div class="filerow"><div class="fname">periodicJob.ts</div><div class="fdesc">Helper genérico que todos os jobs de fundo (<code>setInterval</code>) usam.</div></div>
         <div class="filerow"><div class="fname">db.ts</div><div class="fdesc">Cliente de banco (<code>getDb()</code>/<code>getPlatformDb()</code>) — decide se a query roda sob RLS de tenant ou como plataforma.</div></div>
         <div class="filerow"><div class="fname">csvParse.ts</div><div class="fdesc">Parser de CSV usado em importação de dado.</div></div>
         <div class="filerow"><div class="fname">pushSubscriptionStore.ts</div><div class="fdesc">Inscrições de push notification do navegador, por usuário.</div></div>
         <div class="filerow"><div class="fname">webPush.ts</div><div class="fdesc">Envio de notificação push web.</div></div>
-        <div class="filerow"><div class="fname">groqClient.ts</div><div class="fdesc">Cliente pro roteador alternativo Groq (classificação rápida de mensagem).</div></div>
+        <div class="filerow"><div class="fname">groqClient.ts</div><div class="fdesc">Cliente Groq com telemetria e pausa por cota; prompts grandes preservados no fallback Gemini.</div></div>
         <div class="filerow"><div class="fname">geminiSystemInstructionCache.ts</div><div class="fdesc">Cache do <code>systemInstruction</code> do Gemini por tenant, pra não remontar a cada chamada.</div></div>
         <div class="filerow"><div class="fname">adminAlertChannel.ts</div><div class="fdesc">Canal comum (push + WhatsApp template) usado pelos 4 jobs de alerta de sistema.</div></div>
         <div class="filerow"><div class="fname">conversationAnalysisStore.ts</div><div class="fdesc">Análise/resumo de conversa (ex.: pro painel de operações).</div></div>

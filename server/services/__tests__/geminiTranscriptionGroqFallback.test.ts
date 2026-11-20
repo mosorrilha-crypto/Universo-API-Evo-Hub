@@ -1,3 +1,5 @@
+import { rememberGroqRateLimit, resetGroqRateLimitsForTests } from '../groqRateLimit';
+import { GROQ_SPECIALIST_MODEL } from '../groqClient';
 /**
  * TASK-0352 — transcrição de áudio via Groq/Whisper (primeira tentativa,
  * mesmo padrão Groq-primeiro-Gemini-de-fallback já usado no resto do
@@ -20,6 +22,7 @@ const { transcribeAudio } = await import('../geminiTranscription');
 
 const originalFetch = global.fetch;
 afterEach(() => {
+  resetGroqRateLimitsForTests();
   global.fetch = originalFetch;
   vi.clearAllMocks();
 });
@@ -64,6 +67,13 @@ function mockGroqFetch(opts: { transcription?: unknown; transcriptionStatus?: nu
 }
 
 describe('transcribeAudio — Groq/Whisper primeiro, Gemini de fallback', () => {
+  it('não chama Whisper quando já sabe que a análise Groq está sem cota', async () => {
+    rememberGroqRateLimit('fake-groq-key', GROQ_SPECIALIST_MODEL, new Response('', { status: 429, headers: { 'retry-after': '120' } }), 'limited');
+    const fetch = vi.fn(); global.fetch = fetch;
+    const outcome = await transcribeAudio(fakeGemini(), 'ZmFrZS1hdWRpbw==', 'audio/ogg', { groqApiKey: 'fake-groq-key' });
+    expect(outcome.source).toBe('gemini');
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('usa a transcrição do Whisper + análise do Groq quando os dois funcionam, sem chamar o Gemini', async () => {
     const ai = fakeGemini();
     const generateContentSpy = vi.spyOn(ai.models, 'generateContent');
