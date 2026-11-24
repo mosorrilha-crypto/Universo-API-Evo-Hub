@@ -1,4 +1,3 @@
-import { assertGroqAvailable } from './groqRateLimit';
 import { recordContextUsage } from './tokenUsageStore';
 import type { GoogleGenAI } from '@google/genai';
 import { withGeminiRetry } from '../gemini';
@@ -194,8 +193,9 @@ export async function transcribeAudio(
     }
     let groqTranscription: { text: string; language?: string } | null = null;
     try {
-      // Evita pagar Whisper quando a segunda etapa já está em cooldown.
-      assertGroqAvailable(opts.groqApiKey, GROQ_SPECIALIST_MODEL);
+      // Os limites do Whisper e da análise textual são independentes. Mesmo
+      // se a etapa JSON do Groq estiver em cooldown, transcrever aqui permite
+      // usar Gemini só no texto, sem reenviar o áudio inteiro.
       const audioBuffer = Buffer.from(stripDataUrlPrefix(audioBase64), 'base64');
       groqTranscription = await callGroqAudioTranscription(opts.groqApiKey, audioBuffer, mimeType);
     } catch (groqError) {
