@@ -1,5 +1,6 @@
 import { assertGroqAvailable } from './groqRateLimit';
 import { recordContextUsage } from './tokenUsageStore';
+import { safeParseGeminiJson } from './geminiJson';
 import type { GoogleGenAI } from '@google/genai';
 import { withGeminiRetry } from '../gemini';
 import { isAudioEffectivelySilent, stripDataUrlPrefix } from './audioTranscode';
@@ -19,6 +20,22 @@ export interface TranscriptionResult {
 export interface TranscribeAudioOutcome {
   source: 'groq' | 'gemini' | 'fallback';
   result: TranscriptionResult;
+}
+
+/** Recupera JSON malformado do Gemini sem incluir conteúdo do áudio/transcrição nos logs. */
+function parseGeminiAudioJson(text: string | undefined): Record<string, unknown> {
+  try {
+    const parsed = safeParseGeminiJson(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Resposta não é um objeto JSON.');
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    // A exceção do parser compartilhado inclui um trecho da saída bruta.
+    // O áudio pode conter dados pessoais, então não repassamos esse trecho
+    // para os logs de produção.
+    throw new Error('Gemini retornou JSON inválido para análise do áudio.');
+  }
 }
 
 /** `true` quando `source` veio de uma transcrição real (Groq ou Gemini), nunca do fallback simulado — usado nos 4 chamadores pra decidir se a análise pode disparar resposta automática/checar conteúdo real, em vez de repetir `source === 'gemini' || source === 'groq'` em cada um. */
@@ -136,7 +153,7 @@ ${opts.leadName ? `Nome do cliente: ${opts.leadName}\n` : ''}${opts.customInstru
     })
   );
   recordContextUsage('transcricao', response.usageMetadata, 'gemini', 'gemini-3.6-flash');
-  const parsed = JSON.parse(response.text || '{}');
+  const parsed = parseGeminiAudioJson(response.text);
   if (typeof parsed.summary !== 'string' || !parsed.summary.trim()) {
     throw new Error('Gemini retornou análise de transcrição sem "summary" válido.');
   }
@@ -284,8 +301,8 @@ ${opts.customInstructions || ''}`;
 
       recordContextUsage('transcricao', response.usageMetadata, 'gemini', 'gemini-3.6-flash');
       const rawText = response.text || '';
-      const parsed = JSON.parse(rawText);
-      return { source: 'gemini', result: parsed };
+      const parsed = parseGeminiAudioJson(rawText);
+      return { source: 'gemini', result: parsed as unknown as TranscriptionResult };
     } catch (geminiError) {
       console.warn('Gemini Audio Transcription error, fallbacking:', geminiError);
     }
