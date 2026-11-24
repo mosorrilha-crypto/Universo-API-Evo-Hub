@@ -907,3 +907,148 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
   if (!parts.length) return '';
   return `\nContexto real do negócio (use essas informações pra responder com precisão, nunca invente preços/regras fora daqui):\n${parts.join('\n\n')}\n`;
 }
+/**
+ * Separa a parte estável da Base de Conhecimento (cacheada no Gemini) dos
+ * detalhes que podem ser recuperados por relevância para a mensagem atual.
+ * Catálogo, FAQ e anexos são os blocos que mais crescem; mandar todos em toda
+ * resposta fazia o prompt inteiro cair direto no Gemini quando ultrapassava
+ * o limite do Groq. Os dados originais continuam íntegros no banco.
+ */
+export function selectRelevantKnowledgeBaseContext(
+  context: string | undefined,
+  query: string,
+  limits: { products?: number; productChars?: number; faqs?: number; faqChars?: number; documentsChars?: number } = {}
+): { stableContext: string; relevantContext: string } {
+  const source = context || '';
+  if (!source.trim()) return { stableContext: '', relevantContext: '' };
+
+  const maxProducts = limits.products ?? 12;
+  const maxProductChars = limits.productChars ?? 9000;
+  const maxFaqs = limits.faqs ?? 5;
+  const maxFaqChars = limits.faqChars ?? 4000;
+  const maxDocumentChars = limits.documentsChars ?? 1500;
+  const sectionPattern = /\n(?=(?:Catálogo de produtos\/serviços:|Perguntas frequentes:|Documentos anexados[^\n]*:|Horário de funcionamento:))/g;
+  const chunks = source.split(sectionPattern);
+  const stable: string[] = [];
+  const relevant: string[] = [];
+  const tokenize = (value: string): Set<string> => {
+    const tokens = normalizeText(value)
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((token) => token.length >= 3 || /^\d+$/.test(token));
+    const expanded = new Set(tokens);
+    for (const token of tokens) {
+      if (token.length > 5 && token.endsWith('es')) expanded.add(token.slice(0, -2));
+      else if (token.length > 4 && token.endsWith('s')) expanded.add(token.slice(0, -1));
+    }
+    return new Set([...expanded].filter((token) => !PROMPT_MATCH_STOP_WORDS.has(token)));
+  };
+  const queryTokens = tokenize(query);
+  const score = (value: string): number => {
+    if (!queryTokens.size) return 0;
+    const candidateTokens = tokenize(value);
+    let matches = 0;
+    for (const token of queryTokens) if (candidateTokens.has(token)) matches++;
+    return matches;
+  };
+
+  for (const chunk of chunks) {
+    if (chunk.startsWith('Catálogo de produtos/serviços:')) {
+      const lines = chunk.split('\n');
+      const heading = lines.shift()!;
+      let category = '';
+      let current: string[] | undefined;
+      const products: Array<{ text: string; category: string; score: number }> = [];
+      const flush = () => {
+        if (current?.length) {
+          const text = current.join('\n');
+          products.push({ text, category, score: score(`${category}\n${text}`) });
+        }
+        current = undefined;
+      };
+      for (const line of lines) {
+        if (/^[^\s][^:\n]*:$/.test(line)) {
+          flush();
+          category = line.slice(0, -1);
+        } else if (line.startsWith('- ')) {
+          flush();
+          current = [line];
+        } else if (current) {
+          current.push(line);
+        }
+      }
+      flush();
+      const selected = products
+        .filter((product) => product.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxProducts);
+      if (selected.length) {
+        let remaining = maxProductChars;
+        const used = selected.map(({ text }) => {
+          if (remaining <= 0) return '';
+          const lines = text.split('\n');
+          const base = lines.shift() || '';
+          if (base.length >= remaining) return '';
+          remaining -= base.length;
+          const variants = lines.filter((line) => /^\s+•/.test(line));
+          const otherDetails = lines.filter((line) => !/^\s+•/.test(line));
+          const matchingVariants = variants.filter((line) => score(line) > 0);
+          const chosenVariants = matchingVariants.length ? matchingVariants : variants.slice(0, 8);
+          const kept: string[] = [];
+          for (const detail of [...otherDetails, ...chosenVariants]) {
+            const cost = detail.length + 1;
+            if (cost > remaining) continue;
+            kept.push(detail);
+            remaining -= cost;
+          }
+          return [base, ...kept].join('\n');
+        }).filter(Boolean).join('\n');
+        relevant.push(`${heading}\n${used}\n\nObservação: este é um recorte dos itens mais relacionados à mensagem; não trate itens omitidos como indisponíveis. Se faltar uma opção específica, pergunte qual serviço/modelo a pessoa procura.`);
+      }
+    } else if (chunk.startsWith('Perguntas frequentes:')) {
+      const heading = 'Perguntas frequentes:';
+      const body = chunk.slice(heading.length).trim();
+      const entries = body.split(/\n(?=P: )/).map((text) => ({ text: text.trim(), score: score(text) }));
+      const selected = entries
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxFaqs);
+      let remaining = maxFaqChars;
+      const selectedText = selected.map((entry) => {
+        const cost = entry.text.length + 1;
+        if (cost > remaining) return '';
+        remaining -= cost;
+        return entry.text;
+      }).filter(Boolean);
+      if (selectedText.length) relevant.push(`${heading}\n${selectedText.join('\n')}`);
+    } else if (chunk.startsWith('Documentos anexados')) {
+      const documents = chunk.split(/\n\n(?=Documento )/).map((text) => ({ text: text.trim(), score: score(text) }));
+      const selected = documents
+        .filter((document) => document.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 2);
+      let remaining = maxDocumentChars;
+      const excerpts = selected.map(({ text }) => {
+        if (remaining <= 0) return '';
+        const excerpt = text.length > remaining ? `${text.slice(0, remaining)}… [trecho reduzido]` : text;
+        remaining -= excerpt.length;
+        return excerpt;
+      }).filter(Boolean);
+      if (excerpts.length) relevant.push(excerpts.join('\n\n'));
+    } else {
+      stable.push(chunk);
+    }
+  }
+
+  return {
+    stableContext: stable.join('\n\n').trim(),
+    relevantContext: relevant.join('\n\n').trim(),
+  };
+}
+
+const PROMPT_MATCH_STOP_WORDS = new Set([
+  'para', 'com', 'por', 'uma', 'uns', 'das', 'dos', 'que', 'qual', 'quais', 'tem', 'têm',
+  'como', 'onde', 'quando', 'mais', 'menos', 'muito', 'pouco', 'isso', 'aqui', 'ali',
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'you', 'your', 'what', 'when',
+  'como', 'porque', 'pero', 'esta', 'este', 'tiene', 'tienen', 'quiero', 'puedo', 'porfa',
+]);
+

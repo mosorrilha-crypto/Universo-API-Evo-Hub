@@ -10,7 +10,7 @@ import {
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold, type TrackedAppointment } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
-import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, formatKnowledgeBaseForPrompt, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, formatKnowledgeBaseForPrompt, selectRelevantKnowledgeBaseContext, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import * as knowledgeBaseStore from './knowledgeBaseStore';
 import { createPreReservation, updatePreReservationStatus } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
@@ -451,26 +451,12 @@ AGENDAMENTO CANCELADO PELO NEGÓCIO/SEM O CLIENTE TER PEDIDO: diferente de DESIS
  * tenant respectivo, sem perda de conteúdo.
  */
 /**
- * Achado de eficiência (14/08/2026, mesmo dia da remoção da Camada 2): a
- * Camada 1 (global) já era cacheada via Explicit Context Caching do Gemini
- * (geminiSystemInstructionCache.ts) — texto idêntico pra todo tenant,
- * escrito uma vez, reaproveitado por até 55min. A Camada 3 (Base de
- * Conhecimento do tenant), porém, NUNCA foi cacheada — sempre reenviada
- * por inteiro em `contents` a cada mensagem, mesmo sendo, na prática, tão
- * estável quanto a Camada 1 (só muda quando alguém edita a KB pelo
- * painel). Isso ficou mais caro depois da remoção da Camada 2: regras que
- * antes viviam no cache compartilhado (`beauty_studio`) passaram a viver
- * na KB de cada tenant, sem cache nenhum.
- *
- * Correção: a Camada 3 agora entra NO MESMO texto cacheado que a Camada 1,
- * com chave por (agent, tenantId) — cache por tenant em vez de
- * compartilhado entre todos, mas ainda assim cache de verdade. Não precisa
- * de invalidação explícita quando a KB muda: a checagem de hash já
- * existente em getCachedSystemInstruction detecta que o conteúdo mudou e
- * recria o cache sozinha na próxima mensagem. `contents` (dinâmico —
- * histórico, mensagem atual, resultado de ferramentas) nunca é cacheado,
- * como sempre.
+ * O cache do Gemini mantém as regras globais e os dados gerais estáveis da
+ * empresa. Catálogo, FAQs e documentos anexados são recuperados por
+ * relevância a cada mensagem e vão no conteúdo dinâmico, reduzindo tokens
+ * sem mudar os dados originais nem invalidar o cache a cada conversa.
  */
+
 /**
  * TASK-0359 (pedido direto, "diminuir o prompt" — auditoria confirmou: o bloco
  * "REGRAS DE ESTILO" sozinho tinha ~21.700 caracteres (~5.400 tokens), maior que
@@ -630,15 +616,11 @@ function findServiceNamedInHeadline(adHeadline: string, products?: AgentProduct[
  * Base de Conhecimento, empatia antes de credenciais, sem "speech" de
  * vendedor).
  *
- * Camada 1 (global, fixa) + Camada 3 (Base de Conhecimento do tenant,
- * editável pelo painel, mas estável entre mensagens) vão juntas em
- * `systemInstruction` — cacheadas por tenant (ver buildCachedSystemInstruction
- * e geminiSystemInstructionCache.ts), desde 14/08/2026. Só o que muda de
- * verdade a cada mensagem (Camada 4 dinâmica via `extraContext`, histórico,
- * mensagem atual) vai em `contents`, nunca cacheado — ver
- * docs/AGENTE-VERTICAL-ARQUITETURA.md seções 1 e 7 (Etapa 3, com a
- * atualização de 14/08 no topo do documento). Não existe mais Camada 2
- * (segmento) hardcoded em código.
+ * Regras globais e dados estáveis do negócio formam o systemInstruction
+ * cacheado por tenant. Catálogo, FAQs e documentos são selecionados por
+ * relevância para cada mensagem e entram no conteúdo dinâmico junto com o
+ * histórico e o texto atual do cliente. Não existe mais Camada 2 de segmento
+ * hardcoded em código.
  */
 async function generateSpecialistReply(
   tenantId: string,
@@ -671,6 +653,13 @@ async function generateSpecialistReply(
   specialistInvokedBefore?: boolean
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string; interestedService?: string; outOfScope?: boolean } | null> {
   const historyText = buildHistoryText(history);
+  const knowledgeQuery = [
+    text,
+    ...(history || []).slice(-8).map((message) => message.text || ''),
+    extraContext || '',
+    adContext || '',
+  ].filter(Boolean).join('\n');
+  const selectedKnowledge = selectRelevantKnowledgeBaseContext(knowledgeBaseContext, knowledgeQuery);
   // TASK-0411/TASK-0412 — "somente leads": buscado uma vez aqui (não dentro
   // de buildCachedSystemInstruction) pra reaproveitar o mesmo valor tanto na
   // Camada 1 (cacheada) quanto no lembrete dinâmico de 1ª mensagem abaixo,
@@ -705,16 +694,12 @@ async function generateSpecialistReply(
   // 1ª mensagem, isso é IGNORADO aqui, caindo no fluxo antigo de falha real
   // em vez de silenciar a mensagem mais importante de um lead novo).
   const outOfScopeHonored = (p?: { outOfScope?: boolean }) => !!p?.outOfScope && leadsOnly && !isFirstMessage;
-  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext, leadsOnly);
+  // Cacheie regras estáveis e dados gerais; injete catálogo, FAQ e anexos conforme a mensagem.
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, selectedKnowledge.stableContext, leadsOnly);
   const specialistModel = 'gemini-3.6-flash';
-  // Camada 1 (global) + Camada 3 (Base de Conhecimento do tenant) juntas
-  // são idênticas em toda chamada deste (agent, tenantId) enquanto ninguém
-  // editar o prompt global nem a KB — cache de contexto real do Gemini
-  // evita reenviar esse texto por inteiro toda mensagem (ver
-  // geminiSystemInstructionCache.ts; chave por tenant, não compartilhada,
-  // já que a KB agora faz parte do texto cacheado). `null` = cache
-  // indisponível por qualquer motivo; usa systemInstruction inline,
-  // exatamente como sempre funcionou.
+  // O cache fica restrito às regras globais e aos dados estáveis do negócio.
+  // Catálogo, FAQs e documentos entram no conteúdo dinâmico após o recorte
+  // por relevância, sem alterar a chave cacheada a cada mensagem.
   // Cache só é criado quando a chamada realmente precisa do Gemini.
 
   // TASK-0411/TASK-0412 — reforço específico desta mensagem (Camada 4,
@@ -727,7 +712,7 @@ async function generateSpecialistReply(
   const firstMessageOutOfScopeReminder = leadsOnly && isFirstMessage
     ? 'Esta é a PRIMEIRA mensagem desta conversa (sem histórico anterior) — NUNCA marque "outOfScope" aqui, mesmo que a mensagem pareça pessoal/ambígua (ex: "Oi", "Buenas"); não há contexto suficiente ainda pra saber se é lead comercial ou contato pessoal. Responda normalmente.\n\n'
     : '';
-  const contextPreamble = `${firstMessageOutOfScopeReminder}${contextPack ? `${contextPack.promptSection}\n\n` : ''}${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`;
+  const contextPreamble = `${firstMessageOutOfScopeReminder}${selectedKnowledge.relevantContext ? 'Informações específicas relevantes da base de conhecimento:\n' + selectedKnowledge.relevantContext + '\n\n' : ''}${contextPack ? `${contextPack.promptSection}\n\n` : ''}${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`;
 
   // Estrutural, não só textual (18/08/2026): messageBuffer.ts agrupa
   // mensagens de rajada do cliente (dentro da janela de 6s de silêncio) num
@@ -954,13 +939,16 @@ export async function getPromptAuditView(tenantId: string, agent: AgentType, pho
   const knowledgeBaseContext = formatKnowledgeBaseForPrompt(runtimeKnowledgeBase.knowledgeBase);
   const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
   const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
+  const conversation = phone ? await getConversation(tenantId, phone) : null;
+  const queryText = conversation?.messages.slice(-8).map((message) => message.text || '').filter(Boolean).join('\n') || '';
+  const selectedKnowledge = selectRelevantKnowledgeBaseContext(fullKnowledgeBaseContext, queryText);
   // TASK-0415 — buildCachedSystemInstruction ganhou o parâmetro leadsOnly na
   // TASK-0412 (generateSpecialistReply já busca e passa); esta função tinha
   // ficado pra trás, sempre montando o ramo "outOfScope é sempre false" mesmo
   // pra tenants com o modo "somente leads" ligado — quebrava a promessa do
   // docstring acima ("byte a byte igual ao que o especialista real usa").
   const leadsOnly = await isLeadsOnlyMode(tenantId).catch(() => false);
-  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, fullKnowledgeBaseContext, leadsOnly);
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, selectedKnowledge.stableContext, leadsOnly);
 
   let conversationPreview: PromptAuditView['conversationPreview'];
   if (phone) {
@@ -971,7 +959,7 @@ export async function getPromptAuditView(tenantId: string, agent: AgentType, pho
       conversationPreview = {
         contactName,
         historyText,
-        contentsPreamble: `${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`,
+        contentsPreamble: `${selectedKnowledge.relevantContext ? 'Informações específicas relevantes da base de conhecimento:\n' + selectedKnowledge.relevantContext + '\n\n' : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`,
       };
     }
   }
@@ -985,6 +973,7 @@ export async function getPromptAuditView(tenantId: string, agent: AgentType, pho
     conversationPreview,
     dynamicNotShown: [
       'A "Nova mensagem do cliente" em si — o texto literal que dispara o turno.',
+      'O recorte da Base de Conhecimento depende da mensagem atual; esta prévia usa as últimas mensagens quando phone foi informado.',
       'Ações reais já executadas nesta mensagem (disponibilidade consultada, evento de agenda criado/remarcado/cancelado, foto/vídeo enviado) — só existem durante uma mensagem real, geradas pelas ferramentas de agenda/mídia.',
       'Contexto de anúncio (Clique para WhatsApp) — só aparece no primeiro contato de uma lead vinda de campanha.',
       'Orientação do operador e exemplos de resposta aprovados — variam por escalonamento resolvido.',
