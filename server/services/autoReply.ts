@@ -273,11 +273,19 @@ async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<ty
  * padrão de capturedClientName pro serviço identificado.
  */
 export const HISTORY_WINDOW_SIZE = 24;
+// O roteador só precisa entender o estado imediato da conversa. Manter 24
+// mensagens aqui duplica contexto grande antes do especialista; este corte é
+// exclusivo do roteador. O especialista continua com 24 por causa de casos
+// reais em que a preferência de serviço apareceu bem antes da última mensagem.
+const ROUTER_HISTORY_WINDOW_SIZE = 8;
 
-function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
+function buildHistoryText(
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  windowSize: number = HISTORY_WINDOW_SIZE
+): string {
   return (history || [])
     .filter((m) => m.text)
-    .slice(-HISTORY_WINDOW_SIZE)
+    .slice(-windowSize)
     .map((m) => `${m.sender === 'lead' ? 'Cliente' : 'Atendente'}: ${m.text}`)
     .join('\n');
 }
@@ -364,7 +372,7 @@ async function classifyAgent(
   groqApiKey?: string,
   isBurst?: boolean
 ): Promise<AgentType> {
-  const historyText = buildHistoryText(history);
+  const historyText = buildHistoryText(history, ROUTER_HISTORY_WINDOW_SIZE);
   const prompt = buildRouterPrompt(text, historyText, isBurst);
 
   return withStructuredLog({ tenantId, area: 'autoReply', op: 'router' }, async () => {
