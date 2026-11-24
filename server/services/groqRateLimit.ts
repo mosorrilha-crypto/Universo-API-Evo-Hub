@@ -1,8 +1,10 @@
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 
-// Não compartilha o bloqueio entre credenciais ou modelos; nunca guarda a chave em claro.
+// A chave da API tem alta entropia e não é senha de usuário. HMAC gera uma
+// chave determinística por credencial/modelo para o cache em memória, sem
+// armazenar a credencial em claro nem usar hash simples da chave como senha.
 const blockedUntil = new Map<string, number>();
-const keyFor = (apiKey: string, model: string) => createHash('sha256').update(apiKey).update('\0').update(model).digest('hex');
+const keyFor = (apiKey: string, model: string) => createHmac('sha256', apiKey).update(model).digest('hex');
 export function assertGroqAvailable(apiKey: string, model: string): void {
   const key = keyFor(apiKey, model);
   const until = blockedUntil.get(key) || 0;
